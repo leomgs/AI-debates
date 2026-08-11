@@ -1,0 +1,156 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+
+// =========================================================================
+// 1. GESTIÓN DE TENDENCIAS E INVESTIGACIÓN
+// =========================================================================
+
+model Topic {
+  id               String            @id @default(uuid())
+  title            String            // Ej: "La IA reemplazará a los programadores en 2026"
+  context          String            // Resumen inicial del trend descubierto o ingresado
+  status           String            // PENDING, RESEARCHED, COMPLETED, FAILED
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  researchSessions ResearchSession[]
+  debates          Debate[]
+}
+
+model ResearchSession {
+  id        String   @id @default(uuid())
+  topicId   String
+  topic     Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  rawOutput String   // El reporte completo consolidado por tu ResearchProvider
+  createdAt DateTime @default(now())
+  sources   Source[]
+}
+
+model Source {
+  id                String          @id @default(uuid())
+  researchSessionId String
+  researchSession   ResearchSession @relation(fields: [researchSessionId], references: [id], onDelete: Cascade)
+  title             String
+  url               String
+  snippet           String          // Fragmento de texto relevante extraído de la web
+}
+
+// =========================================================================
+// 2. CONFIGURACIÓN DE AGENTES
+// =========================================================================
+
+model Agent {
+  id             String         @id @default(uuid())
+  name           String         // Ej: "IA_Elon", "Tech_Optimist"
+  avatarUrl      String?        // Asset visual para Remotion
+  systemPrompt   String         // Personalidad y directrices del agente
+  voiceId        String         // ID abstracto para tu TTSProvider (ej: "es-male-1")
+  arguments      Argument[]
+  verdicts       Verdict[]      // En caso de que este agente actúe como Juez
+}
+
+// =========================================================================
+// 3. ORQUESTACIÓN DEL DEBATE
+// =========================================================================
+
+model Debate {
+  id        String        @id @default(uuid())
+  topicId   String
+  topic     Topic         @relation(fields: [topicId], references: [id])
+  status    String        // CREATED, IN_PROGRESS, PENDING_REVIEW, APPROVED, FAILED
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  rounds    DebateRound[]
+  verdict   Verdict?
+  episode   Episode?
+}
+
+model DebateRound {
+  id        String     @id @default(uuid())
+  debateId  String
+  debate    Debate     @relation(fields: [debateId], references: [id], onDelete: Cascade)
+  round     Int        // Número de ronda (ej: 1, 2, 3)
+  arguments Argument[]
+}
+
+model Argument {
+  id            String       @id @default(uuid())
+  debateRoundId String
+  debateRound   DebateRound  @relation(fields: [debateRoundId], references: [id], onDelete: Cascade)
+  agentId       String
+  agent         Agent        @relation(fields: [agentId], references: [id])
+  content       String       // El texto generado por el LLM para este agente
+  audioUrl      String?      // Ruta al .mp3 generado gratis por tu TTSProvider
+  audioDuration Float?       // Duración exacta en segundos (vital para Remotion)
+  createdAt     DateTime     @default(now())
+  claims        Claim[]
+}
+
+model Claim {
+  id         String      @id @default(uuid())
+  argumentId String
+  argument   Argument    @relation(fields: [argumentId], references: [id], onDelete: Cascade)
+  statement  String      // La afirmación específica que requiere verificación
+  factCheck  FactCheck?
+}
+
+model FactCheck {
+  id        String   @id @default(uuid())
+  claimId   String   @unique
+  claim     Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  veracity  String   // TRUE, FALSE, MISLEADING, UNVERIFIABLE
+  analysis  String   // Explicación/Justificación del Fact Checker
+  createdAt DateTime @default(now())
+}
+
+model Verdict {
+  id        String   @id @default(uuid())
+  debateId  String   @unique
+  debate    Debate   @relation(fields: [debateId], references: [id], onDelete: Cascade)
+  judgeId   String   // El agente que tomó el rol de juez
+  judge     Agent    @relation(fields: [judgeId], references: [id])
+  content   String   // Argumentación final del veredicto
+  winnerId  String?  // Id del Agent ganador (opcional)
+  createdAt DateTime @default(now())
+}
+
+// =========================================================================
+// 4. ENTREGABLE FINAL (PRODUCCIÓN AUDIOVISUAL)
+// =========================================================================
+
+model Episode {
+  id          String   @id @default(uuid())
+  debateId    String   @unique
+  debate      Debate   @relation(fields: [debateId], references: [id], onDelete: Cascade)
+  title       String   // Título del episodio para YouTube/TikTok
+  
+  // Render Config para el Cliente
+  // Guardamos las líneas finales curadas y sincronizadas en un JSON estructurado.
+  // Tu frontend de Remotion leerá este campo exacto para armar la línea de tiempo.
+  remotionManifest String // Tipo String en SQLite, guardará un JSON serializado
+  
+  status      String   // READY_FOR_RENDER, RENDERED, PUBLISHED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  assets      Asset[]
+}
+
+model Asset {
+  id        String   @id @default(uuid())
+  episodeId String
+  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  type      String   // AUDIO_FULL, VIDEO_LONG, VIDEO_SHORT, POST_X
+  url       String   // Ruta local o URL final del archivo renderizado/generado
+  createdAt DateTime @default(now())
+}
