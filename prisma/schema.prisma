@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
-
 datasource db {
   provider = "sqlite"
 }
@@ -12,6 +9,89 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// =========================================================================
+// 0. ENUMS
+// (Soportados en SQLite desde Prisma 6.2 — validados a nivel de Prisma ORM)
+// =========================================================================
+
+// Feature 4: única fuente de verdad del ciclo de vida completo.
+// Topic y Debate NO tienen status propio: se deriva consultando el Episode.
+enum EpisodeStatus {
+  CREATED
+  RESEARCHING
+  READY_FOR_DEBATE
+  DEBATING
+  JUDGING
+  PENDING_REVIEW
+  APPROVED
+  CANCELLED
+  FAILED
+  GENERATING_AUDIO
+  READY_FOR_RENDER
+  RENDERING
+  COMPLETED
+  REQUIRES_HUMAN_REVIEW
+}
+
+enum CheckpointReason {
+  INSUFFICIENT_EVIDENCE
+  USAGE_LIMIT_EXCEEDED
+  MAX_REVISIONS_EXCEEDED
+  VALIDATION_INCONSISTENCY
+}
+
+// Extensible a propósito: nuevos tipos de ronda = nuevos formatos de debate
+// sin tocar el resto del modelo.
+enum RoundType {
+  OPENING
+  REBUTTAL
+  CROSS_EXAMINATION
+}
+
+enum ArgumentStatus {
+  DRAFT
+  OFFICIAL
+  REJECTED
+}
+
+enum ArgumentOrigin {
+  AI_GENERATED
+  HUMAN_EDITED
+}
+
+enum ArgumentHistoryStatus {
+  REJECTED
+  SUPERSEDED
+}
+
+enum ClaimType {
+  FACTUAL
+  OPINION
+  PREDICTION
+  SUBJECTIVE
+}
+
+enum FactCheckVeracity {
+  TRUE
+  FALSE
+  MISLEADING
+  UNSUPPORTED
+  CONTESTED
+}
+
+enum AudioProvider {
+  ELEVENLABS
+  OPENAI
+  GOOGLE_TTS
+  LOCAL
+}
+
+enum AssetType {
+  AUDIO_FULL
+  VIDEO_LONG
+  VIDEO_SHORT
+  POST_X
+}
 
 // =========================================================================
 // 1. GESTIÓN DE TENDENCIAS E INVESTIGACIÓN
@@ -19,9 +99,8 @@ generator client {
 
 model Topic {
   id               String            @id @default(uuid())
-  title            String            // Ej: "La IA reemplazará a los programadores en 2026"
-  context          String            // Resumen inicial del trend descubierto o ingresado
-  status           String            // PENDING, RESEARCHED, COMPLETED, FAILED
+  title            String // Ej: "La IA reemplazará a los programadores en 2026"
+  context          String // Resumen inicial del trend descubierto o ingresado
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   researchSessions ResearchSession[]
@@ -32,7 +111,7 @@ model ResearchSession {
   id        String   @id @default(uuid())
   topicId   String
   topic     Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  rawOutput String   // El reporte completo consolidado por tu ResearchProvider
+  rawOutput String // El reporte completo consolidado por tu ResearchProvider
   createdAt DateTime @default(now())
   sources   Source[]
 }
@@ -43,7 +122,24 @@ model Source {
   researchSession   ResearchSession @relation(fields: [researchSessionId], references: [id], onDelete: Cascade)
   title             String
   url               String
-  snippet           String          // Fragmento de texto relevante extraído de la web
+  snippet           String // Fragmento de texto relevante extraído de la web
+
+  // Feature 1: Recolección Extendida de Fuentes
+  fetchTimestamp DateTime  @default(now())
+  publishedAt    DateTime?
+  contentHash    String // Identificador único del contenido recuperado para detectar mutaciones o duplicados
+
+  // Relaciones
+  facts      EvidenceFact[]
+  factChecks FactCheck[]
+}
+
+model EvidenceFact {
+  id        String   @id @default(uuid())
+  sourceId  String
+  source    Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  content   String // La afirmación o punto de datos fáctico extraído
+  createdAt DateTime @default(now())
 }
 
 // =========================================================================
@@ -51,13 +147,18 @@ model Source {
 // =========================================================================
 
 model Agent {
-  id             String         @id @default(uuid())
-  name           String         // Ej: "IA_Elon", "Tech_Optimist"
-  avatarUrl      String?        // Asset visual para Remotion
-  systemPrompt   String         // Personalidad y directrices del agente
-  voiceId        String         // ID abstracto para tu TTSProvider (ej: "es-male-1")
-  arguments      Argument[]
-  verdicts       Verdict[]      // En caso de que este agente actúe como Juez
+  id           String     @id @default(uuid())
+  name         String // Ej: "IA_Elon", "Tech_Optimist"
+  // String (no enum) a propósito: los "roles" de agente son un concepto de
+  // negocio en evolución (Analyst/Contrarian/...), no una lista cerrada del
+  // sistema como los status. Mantenerlo flexible para poder probar personas
+  // nuevas sin migrar el schema.
+  role         String? // Ej: "ANALYST", "CONTRARIAN", "JUDGE"
+  avatarUrl    String? // Asset visual para Remotion
+  systemPrompt String // Personalidad y directrices del agente
+  voiceId      String // ID abstracto para tu TTSProvider (ej: "es-male-1")
+  arguments    Argument[]
+  verdicts     Verdict[] // En caso de que este agente actúe como Juez
 }
 
 // =========================================================================
@@ -68,7 +169,6 @@ model Debate {
   id        String        @id @default(uuid())
   topicId   String
   topic     Topic         @relation(fields: [topicId], references: [id])
-  status    String        // CREATED, IN_PROGRESS, PENDING_REVIEW, APPROVED, FAILED
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   rounds    DebateRound[]
@@ -77,80 +177,166 @@ model Debate {
 }
 
 model DebateRound {
-  id        String     @id @default(uuid())
-  debateId  String
-  debate    Debate     @relation(fields: [debateId], references: [id], onDelete: Cascade)
-  round     Int        // Número de ronda (ej: 1, 2, 3)
-  arguments Argument[]
+  id          String              @id @default(uuid())
+  debateId    String
+  debate      Debate              @relation(fields: [debateId], references: [id], onDelete: Cascade)
+  round       Int // Número de ronda (ej: 1, 2, 3)
+  type        RoundType
+  arguments   Argument[]
+  checkpoints EpisodeCheckpoint[] // Checkpoints que se congelaron durante esta ronda
 }
 
 model Argument {
-  id            String       @id @default(uuid())
+  id            String      @id @default(uuid())
   debateRoundId String
-  debateRound   DebateRound  @relation(fields: [debateRoundId], references: [id], onDelete: Cascade)
+  debateRound   DebateRound @relation(fields: [debateRoundId], references: [id], onDelete: Cascade)
   agentId       String
-  agent         Agent        @relation(fields: [agentId], references: [id])
-  content       String       // El texto generado por el LLM para este agente
-  audioUrl      String?      // Ruta al .mp3 generado gratis por tu TTSProvider
-  audioDuration Float?       // Duración exacta en segundos (vital para Remotion)
-  createdAt     DateTime     @default(now())
-  claims        Claim[]
+  agent         Agent       @relation(fields: [agentId], references: [id])
+  content       String // El texto generado por el LLM para este agente
+
+  // Feature 6: Abstracción de AudioAsset (reemplaza audioUrl y audioDuration)
+  audioAssetId String?     @unique
+  audioAsset   AudioAsset? @relation(fields: [audioAssetId], references: [id])
+
+  // Feature 3: Promoción de borradores y trazabilidad de mutaciones
+  status ArgumentStatus @default(DRAFT)
+  origin ArgumentOrigin @default(AI_GENERATED)
+
+  // CROSS_EXAMINATION: apunta al argumento puntual que se está respondiendo.
+  // Null en OPENING / REBUTTAL.
+  respondsToId String?
+  respondsTo   Argument?  @relation("ArgumentResponses", fields: [respondsToId], references: [id])
+  responses    Argument[] @relation("ArgumentResponses")
+
+  createdAt DateTime          @default(now())
+  claims    Claim[]
+  history   ArgumentHistory[]
+}
+
+model ArgumentHistory {
+  id         String                 @id @default(uuid())
+  argumentId String
+  argument   Argument               @relation(fields: [argumentId], references: [id], onDelete: Cascade)
+  content    String
+  origin     ArgumentOrigin
+  status     ArgumentHistoryStatus
+  createdAt  DateTime               @default(now())
 }
 
 model Claim {
-  id         String      @id @default(uuid())
+  id         String   @id @default(uuid())
   argumentId String
-  argument   Argument    @relation(fields: [argumentId], references: [id], onDelete: Cascade)
-  statement  String      // La afirmación específica que requiere verificación
-  factCheck  FactCheck?
+  argument   Argument @relation(fields: [argumentId], references: [id], onDelete: Cascade)
+  statement  String // La afirmación específica que requiere verificación
+
+  // Feature 3: Claim Extraction
+  type ClaimType @default(FACTUAL)
+
+  factCheck FactCheck?
 }
 
 model FactCheck {
-  id        String   @id @default(uuid())
-  claimId   String   @unique
-  claim     Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  veracity  String   // TRUE, FALSE, MISLEADING, UNVERIFIABLE
-  analysis  String   // Explicación/Justificación del Fact Checker
-  createdAt DateTime @default(now())
+  id        String            @id @default(uuid())
+  claimId   String            @unique
+  claim     Claim             @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  veracity  FactCheckVeracity
+  analysis  String // Explicación/Justificación del Fact Checker
+  createdAt DateTime          @default(now())
+
+  // Feature 10: Vinculación con las fuentes de origen para auditoría
+  sources Source[]
 }
 
 model Verdict {
   id        String   @id @default(uuid())
   debateId  String   @unique
   debate    Debate   @relation(fields: [debateId], references: [id], onDelete: Cascade)
-  judgeId   String   // El agente que tomó el rol de juez
+  judgeId   String // El agente que tomó el rol de juez
   judge     Agent    @relation(fields: [judgeId], references: [id])
-  content   String   // Argumentación final del veredicto
-  winnerId  String?  // Id del Agent ganador (opcional)
+  content   String // Argumentación final del veredicto
+  winnerId  String? // Id del Agent ganador (opcional)
   createdAt DateTime @default(now())
 }
 
 // =========================================================================
-// 4. ENTREGABLE FINAL (PRODUCCIÓN AUDIOVISUAL)
+// 4. ENTREGABLE FINAL (PRODUCCIÓN AUDIOVISUAL) & LIFE-CYCLE
 // =========================================================================
 
 model Episode {
-  id          String   @id @default(uuid())
-  debateId    String   @unique
-  debate      Debate   @relation(fields: [debateId], references: [id], onDelete: Cascade)
-  title       String   // Título del episodio para YouTube/TikTok
-  
-  // Render Config para el Cliente
-  // Guardamos las líneas finales curadas y sincronizadas en un JSON estructurado.
-  // Tu frontend de Remotion leerá este campo exacto para armar la línea de tiempo.
-  remotionManifest String // Tipo String en SQLite, guardará un JSON serializado
-  
-  status      String   // READY_FOR_RENDER, RENDERED, PUBLISHED
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id       String @id @default(uuid())
+  debateId String @unique
+  debate   Debate @relation(fields: [debateId], references: [id], onDelete: Cascade)
+  title    String // Título del episodio para YouTube/TikTok
+
+  // Render Config para el Cliente (Json nativo, soportado en SQLite desde Prisma 6.2)
+  remotionManifest Json?
+
+  // Feature 4: única fuente de verdad del ciclo de vida (v1.2)
+  status EpisodeStatus @default(CREATED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Feature 2: Límites Operacionales por Episodio
+  maxLlmCalls         Int @default(25)
+  maxSearchQueries    Int @default(5)
+  maxTtsSegments      Int @default(40)
+  maxRevisionAttempts Int @default(3)
+
+  // Relaciones
+  usage       EpisodeUsage?
+  checkpoints EpisodeCheckpoint[] // Historial completo, no se pisa (Feature 10)
   assets      Asset[]
 }
 
-model Asset {
-  id        String   @id @default(uuid())
+model EpisodeUsage {
+  id             String  @id @default(uuid())
+  episodeId      String  @unique
+  episode        Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  llmCalls       Int     @default(0)
+  inputTokens    Int     @default(0)
+  outputTokens   Int     @default(0)
+  searchRequests Int     @default(0)
+  ttsRequests    Int     @default(0)
+  executionTime  Int     @default(0)
+}
+
+model EpisodeCheckpoint {
+  id        String           @id @default(uuid())
   episodeId String
-  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  type      String   // AUDIO_FULL, VIDEO_LONG, VIDEO_SHORT, POST_X
-  url       String   // Ruta local o URL final del archivo renderizado/generado
+  episode   Episode          @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  fromState EpisodeStatus // El estado en el que se congeló (ej: RESEARCHING, DEBATING)
+  reason    CheckpointReason
+
+  // Granularidad fina para retomar exactamente donde quedó dentro de DEBATING.
+  // Null cuando la interrupción ocurrió fuera de una ronda (ej: RESEARCHING).
+  debateRoundId String?
+  debateRound   DebateRound? @relation(fields: [debateRoundId], references: [id])
+
+  snapshot  String // JSON con la foto del EpisodeUsage y contexto relevante
   createdAt DateTime @default(now())
+
+  // El checkpoint "activo" es el más reciente por createdAt — no hay flag
+  // booleano redundante que pueda desincronizarse.
+}
+
+model AudioAsset {
+  id         String         @id @default(uuid())
+  storageKey String // ej: "episodes/45/segment_12.mp3"
+  provider   AudioProvider
+  durationMs Int
+  mimeType   String // audio/mpeg
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  arguments Argument[]
+}
+
+model Asset {
+  id        String    @id @default(uuid())
+  episodeId String
+  episode   Episode   @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  type      AssetType
+  url       String // Ruta local o URL final del archivo renderizado/generado
+  createdAt DateTime  @default(now())
 }

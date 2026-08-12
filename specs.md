@@ -1,8 +1,9 @@
 AI Trend Debates — Feature Specification
-Versión: 1.1
+Versión: 1.2
 Objetivo: MVP de una plataforma de generación de debates audiovisuales automatizados, verificados, controlados en costo y curados por humanos.
 
 Changelog 1.1: se introduce el modelo de recuperación (checkpoint + REQUIRES_HUMAN_REVIEW) para distinguir interrupciones recuperables de fallos terminales. Afecta Features 1, 2, 4 y 5.
+Changelog 1.2: se desglosa DEBATING en fases explícitas (OPENING, REBUTTAL, CROSS_EXAMINATION) y se define Episode como única fuente de verdad del ciclo de vida — Topic y Debate dejan de tener status propio. Afecta Features 2 y 4.
 
 1. Trend Discovery & Research (P0)
 Objetivo: Construir una base de evidencia (Evidence Base) aislada, confiable y fechada antes de inicializar la orquestación del debate.
@@ -23,6 +24,7 @@ Funcionalidades Refinadas
 Límites Operacionales por Episodio (Cost/Usage Control): Cada episodio nace con un presupuesto máximo de ejecución. Si se excede cualquiera de estos techos, el pipeline se congela y transiciona a un estado de error controlado.
 Estructura de Consumo (EpisodeUsage): El sistema registrará de forma transaccional: llmCalls, inputTokens, outputTokens, searchRequests, ttsRequests y executionTime.
 Promoción de Argumentos: Los agentes solo pueden leer intervenciones que tengan el estado OFFICIAL. Los borradores (DRAFT) están estrictamente aislados del contexto del oponente.
+Fases del Debate (RoundType): DEBATING no es un bloque monolítico — se compone de rondas tipadas (OPENING, REBUTTAL, CROSS_EXAMINATION), extensible a futuros formatos sin romper el resto del pipeline. En CROSS_EXAMINATION, cada argumento responde a un argumento puntual previo (no al debate en general), a diferencia de OPENING/REBUTTAL. El "Fact checking" (minuto 08:00-10:00 del formato de episodio) no es una fase propia del modelo de datos: es la vista de los FactCheck ligados a los argumentos de OPENING, compuesta al generar el guion final.
 Techos Máximos del MVP (Configurables)
 max_llm_calls_per_episode: 25
 max_search_queries_per_episode: 5
@@ -52,6 +54,7 @@ Loop de Enmienda: Si el borrador falla por un claim FALSE / MISLEADING o por rom
 
 4. Debate State & Episode Lifecycle (P0)
 Objetivo: Persistir la máquina de estados de forma transaccional, garantizando idempotencia y una clara distinción entre fallos recuperables, fallos terminales, cancelaciones de usuarios y revisiones.
+Fuente única de verdad: Episode.status es la única máquina de estados del sistema. Topic y Debate son entidades puramente estructurales (agrupan investigación y contenido de debate respectivamente) y no mantienen un status propio — cualquier consulta sobre "en qué estado está" un tema o un debate se resuelve a través de su Episode asociado. Esto evita tener que sincronizar múltiples máquinas de estado parcialmente superpuestas.
 Máquina de Estados Definitiva (v1.1)
 [CREATED] ──► [RESEARCHING] ──► [READY_FOR_DEBATE] ──► [DEBATING] ──► [JUDGING] ──► [PENDING_REVIEW]
                                                                                           │
@@ -72,7 +75,7 @@ A diferencia de FAILED, este estado NO descarta el progreso del episodio. Se gat
   - MAX_REVISIONS_EXCEEDED: un agente agotó sus max_revision_attempts en el loop de fact-checking (Feature 3).
   - VALIDATION_INCONSISTENCY: inconsistencia en validación intermedia que no rompe el backend pero requiere árbitro humano.
 
-Al entrar a REQUIRES_HUMAN_REVIEW, el sistema persiste un Checkpoint: { fromState: EpisodeState, reason: string, snapshot: EpisodeUsage }. El curador resuelve mediante una de estas acciones (ver Feature 5):
+Al entrar a REQUIRES_HUMAN_REVIEW, el sistema persiste un Checkpoint: { fromState: EpisodeState, reason: string, debateRoundId: string | null, snapshot: EpisodeUsage }. El checkpoint se guarda como historial (no se pisa) para no perder trazabilidad de interrupciones previas dentro del mismo episodio (ver Feature 10). Cuando la interrupción ocurre dentro de DEBATING, debateRoundId identifica exactamente en qué ronda y fase (OPENING/REBUTTAL/CROSS_EXAMINATION) se congeló, evitando repetir rondas ya completadas al hacer Resume. El curador resuelve mediante una de estas acciones (ver Feature 5):
   - Resume: reanuda la ejecución exactamente desde checkpoint.fromState (por ejemplo, ampliar el presupuesto y continuar DEBATING donde quedó, o agregar fuentes manuales y continuar RESEARCHING).
   - Reject: transiciona a CANCELLED (decisión humana de no continuar).
   - Escalar a FAILED: si tras un Resume la misma causa vuelve a ocurrir (ej. sigue sin alcanzar 3 fuentes tras la revisión), el episodio pasa a FAILED como terminal — no hay un tercer intento automático.
