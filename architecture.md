@@ -101,9 +101,88 @@ El modelo de datos completo vive en `schema.prisma` (comentado inline). Resumen 
 
 `Topic` y `Debate` no tienen `status` propio — se derivan consultando el `Episode` asociado (ver sección 4).
 
-## 7. Referencias
+## 7. Algoritmo de orquestación del debate
 
-- `01-product/features.md` — contrato de producto, máquina de estados de producto, criterios de aceptación por feature.
+Decisiones de diseño (acordadas con el usuario) que resuelven la ambigüedad que tenía Feature 2:
+
+- **Rondas configurables**: `Episode.openingRounds` / `rebuttalRounds` / `crossExaminationRounds` — no son un valor fijo del sistema.
+- **Solo 2 agentes debaten por episodio** (de un pool de 4 personas: Analyst, Contrarian, Diplomat, Provocateur), con turnos secuenciales — no los 4 a la vez. Esto es clave para que el resultado sea una conversación entendible, no un mosaico de monólogos en paralelo.
+- **Judge es un personaje fijo**, pero el modelo LLM que lo interpreta rota por episodio (`EpisodeParticipant.modelProvider`).
+- **Asignación de cross-examination aleatoria** — quién examina qué argumento puntual, para que sea parejo entre agentes.
+- **Paralelización solo en el fact-checking de claims** dentro de un mismo argumento — nunca en la generación de los argumentos en sí (son secuenciales por diseño, ver punto anterior).
+
+### 7.1 Selección de participantes (al crear el episodio, transición `CREATED → RESEARCHING`)
+
+```
+1. Elegir 2 de las 4 personas debatientes al azar → EpisodeParticipant (isJudge: false) x2
+2. Asignar un ModelProvider a cada una (al azar entre los configurados)
+3. Agent "Judge" → EpisodeParticipant (isJudge: true), con un ModelProvider
+   distinto al de los dos debatientes (evita que el mismo modelo debata
+   y juzgue en el mismo episodio)
+4. Definir el orden de turnos: se sortea una vez por episodio quién abre
+   (participantA u participantB) — ese orden se mantiene consistente en
+   todas las rondas OPENING/REBUTTAL de ese episodio.
+```
+
+### 7.2 Loop de rondas (estado `DEBATING`)
+
+```
+para cada round en 1..openingRounds:
+  crear DebateRound(type=OPENING, round=N)
+  para cada agente en el orden de turnos definido en 7.1:
+    draft = agent.argue(context)                    // shared/contracts
+    resultado = procesarBorrador(draft)              // ver 7.3
+    context.officialArguments.push(resultado)         // el siguiente turno ya lo ve
+
+para cada round en 1..rebuttalRounds:
+  crear DebateRound(type=REBUTTAL, round=N)
+  (mismo loop que OPENING — mismo orden de turnos)
+
+para cada round en 1..crossExaminationRounds:
+  crear DebateRound(type=CROSS_EXAMINATION, round=N)
+  para cada agente en el orden de turnos:
+    target = elegir al azar un Argument OFFICIAL del oponente
+              (que todavía no haya sido target en este episodio,
+              si hay más de uno disponible)
+    draft = agent.respond(context, target)
+    resultado = procesarBorrador(draft)
+    context.officialArguments.push(resultado)
+```
+
+### 7.3 `procesarBorrador` — el loop de enmienda con paralelización acotada
+
+```
+draft → claim extraction (AgentsModule → FactCheckModule.extractClaims)
+claims = [...]
+
+// Paralelización: cada claim se despacha a su verificación en paralelo,
+// PERO nunca dos llamadas concurrentes al mismo ModelProvider — se
+// agrupan en una cola por proveedor para no pisar su rate limit.
+resultados = para cada claim, en paralelo agrupado por ModelProvider:
+  si claim.type == FACTUAL → FactCheckModule.check(claim)      // TRUE/FALSE/...
+  si no                     → FactCheckModule.editorialReview(claim, persona)
+
+si algún resultado es FALSE / MISLEADING / editorial.passed=false:
+  intentos += 1
+  si intentos > episode.maxRevisionAttempts:
+    → Episode a REQUIRES_HUMAN_REVIEW (reason: MAX_REVISIONS_EXCEEDED,
+       debateRoundId: ronda actual)
+  si no:
+    feedback = AmendmentFeedback (shared/contracts)
+    draft = agent.amend(context, draft, feedback)
+    reintentar procesarBorrador(draft)
+si no:
+  Argument.status → OFFICIAL
+  devolver Argument
+```
+
+### 7.4 Veredicto (estado `JUDGING`)
+
+Al terminar la última ronda de `CROSS_EXAMINATION`, se arma el `DebateContext` completo (todos los `officialArguments`) y se llama al `EpisodeParticipant` con `isJudge: true`, usando `buildJudgeSystemPrompt` (`shared/personas/`) y `VerdictOutputSchema` (`shared/contracts/`).
+
+## 8. Referencias
+
+- `features.md` — contrato de producto, máquina de estados de producto, criterios de aceptación por feature.
 - `shared/contracts/agents.contracts.ts` — contratos Zod y interfaz `DebateAgent`.
 - `shared/personas/agent-personas.ts` — personas y reglas editoriales por agente.
 - `schema.prisma` — modelo de datos completo.

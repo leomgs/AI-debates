@@ -86,6 +86,15 @@ enum AudioProvider {
   LOCAL
 }
 
+// Modelos LLM intercambiables por persona/episodio (idea original, sección 4).
+// Extensible: agregar un valor acá no requiere tocar ninguna otra entidad.
+enum ModelProvider {
+  OPENAI
+  GOOGLE
+  ANTHROPIC
+  XAI
+}
+
 enum AssetType {
   AUDIO_FULL
   VIDEO_LONG
@@ -159,6 +168,7 @@ model Agent {
   voiceId      String // ID abstracto para tu TTSProvider (ej: "es-male-1")
   arguments    Argument[]
   verdicts     Verdict[] // En caso de que este agente actúe como Juez
+  episodeParticipations EpisodeParticipant[]
 }
 
 // =========================================================================
@@ -283,10 +293,31 @@ model Episode {
   maxTtsSegments      Int @default(40)
   maxRevisionAttempts Int @default(3)
 
+  // Configuración de rondas (configurable por episodio, no un valor fijo del sistema)
+  openingRounds          Int @default(1)
+  rebuttalRounds         Int @default(1)
+  crossExaminationRounds Int @default(1)
+
   // Relaciones
-  usage       EpisodeUsage?
-  checkpoints EpisodeCheckpoint[] // Historial completo, no se pisa (Feature 10)
-  assets      Asset[]
+  usage        EpisodeUsage?
+  checkpoints  EpisodeCheckpoint[] // Historial completo, no se pisa (Feature 10)
+  assets       Asset[]
+  participants EpisodeParticipant[]
+}
+
+// Quiénes debaten este episodio y con qué modelo LLM los interpreta —
+// tanto la selección de personas como el modelo son datos por-episodio,
+// no una configuración fija del sistema (rotan).
+model EpisodeParticipant {
+  id            String        @id @default(uuid())
+  episodeId     String
+  episode       Episode       @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  agentId       String
+  agent         Agent         @relation(fields: [agentId], references: [id])
+  modelProvider ModelProvider
+  isJudge       Boolean       @default(false) // true para exactamente 1 participante por episodio
+
+  @@unique([episodeId, agentId])
 }
 
 model EpisodeUsage {
