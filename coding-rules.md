@@ -76,7 +76,11 @@ Encapsulado en un solo servicio, `EpisodeStateService` (dentro de `episodes/`), 
 - Archivos: `kebab-case` (`agent-contracts.ts`, no `agentContracts.ts`).
 - Los valores de enum se escriben `SCREAMING_SNAKE_CASE` tanto en `schema.prisma` como en los `z.enum([...])` de `shared/contracts/` — deben ser el mismo string literal en ambos lados (no hay mapeo intermedio).
 
-## 8. Tests
+## 8. Variables de entorno
+
+Toda variable de entorno nueva se agrega primero a `shared/config/env.schema.ts` (Zod) y a `.env.example` — nunca `process.env.X` leído directo en otro archivo. El acceso siempre pasa por `ConfigService` inyectado, tipado contra `Env`. `AppModule` valida el entorno al arrancar (`ConfigModule.forRoot({ validate: validateEnv })`): si falta una key requerida, el proceso no levanta — no falla a mitad de un episodio con un error críptico del proveedor.
+
+## 9. Tests
 
 - Cada `*.service.ts` tiene su `*.service.spec.ts` en el mismo módulo.
 - Los tests de un módulo de dominio (`agents`, `fact-check`, etc.) mockean el LLM/servicio externo — nunca hacen una llamada real. `EpisodesModule` es el único con tests de integración que orquestan varios módulos juntos (con todo mockeado en el borde externo).
