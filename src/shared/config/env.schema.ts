@@ -6,10 +6,14 @@ import { z } from "zod";
 export const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1), // sqlite: "file:./dev.db"
 
-  OPENAI_API_KEY: z.string().min(1),
+  // Única requerida: es la única con la que hay acceso gratuito hoy.
+  // Las demás quedan opcionales hasta contratar una suscripción adecuada —
+  // ModelProviderFactory tira error recién si algo intenta resolver un
+  // provider cuya key falta, no al arrancar el proceso.
   GOOGLE_API_KEY: z.string().min(1),
-  // ANTHROPIC_API_KEY / XAI_API_KEY: agregar acá recién cuando se habiliten
-  // esos providers en ModelProviderFactory — no antes.
+  OPENAI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  XAI_API_KEY: z.string().optional(),
 
   GOOGLE_TTS_API_KEY: z.string().optional(), // según el wrapper de google-tts-api que termines usando
 

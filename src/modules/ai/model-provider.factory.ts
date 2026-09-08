@@ -2,9 +2,11 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createXai } from "@ai-sdk/xai";
 import type { LanguageModel } from "ai";
 import { ModelProvider } from "@prisma/client";
-import type { Env } from "../config/env.schema";
+import type { Env } from "../../shared/config/env.schema";
 
 // Único lugar del proyecto que mapea ModelProvider (schema.prisma) → cliente
 // real del AI SDK. AgentsModule (debatientes + Judge) es el consumidor
@@ -26,15 +28,18 @@ export class ModelProviderFactory {
           apiKey: this.config.get("GOOGLE_API_KEY", { infer: true }),
         })("gemini-2.0-flash");
 
-      // ANTHROPIC y XAI ya existen en el enum (schema.prisma los deja
-      // extensibles a propósito) pero todavía no están conectados acá.
-      // Habilitarlos: instalar @ai-sdk/anthropic o @ai-sdk/xai, agregar
-      // la env var correspondiente a env.schema.ts, y sumar el case.
+      // ANTHROPIC_API_KEY/XAI_API_KEY son opcionales en env.schema.ts (no
+      // hay suscripción paga contratada todavía) — si falta la key, el SDK
+      // tira su propio error recién acá, al intentar resolver el modelo.
       case "ANTHROPIC":
+        return createAnthropic({
+          apiKey: this.config.get("ANTHROPIC_API_KEY", { infer: true }),
+        })("claude-sonnet-5");
+
       case "XAI":
-        throw new Error(
-          `ModelProvider "${provider}" está definido en el schema pero todavía no tiene un cliente configurado en ModelProviderFactory.`
-        );
+        return createXai({
+          apiKey: this.config.get("XAI_API_KEY", { infer: true }),
+        })("grok-4");
 
       default: {
         const _exhaustive: never = provider;

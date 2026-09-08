@@ -20,12 +20,18 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@ai-sdk/google": "^4.0.40",
-    "@ai-sdk/openai": "^4.0.37",
+    "@ai-sdk/anthropic": "^3.0.116",
+    "@ai-sdk/google": "^3.0.121",
+    "@ai-sdk/openai": "^3.0.109",
+    "@ai-sdk/xai": "^3.0.130",
     "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@prisma/adapter-better-sqlite3": "^7.10.0",
     "@prisma/client": "^7.9.1",
+    "ai": "^6.0.277",
+    "better-sqlite3": "^13.0.3",
     "cockatiel": "^4.0.0",
     "google-tts-api": "^2.0.2",
     "reflect-metadata": "^0.2.2",
@@ -69,6 +75,9 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@nestjs/config|dotenv-expand|es-toolkit)/)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
