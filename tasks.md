@@ -6,17 +6,18 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 
 ## Dónde retomar (última sesión: 2026-09-08)
 
-**Completo y verificado**: secciones 0-4 (Fundacional, Research, Agents, Debate, Fact-check) — código + tests unitarios + `tsc` limpio en todos. Además, `scripts/smoke-test-argument.ts` corrió de punta a punta **contra APIs reales** (Tavily + Gemini): creó un `Topic`, hizo research real (9 facts extraídos), generó un primer argumento OPENING con `AgentsService`, y lo persistió como `Argument` OFFICIAL vía `DebateModule` — sin pasar por `FactCheckModule` todavía (a propósito, ver el script). Esto prueba que el tramo research → argumento anda de verdad, no solo con mocks.
+**Completo y verificado**: secciones 0-4 (Fundacional, Research, Agents, Debate, Fact-check), 0.1 (rate limiter), 7 (Episodes — el orquestador completo), 8 (SSE), y el ítem de formato de error de la 9 — código + tests unitarios/integración + `tsc` limpio en todo el repo (121 tests unitarios + 1 e2e, todo en verde). Además, `scripts/smoke-test-argument.ts` corrió de punta a punta **contra APIs reales** (Tavily + Gemini) antes de construir `EpisodesModule`, probando que el tramo research → argumento anda de verdad, no solo con mocks.
 
-**No hay nada roto ni a medio terminar** — el repo compila, todos los tests pasan, y el último commit está limpio. Lo que sigue es simplemente avanzar con lo que falta:
+**No hay nada roto ni a medio terminar** — el repo compila, todos los tests pasan. El módulo más grande y central del proyecto (`EpisodesModule`, el orquestador) ya está completo, incluyendo notificaciones internas, SSE, resume/recovery, y tests de integración multi-módulo. Se encontraron y corrigieron 3 bugs reales en revisión manual durante la construcción — ver `decision-log.md` entrada 10 para el detalle completo del proceso (las 5 fases de implementación + qué encontró cada revisión).
 
-- **Siguiente módulo lógico: `EpisodesModule`** (sección 7) — el orquestador. Es el más grande: máquina de estados de `Episode`, loop de rondas, `procesarBorrador`, chequeo de presupuesto, checkpoints/resume, y el controller HTTP. Varios ítems de acá ya tienen sub-notas de decisiones tomadas en sesiones anteriores que hay que respetar al implementar (buscar "decisión tomada 2026-09-08" en la sección 7).
-- Alternativa si se prefiere ir por lo más chico primero: **`TTS`** (sección 5) o **`Render`** (sección 6, P1 — no bloquea el MVP).
-- Pendiente aparte, no bloqueante: completar `README.md` (sigue siendo boilerplate de NestJS, sección 9).
+Lo que sigue:
 
-**Nuevo esta sesión**: se creó `decision-log.md` — bitácora cronológica de decisiones no obvias tomadas a lo largo del proyecto (con el proceso de cómo se llegó a cada una, no solo el resultado), pensada para servir de insumo a un paper que el usuario está planeando escribir sobre el desarrollo de este proyecto. Mantenerla actualizada en cada decisión de ese tipo, no solo al final.
+- **`TTS`** (sección 5) o **`Render`** (sección 6, P1 — no bloquea el MVP) — los dos módulos de dominio que faltan. Ninguno tiene código todavía.
+- Ahora que existe una superficie HTTP real (`POST /episodes`, `GET /episodes`, etc.), es un buen momento para retomar el **scaffolding de frontend** que se había pausado a propósito hasta tener este recorte vertical.
+- Pendiente aparte, no bloqueante: completar `README.md` (sigue siendo boilerplate de NestJS).
+- No verificado todavía: correr `POST /episodes` real de punta a punta contra APIs reales (Tavily + Gemini) — todo lo demás se probó con `episodes.integration.spec.ts` (servicios de dominio LLM mockeados). Vale la pena un smoke test real antes de dar por completamente probado el pipeline completo, mismo criterio que `scripts/smoke-test-argument.ts` en su momento (consume créditos reales).
 
-**También esta sesión**: se diseñó (con el agente de arquitectura) un rate limiter proactivo para llamadas a LLM y un sistema de notificaciones internas — ver `decision-log.md` entradas 8 y 9 para el proceso completo. El rate limiter se implementa en esta misma sesión (sección 0.1 de este archivo, más abajo); las notificaciones quedan documentadas como diseño pendiente en la sección 7, porque dependen de `EpisodesModule`.
+**Nuevo esta sesión**: se creó `decision-log.md` — bitácora cronológica de decisiones no obvias (con el proceso de cómo se llegó a cada una), pensada como insumo para un paper que el usuario está planeando escribir sobre el desarrollo de este proyecto. Se implementaron en esta misma sesión: el rate limiter proactivo de LLM (0.1), el sistema de notificaciones internas, y `EpisodesModule` completo — ver `decision-log.md` entradas 8, 9 y 10.
 
 ## 0. Fundacional (bloquea todo lo demás) — COMPLETA
 
@@ -149,54 +150,50 @@ Entidad: `Asset`. P1 según features.md — no bloquea el MVP core.
 - [ ] Worker desacoplado que ejecuta el binario de Remotion (Feature 9, P1)
 - [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas (api-contract.md §2, marcado P1)
 
-## 7. Episodes — el orquestador (`modules/episodes/`)
+## 7. Episodes — el orquestador (`modules/episodes/`) — COMPLETA (código + tests + integración, 2026-09-08)
 
-Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`. Único módulo que conoce el pipeline completo y el único que escribe `Episode.status`.
+Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`. Único módulo que conoce el pipeline completo y el único que escribe `Episode.status`. Construido en 5 fases verificables (plan completo, diseñado con el agente de arquitectura + un agente de planificación, en `decision-log.md` entrada 10), cada una con `tsc`/tests en verde antes de pasar a la siguiente.
 
-- [ ] Módulo no existe
-- [ ] `EpisodeStateService` (coding-rules.md §6) — único escritor de `Episode.status`, un método por transición válida
-- [ ] Selección de participantes al crear el episodio (arquitectura §7.1 — 2 de 4 personas + Judge con provider distinto + sorteo de orden de turnos)
-- [ ] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION (arquitectura §7.2)
-  - [ ] Capturar `NoCrossExaminationTargetError` de `DebateModule.pickCrossExaminationTarget` → `EpisodeCheckpoint` con `reason: VALIDATION_INCONSISTENCY` → `Episode → REQUIRES_HUMAN_REVIEW` → resolución esperada vía acción `regenerate` (ver `frontend-notes.md` 2026-09-08, decisión tomada 2026-09-08 sección 3 de este archivo)
-- [ ] `procesarBorrador` — orquesta claim extraction + fact-check/editorial + loop de enmienda (arquitectura §7.3)
-  - [ ] Paralelización de las llamadas a `FactCheckService.check()`/`.editorialReview()` por claim, agrupadas por `ModelProvider` (nunca 2 llamadas concurrentes al mismo provider) — decisión tomada 2026-09-08 (`tasks.md` sección 4): `FactCheckModule` opera de a un claim, esta coordinación entre múltiples llamadas simultáneas es de acá, no de ese módulo
-  - [ ] Conteo de `intentos` contra `episode.maxRevisionAttempts` → si se agota, `EpisodeCheckpoint` con `reason: MAX_REVISIONS_EXCEEDED` → `Episode → REQUIRES_HUMAN_REVIEW` — decisión tomada 2026-09-08 (`tasks.md` sección 4): no hace falta una excepción tipada de `FactCheckModule` para esto, `EpisodesModule` ya tiene el dato de `Episode` y decide la transición directo en su propio loop
-- [ ] Chequeo de presupuesto (`EpisodeUsage` vs `maxLlmCalls`/`maxSearchQueries`/`maxTtsSegments`) antes de cada llamada externa (AC 2.1)
-- [ ] Persistencia de `EpisodeCheckpoint` como historial (nunca se pisa) al entrar a `REQUIRES_HUMAN_REVIEW`
-- [ ] Lógica de `Resume` (retoma desde `checkpoint.fromState`/`debateRoundId`) y escalado a `FAILED` si la misma causa se repite tras un resume
-- [ ] Idempotencia post-caída del proceso (Feature 4 — inspeccionar último estado persistido al reiniciar)
-- [ ] `episodes.controller.ts`:
-  - [ ] `POST /episodes`
-  - [ ] `GET /episodes` (filtrable por `status`)
-  - [ ] `GET /episodes/:id`
-  - [ ] `GET /episodes/:id/audio/:audioAssetId/url`
-  - [ ] `POST /episodes/:id/actions/approve`
-  - [ ] `POST /episodes/:id/actions/edit`
-  - [ ] `POST /episodes/:id/actions/regenerate`
-  - [ ] `POST /episodes/:id/actions/reject`
-  - [ ] `POST /episodes/:id/actions/resume`
-  - [ ] Validar tabla de estados válidos por acción (api-contract.md §5) → `409 Conflict` con `code: INVALID_STATE_TRANSITION` fuera de tabla
-- [ ] DTOs Zod separados de los contratos de agentes (coding-rules.md §3 — no reutilizar `ArgumentDraftSchema` como DTO)
-- [ ] Tests de integración orquestando varios módulos con todo mockeado en el borde externo (coding-rules.md §9 — únicos tests de integración del proyecto)
+- [x] `EpisodeStateService` (coding-rules.md §6) — único escritor de `Episode.status`. Un método por **estado destino** (no por arista from→to), cada uno valida un `ALLOWED_FROM` de orígenes permitidos — reusa el mismo método en flujo normal y en resume. `requireHumanReview(reason)` detecta "la misma causa volvió a ocurrir tras un resume" comparando contra el `EpisodeCheckpoint` más reciente, y escala directo a `markFailed` si coincide (sin pasar por otro `REQUIRES_HUMAN_REVIEW` intermedio). No implementa `markGeneratingAudio`/`markReadyForRender`/`markRendering`/`markCompleted` todavía (TTS/Render no existen — YAGNI documentado, se agregan después con el mismo patrón).
+- [x] Selección de participantes al crear el episodio (arquitectura §7.1 — `EpisodeParticipantsService`: 2 de 4 personas + Judge con provider distinto + sorteo de orden de turnos). Providers "disponibles" para el sorteo se resuelven con un chequeo propio de env vars en este service (sin tocar `ModelProviderFactory`, fuera de scope). Fallback documentado cuando solo hay 1 provider configurado (caso real hoy, solo GOOGLE): el Judge sortea entre todos igual.
+- [x] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION (arquitectura §7.2, `EpisodeOrchestratorService.runDebatePhase`/`runRound`). Orden de turnos derivado sin columna nueva en `EpisodeParticipant` (D-4 del plan): se fija por el `createdAt` del primer `Argument` de la ronda OPENING/1, resortea si todavía no hay ninguno — resistente a resume/recovery sin necesitar un cursor persistido.
+  - [x] `NoCrossExaminationTargetError` de `DebateModule.pickCrossExaminationTarget` → `EpisodeCheckpoint` con `reason: VALIDATION_INCONSISTENCY` → `REQUIRES_HUMAN_REVIEW` (mapeado en `handlePipelineError`, resolución vía `regenerate` como ya estaba previsto)
+- [x] `procesarBorrador` — `EpisodeOrchestratorService.processDraft` (arquitectura §7.3): claim extraction + fact-check/editorial + loop de enmienda.
+  - [x] **Decisión D-7 del plan**: NO se agrupan manualmente las llamadas de fact-check por `ModelProvider` — `Promise.all` sobre todos los claims. `LlmRateLimiterService.acquire()` (sección 0.1) ya serializa correctamente por provider vía su mutex interno; agrupar en el orquestador hubiera duplicado esa garantía. Reemplaza la idea original de "cola por provider" de esta misma sección.
+  - [x] Conteo de `intentos` contra `episode.maxRevisionAttempts` → al agotarse, `DebateService.rejectArgument` + `EpisodeStateService.requireHumanReview(reason: MAX_REVISIONS_EXCEEDED)`, señalizado con `EpisodePipelineHaltedError` (excepción de control interna, para que `handlePipelineError` no la vuelva a mapear)
+- [x] Chequeo de presupuesto (`EpisodeBudgetService.withLlmCall`/`withSearchRequest` — `EpisodeUsage` vs `maxLlmCalls`/`maxSearchQueries`) antes de cada llamada externa (AC 2.1). Envuelve **todas** las llamadas a LLM del pipeline, incluida `regenerate()` en curaduría (gap encontrado y corregido en revisión — no estaba en el plan original, `AC 2.1` no distingue entre pipeline automático y acciones humanas). `maxTtsSegments` queda sin uso todavía (TTS no existe).
+- [x] Persistencia de `EpisodeCheckpoint` como historial (nunca se pisa) al entrar a `REQUIRES_HUMAN_REVIEW`/`FAILED`, con `snapshot: JSON.stringify(EpisodeUsage)`
+- [x] Lógica de `Resume` (`EpisodeActionsService.resume` + `EpisodeStateService.resumeFromCheckpoint`, retoma desde `checkpoint.fromState`/`debateRoundId`) y escalado a `FAILED` si la misma causa se repite tras un resume (ver `requireHumanReview` arriba)
+- [x] Idempotencia post-caída del proceso (`EpisodeRecoveryService.onApplicationBootstrap`, Feature 4) — retoma episodios en `RESEARCHING`/`DEBATING`/`JUDGING` al reiniciar, reusando la misma idempotencia por re-chequeo de cada fase que ya usan la corrida inicial y el resume manual (sin lógica de recovery separada). `GENERATING_AUDIO`/`RENDERING` fuera del alcance a propósito.
+- [x] `episodes.controller.ts`:
+  - [x] `POST /episodes`
+  - [x] `GET /episodes` (filtrable por `status`)
+  - [x] `GET /episodes/:id`
+  - [ ] `GET /episodes/:id/audio/:audioAssetId/url` — **fuera de scope a propósito**, depende de `TTSModule` (no existe)
+  - [x] `POST /episodes/:id/actions/approve`
+  - [x] `POST /episodes/:id/actions/edit`
+  - [x] `POST /episodes/:id/actions/regenerate` — reescritura editorial vía `reviseDraft` (no `editByHuman`: el contenido lo sigue generando el agente, `origin` queda `AI_GENERATED`), sin pasar por el loop de fact-check
+  - [x] `POST /episodes/:id/actions/reject`
+  - [x] `POST /episodes/:id/actions/resume` — body validado contra el `reason` real del checkpoint activo (no solo contra la unión de los 3 shapes posibles)
+  - [x] Validar tabla de estados válidos por acción (api-contract.md §5) → `409 Conflict` con `code: INVALID_STATE_TRANSITION` (vía `HttpErrorFilter` global — resuelve de paso el pendiente de formato de error de la sección 9)
+  - [x] `GET /episodes/:id/events` (SSE) — ver sección 8
+  - [ ] `GET /episodes/:id/manifest` — **fuera de scope a propósito**, depende de `RenderModule` (P1, no existe)
+- [x] DTOs Zod separados de los contratos de agentes (`modules/episodes/dto/`, coding-rules.md §3) + `ZodValidationPipe` genérico (`shared/http/`)
+- [x] Tests de integración orquestando varios módulos con todo mockeado en el borde externo (coding-rules.md §9 — `episodes.integration.spec.ts`, contra sqlite de test real aislada de `dev.db`, con `ResearchService`/`AgentsService`/`FactCheckService` mockeados). Cubre pipeline feliz completo, `InsufficientEvidenceError`, `MAX_REVISIONS_EXCEEDED`, resume exitoso, escalada a `FAILED` tras repetir la misma causa, y recovery post-caída — este último ejerce el bug real descrito abajo.
 
-**Notificaciones internas (diseño ya cerrado, implementar junto con `EpisodeStateService`)** — motivado por el rate limiter (sección 0.1): al encolarse llamadas a LLM, procesar un episodio puede tardar más, y el usuario no quiere quedar bloqueado esperando la respuesta HTTP. Proceso completo de diseño en `decision-log.md` entrada 9.
+**Notificaciones internas** — implementadas junto con `EpisodeStateService`, como estaba planeado (`decision-log.md` entrada 9): tabla `Notification`/`enum NotificationType` (`EPISODE_COMPLETED`/`EPISODE_PENDING_REVIEW`/`EPISODE_REQUIRES_REVIEW`/`EPISODE_FAILED`) acoplada 1:1 a `Episode`, `modules/notifications/` standalone con su controller (`GET /notifications?unreadOnly=true`, `POST /notifications/:id/read`, `POST /notifications/read-all`), `NotificationsService` inyectado en `EpisodeStateService` y disparado como último paso interno de cada transición relevante.
 
-- [ ] `prisma/schema.prisma`: tabla `Notification` (`episodeId`, `type: NotificationType`, `message`, `readAt` nullable — mismo patrón que `EpisodeCheckpoint`, sin flag booleano redundante) acoplada 1:1 a `Episode` (no genérica/polimórfica — no hay otro emisor de notificaciones hoy)
-- [ ] `enum NotificationType`: `EPISODE_COMPLETED` / `EPISODE_PENDING_REVIEW` / `EPISODE_REQUIRES_REVIEW` / `EPISODE_FAILED`
-- [ ] `modules/notifications/` — módulo standalone nuevo (controller propio, no vive dentro de `episodes/`, coding-rules.md §1) con `NotificationsService` inyectado por `EpisodeStateService`
-- [ ] `EpisodeStateService` dispara la notificación como último paso interno de `markCompleted`/`markPendingReview`/`requireHumanReview`/`markFailed` — no una llamada aparte desde el código de orquestación (mismo motivo que centralizar "un método por transición válida": evita que una transición nueva se olvide de notificar)
-- [ ] `GET /notifications?unreadOnly=true` (default `true`, sin paginación), `POST /notifications/:id/read`, `POST /notifications/read-all`
-- [ ] Documentar explícitamente en `architecture.md`/`api-contract.md` que esto es complementario al SSE de la sección 8, no un reemplazo (SSE = en vivo/efímero con la pantalla abierta; `Notification` = inbox persistente)
+**⚠️ Bug real encontrado en revisión manual (no por los tests generados) — corregido**: `EpisodeOrchestratorService.runResearchPhase` chequeaba `refreshed.status !== 'READY_FOR_DEBATE'` para decidir si transicionar a `READY_FOR_DEBATE`, en vez de `=== 'RESEARCHING'`. Como `runPipeline()` se reusa tal cual para resume/recovery, un episodio reanudado desde `DEBATING`/`JUDGING` (ej. tras `MAX_REVISIONS_EXCEEDED`) pasaba de nuevo por `runResearchPhase` al llamar `runPipeline`, y ese chequeo intentaba una transición inválida (`DEBATING → READY_FOR_DEBATE`, fuera del `ALLOWED_FROM` real) — rompía el resume antes de llegar a `runDebatePhase`. Corregido con el guard explícito por estado de origen; tiene test de regresión unitario y se ejerce de punta a punta en el escenario de recovery de `episodes.integration.spec.ts`. Ninguna de las fases (A-E) lo detectó por su cuenta — se encontró releyendo el código línea por línea entre fases, no generado por ningún test automático. Ver `decision-log.md` entrada 10 para el detalle completo del proceso de las 5 fases y este hallazgo.
 
-## 8. Real-time (SSE)
+## 8. Real-time (SSE) — COMPLETA (2026-09-08)
 
-- [ ] `GET /episodes/:id/events` (`text/event-stream`)
-- [ ] Emisión de los 6 eventos definidos (api-contract.md §4): `research.started`, `agent.thinking`, `fact_check.completed`, `argument.approved`, `episode.pending_review`, `episode.requires_review`
+- [x] `GET /episodes/:id/events` (`text/event-stream`) — `EpisodeEventsService`, `RxJS Subject` por episodio (`Map<episodeId, Subject<MessageEvent>>`), sin replay/backfill (efímero por diseño, complementario a `Notification`). Se cierra (`complete()`) al terminar cada corrida de `runPipeline`.
+- [x] Emisión de los 6 eventos definidos (api-contract.md §4): `research.started`, `agent.thinking`, `fact_check.completed`, `argument.approved` (todos emitidos desde `EpisodeOrchestratorService`), `episode.pending_review`/`episode.requires_review` (emitidos desde `EpisodeStateService` — **gap encontrado en revisión y corregido**: `EpisodeEventsService` se construyó en una fase posterior a `EpisodeStateService` y nadie había vuelto a conectarlos; el contrato prometía estos 2 eventos pero no se emitían)
 
 ## 9. Transversal / infraestructura
 
-- [ ] Formato de error HTTP consistente `{ "error": { "code": string, "message": string } }` (api-contract.md §1)
-- [ ] Seed inicial de datos (`Agent` x5, config default de `Episode`)
+- [x] Formato de error HTTP consistente `{ "error": { "code": string, "message": string } }` (api-contract.md §1) — `HttpErrorFilter` global (`shared/http/`), registrado en `main.ts`. Resuelto como parte de `EpisodesModule` (primer módulo con superficie HTTP real).
+- [x] Seed inicial de datos (`Agent` x5) — ya estaba (`prisma/seed.ts`, sección 2). Config default de `Episode` vive como `@default` en `schema.prisma` (`maxLlmCalls`/`maxSearchQueries`/`maxTtsSegments`/`maxRevisionAttempts`/`openingRounds`/`rebuttalRounds`/`crossExaminationRounds`), no requiere seed aparte.
 - [ ] `README.md` sigue siendo el boilerplate default de NestJS — reemplazar por descripción real del proyecto cuando el resto avance
 - [ ] `04-development/testing-strategy.md` — mencionado como pendiente en `coding-rules.md` §9, escribir cuando haya al menos un módulo implementado
 - [ ] Decidir estrategia de seed/fixtures de `Evidence Base` para desarrollo local (research contra APIs reales cuesta $ — ver límites de Feature 2)

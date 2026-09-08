@@ -56,3 +56,8 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
+
+# DBs de test temporales (aisladas de dev.db — ver test/jest-e2e.setup.ts y
+# src/modules/episodes/episodes.integration.spec.ts)
+test/tmp-e2e.db*
+src/modules/episodes/tmp-episodes-integration.db*

@@ -106,6 +106,18 @@ enum AssetType {
   POST_X
 }
 
+// Inbox persistente que sobrevive a que el usuario no esté mirando la
+// pantalla del episodio — complementa (no reemplaza) al SSE de
+// EpisodeEventsService, que es en vivo/efímero (decision-log.md 2026-09-08,
+// #9). Sin APPROVED/CANCELLED a propósito: el diseño aprobado solo notifica
+// los 4 desenlaces donde el usuario necesita enterarse sin estar mirando.
+enum NotificationType {
+  EPISODE_COMPLETED
+  EPISODE_PENDING_REVIEW
+  EPISODE_REQUIRES_REVIEW
+  EPISODE_FAILED
+}
+
 // =========================================================================
 // 1. GESTIÓN DE TENDENCIAS E INVESTIGACIÓN
 // =========================================================================
@@ -303,10 +315,11 @@ model Episode {
   crossExaminationRounds Int @default(1)
 
   // Relaciones
-  usage        EpisodeUsage?
-  checkpoints  EpisodeCheckpoint[] // Historial completo, no se pisa (Feature 10)
-  assets       Asset[]
-  participants EpisodeParticipant[]
+  usage         EpisodeUsage?
+  checkpoints   EpisodeCheckpoint[] // Historial completo, no se pisa (Feature 10)
+  assets        Asset[]
+  participants  EpisodeParticipant[]
+  notifications Notification[]
 }
 
 // Quiénes debaten este episodio y con qué modelo LLM los interpreta —
@@ -374,6 +387,23 @@ model Asset {
   type      AssetType
   url       String // Ruta local o URL final del archivo renderizado/generado
   createdAt DateTime  @default(now())
+}
+
+// Acoplada 1:1 a Episode a propósito — no genérica/polimórfica. No hay hoy
+// ningún otro emisor de notificaciones en el sistema, generalizar sin un
+// caso concreto sería resolver un problema hipotético (decision-log.md
+// 2026-09-08, #9). Sin checkpointId: alcanza con episodeId + message para
+// el MVP, el frontend resuelve el detalle con GET /episodes/:id al click.
+model Notification {
+  id        String           @id @default(uuid())
+  episodeId String
+  episode   Episode          @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  message   String // Texto ya armado al crear la fila, no derivado en el front
+  readAt    DateTime? // null = no leída — mismo patrón que EpisodeCheckpoint (el más reciente es el vigente), sin flag booleano redundante
+  createdAt DateTime         @default(now())
+
+  @@index([episodeId, readAt])
 }
 
 // =========================================================================

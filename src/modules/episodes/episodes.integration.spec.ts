@@ -1,0 +1,318 @@
+import { execSync } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { Test, TestingModule } from "@nestjs/testing";
+import { ConfigModule } from "@nestjs/config";
+import { validateEnv } from "../../shared/config/env.schema";
+import { PrismaModule } from "../../shared/prisma/prisma.module";
+import { PrismaService } from "../../shared/prisma/prisma.service";
+import { ResearchService } from "../research/research.service";
+import { InsufficientEvidenceError } from "../research/research.errors";
+import { AgentsService } from "../agents/agents.service";
+import { FactCheckService } from "../fact-check/fact-check.service";
+import { DEBATER_PERSONAS, JUDGE } from "../../shared/personas/agents.personas";
+import { EpisodesModule } from "./episodes.module";
+import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
+import { EpisodeActionsService } from "./episode-actions.service";
+import { EpisodeRecoveryService } from "./episode-recovery.service";
+
+// coding-rules.md §9 — único módulo con tests de integración multi-módulo
+// (todo mockeado en el borde externo: Research/Agents/FactCheck llaman a
+// LLMs reales, se reemplazan enteros; DebateService/EpisodeStateService/
+// EpisodeParticipantsService/NotificationsService quedan REALES, corren
+// contra una DB sqlite de test real — son puramente de persistencia, sin
+// llamadas externas, así que probarlos "de mentira" no aportaría nada).
+//
+// DB de test: archivo sqlite temporal separado de dev.db, migrado una vez en
+// beforeAll con `prisma migrate deploy` (aplica las migraciones ya
+// existentes, no genera ninguna nueva) y borrado en afterAll. No se usa
+// `file::memory:` porque el adapter better-sqlite3 abre una conexión nueva
+// por PrismaClient — una DB en memoria no sobreviviría el $connect()
+// implícito de PrismaService si algo la reabriera.
+const TEST_DB_PATH = join(__dirname, "tmp-episodes-integration.db");
+const TEST_DB_URL = `file:${TEST_DB_PATH.replace(/\\/g, "/")}`;
+
+function fakeArgentAgent(content = "Contenido de prueba generado por el agente.") {
+  return {
+    argue: jest.fn().mockResolvedValue({ content }),
+    respond: jest.fn().mockResolvedValue({ content, respondsToId: "target-placeholder" }),
+    amend: jest.fn().mockResolvedValue({ content: `${content} (enmendado)` }),
+  };
+}
+
+async function seedAgents(prisma: PrismaService): Promise<void> {
+  for (const persona of Object.values(DEBATER_PERSONAS)) {
+    await prisma.agent.create({
+      data: { name: persona.displayName, role: persona.id, systemPrompt: "prompt de prueba", voiceId: "voice-test" },
+    });
+  }
+  await prisma.agent.create({
+    data: { name: JUDGE.displayName, role: JUDGE.id, systemPrompt: "prompt de prueba", voiceId: "voice-test" },
+  });
+}
+
+async function createTestEpisode(prisma: PrismaService, overrides: Partial<{ maxRevisionAttempts: number }> = {}) {
+  const topic = await prisma.topic.create({
+    data: { title: `Trend de test ${Date.now()}-${Math.random().toString(36).slice(2)}`, context: "contexto de prueba" },
+  });
+  const debate = await prisma.debate.create({ data: { topicId: topic.id } });
+  const episode = await prisma.episode.create({
+    data: {
+      debateId: debate.id,
+      title: topic.title,
+      openingRounds: 1,
+      rebuttalRounds: 0,
+      crossExaminationRounds: 0,
+      maxRevisionAttempts: 3,
+      ...overrides,
+    },
+  });
+  await prisma.episodeUsage.create({ data: { episodeId: episode.id } });
+  return { topic, debate, episode };
+}
+
+// Simula el efecto de persistencia real de ResearchService.research() (sin
+// pegarle a Tavily/Gemini) — necesario para que hasCompleteResearch() del
+// orquestador se comporte igual que con la implementación real, algo
+// imprescindible para probar de verdad los escenarios de resume/recovery
+// (que dependen de esa idempotencia).
+async function persistFakeResearch(prisma: PrismaService, topicId: string, count = 3) {
+  const session = await prisma.researchSession.create({
+    data: {
+      topicId,
+      rawOutput: "{}",
+      sources: {
+        create: Array.from({ length: count }, (_, i) => ({
+          title: `Fuente ${i}`,
+          url: `https://example.com/fuente-${topicId}-${i}`,
+          snippet: `Contenido de prueba ${i}`,
+          contentHash: `hash-${topicId}-${i}`,
+        })),
+      },
+    },
+    include: { sources: true },
+  });
+  await prisma.evidenceFact.createMany({
+    data: session.sources.map((s) => ({ sourceId: s.id, content: `Hecho extraído de ${s.title}` })),
+  });
+  return {
+    topic: "trend de prueba",
+    facts: session.sources.map((s) => ({ statement: `Hecho extraído de ${s.title}`, sourceId: s.id })),
+  };
+}
+
+describe("EpisodesModule (integración)", () => {
+  let moduleRef: TestingModule;
+  let prisma: PrismaService;
+  let orchestrator: EpisodeOrchestratorService;
+  let actions: EpisodeActionsService;
+  let recovery: EpisodeRecoveryService;
+
+  let researchMock: { createTopic: jest.Mock; research: jest.Mock };
+  let agentsMock: { createDebateAgent: jest.Mock; judge: jest.Mock };
+  let factCheckMock: { extractClaims: jest.Mock; check: jest.Mock; editorialReview: jest.Mock };
+
+  beforeAll(async () => {
+    if (existsSync(TEST_DB_PATH)) unlinkSync(TEST_DB_PATH);
+    process.env.DATABASE_URL = TEST_DB_URL;
+    process.env.GOOGLE_API_KEY ??= "test-google-api-key";
+    process.env.TAVILY_API_KEY ??= "test-tavily-api-key";
+
+    execSync("npx prisma migrate deploy", {
+      cwd: join(__dirname, "..", "..", ".."),
+      env: process.env,
+      stdio: "pipe",
+    });
+
+    researchMock = { createTopic: jest.fn(), research: jest.fn() };
+    agentsMock = { createDebateAgent: jest.fn(), judge: jest.fn() };
+    factCheckMock = { extractClaims: jest.fn(), check: jest.fn(), editorialReview: jest.fn() };
+
+    moduleRef = await Test.createTestingModule({
+      imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), PrismaModule, EpisodesModule],
+    })
+      .overrideProvider(ResearchService)
+      .useValue(researchMock)
+      .overrideProvider(AgentsService)
+      .useValue(agentsMock)
+      .overrideProvider(FactCheckService)
+      .useValue(factCheckMock)
+      .compile();
+
+    prisma = moduleRef.get(PrismaService);
+    orchestrator = moduleRef.get(EpisodeOrchestratorService);
+    actions = moduleRef.get(EpisodeActionsService);
+    recovery = moduleRef.get(EpisodeRecoveryService);
+
+    await seedAgents(prisma);
+  }, 60_000);
+
+  afterAll(async () => {
+    await moduleRef?.close();
+    try {
+      if (existsSync(TEST_DB_PATH)) unlinkSync(TEST_DB_PATH);
+    } catch {
+      // Puede quedar lockeado un instante en Windows tras cerrar la
+      // conexión — no crítico, es un archivo temporal de test.
+    }
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Defaults "todo pasa" — cada test override lo que necesite distinto.
+    agentsMock.createDebateAgent.mockImplementation(() => fakeArgentAgent());
+    agentsMock.judge.mockImplementation(async (context: { officialArguments: Array<{ agentId: string }> }) => ({
+      content: "Veredicto de prueba.",
+      winnerAgentId: context.officialArguments[0]?.agentId ?? null,
+    }));
+    factCheckMock.extractClaims.mockResolvedValue([
+      { id: "claim-test", argumentId: "arg-test", statement: "Una afirmación de prueba.", type: "FACTUAL" },
+    ]);
+    factCheckMock.check.mockResolvedValue({ veracity: "TRUE", analysis: "Verificado.", sourceIds: ["src-test"] });
+    factCheckMock.editorialReview.mockResolvedValue({ passed: true });
+  });
+
+  it("pipeline feliz completo: CREATED -> ... -> PENDING_REVIEW, con Argument OFFICIAL y Verdict persistidos", async () => {
+    const { topic, episode } = await createTestEpisode(prisma);
+    researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+
+    await orchestrator.runPipeline(episode.id);
+
+    const finalEpisode = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(finalEpisode.status).toBe("PENDING_REVIEW");
+
+    const officialArgs = await prisma.argument.findMany({
+      where: { debateRound: { debateId: episode.debateId }, status: "OFFICIAL" },
+    });
+    expect(officialArgs.length).toBeGreaterThan(0);
+
+    const verdict = await prisma.verdict.findUnique({ where: { debateId: episode.debateId } });
+    expect(verdict).not.toBeNull();
+
+    // Confirma que la research falsa quedó realmente persistida para este topic
+    // (no solo devuelta) — es la base de la idempotencia probada más abajo.
+    const factCount = await prisma.evidenceFact.count({ where: { source: { researchSession: { topicId: topic.id } } } });
+    expect(factCount).toBeGreaterThan(0);
+  });
+
+  it("InsufficientEvidenceError -> REQUIRES_HUMAN_REVIEW con checkpoint INSUFFICIENT_EVIDENCE", async () => {
+    const { episode } = await createTestEpisode(prisma);
+    researchMock.research.mockRejectedValue(new InsufficientEvidenceError(1));
+
+    await orchestrator.runPipeline(episode.id);
+
+    const finalEpisode = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(finalEpisode.status).toBe("REQUIRES_HUMAN_REVIEW");
+
+    const checkpoint = await prisma.episodeCheckpoint.findFirst({
+      where: { episodeId: episode.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(checkpoint?.reason).toBe("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("MAX_REVISIONS_EXCEEDED: fact-check falla siempre, agota maxRevisionAttempts -> REQUIRES_HUMAN_REVIEW", async () => {
+    const { episode } = await createTestEpisode(prisma, { maxRevisionAttempts: 1 });
+    researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+    factCheckMock.check.mockResolvedValue({ veracity: "FALSE", analysis: "Dato incorrecto.", sourceIds: [] });
+
+    await orchestrator.runPipeline(episode.id);
+
+    const finalEpisode = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(finalEpisode.status).toBe("REQUIRES_HUMAN_REVIEW");
+
+    const checkpoint = await prisma.episodeCheckpoint.findFirst({
+      where: { episodeId: episode.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(checkpoint?.reason).toBe("MAX_REVISIONS_EXCEEDED");
+  });
+
+  it("resume exitoso desde INSUFFICIENT_EVIDENCE: sale de REQUIRES_HUMAN_REVIEW y el pipeline avanza", async () => {
+    const { episode } = await createTestEpisode(prisma);
+    researchMock.research.mockRejectedValueOnce(new InsufficientEvidenceError(1));
+
+    await orchestrator.runPipeline(episode.id);
+    let current = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(current.status).toBe("REQUIRES_HUMAN_REVIEW");
+
+    // Segunda llamada (post-resume, con manualSources): esta vez research()
+    // "encuentra" evidencia suficiente.
+    researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+
+    const runPipelineSpy = jest.spyOn(orchestrator, "runPipeline");
+    await actions.resume(episode.id, { manualSources: [{ url: "https://x.com", title: "t", snippet: "s" }] });
+    // resume() dispara runPipeline fire-and-forget — esperamos esa misma
+    // promesa (capturada vía spy) para no leer estado a mitad de camino.
+    await runPipelineSpy.mock.results[runPipelineSpy.mock.results.length - 1].value;
+
+    current = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(current.status).not.toBe("REQUIRES_HUMAN_REVIEW");
+  });
+
+  it("resume con la misma causa dos veces -> FAILED", async () => {
+    const { episode } = await createTestEpisode(prisma);
+    // Sigue fallando incluso con manualSources — simula que las fuentes
+    // manuales tampoco alcanzaron el mínimo.
+    researchMock.research.mockRejectedValue(new InsufficientEvidenceError(1));
+
+    await orchestrator.runPipeline(episode.id);
+    let current = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(current.status).toBe("REQUIRES_HUMAN_REVIEW");
+
+    const runPipelineSpy = jest.spyOn(orchestrator, "runPipeline");
+    await actions.resume(episode.id, { manualSources: [{ url: "https://x.com", title: "t", snippet: "s" }] });
+    await runPipelineSpy.mock.results[runPipelineSpy.mock.results.length - 1].value;
+
+    current = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(current.status).toBe("FAILED");
+
+    const checkpoints = await prisma.episodeCheckpoint.findMany({
+      where: { episodeId: episode.id },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(checkpoints).toHaveLength(2);
+    expect(checkpoints.every((c) => c.reason === "INSUFFICIENT_EVIDENCE")).toBe(true);
+  });
+
+  // Escenario más liviano a propósito: no reconstruye un episodio DEBATING
+  // con turnos parcialmente completados (requeriría fijar manualmente
+  // Argument/DebateRound intermedios) — alcanza con confirmar que
+  // EpisodeRecoveryService detecta el episodio "stuck" y que runPipeline()
+  // reusado para recovery avanza sin romperse (era exactamente el bug
+  // encontrado en revisión: runResearchPhase reventaba con
+  // InvalidEpisodeTransitionError al ejecutarse sobre un episodio ya en
+  // DEBATING). Research/participantes ya completos de antemano para que la
+  // fase de research sea un no-op idempotente real, igual que en producción.
+  it("recovery post-caída: retoma un episodio DEBATING sin romper (regresión del bug de runResearchPhase)", async () => {
+    const { topic, debate, episode } = await createTestEpisode(prisma);
+    await persistFakeResearch(prisma, topic.id);
+
+    const [personaA, personaB] = Object.values(DEBATER_PERSONAS);
+    const agentA = await prisma.agent.findFirstOrThrow({ where: { role: personaA.id } });
+    const agentB = await prisma.agent.findFirstOrThrow({ where: { role: personaB.id } });
+    const judgeAgent = await prisma.agent.findFirstOrThrow({ where: { role: JUDGE.id } });
+    await prisma.episodeParticipant.createMany({
+      data: [
+        { episodeId: episode.id, agentId: agentA.id, modelProvider: "GOOGLE", isJudge: false },
+        { episodeId: episode.id, agentId: agentB.id, modelProvider: "GOOGLE", isJudge: false },
+        { episodeId: episode.id, agentId: judgeAgent.id, modelProvider: "GOOGLE", isJudge: true },
+      ],
+    });
+    await prisma.episode.update({ where: { id: episode.id }, data: { status: "DEBATING" } });
+
+    const runPipelineSpy = jest.spyOn(orchestrator, "runPipeline");
+    await recovery.onApplicationBootstrap();
+
+    const call = runPipelineSpy.mock.calls.find(([id]) => id === episode.id);
+    expect(call).toBeDefined();
+    await runPipelineSpy.mock.results[runPipelineSpy.mock.calls.indexOf(call!)].value;
+
+    const finalEpisode = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    // No exigimos llegar hasta PENDING_REVIEW acá — el punto de este test es
+    // que el pipeline avanzó de DEBATING sin tirar InvalidEpisodeTransitionError,
+    // no repetir la cobertura completa del pipeline feliz de más arriba.
+    expect(finalEpisode.status).not.toBe("DEBATING");
+    expect(debate.id).toBeTruthy(); // silencia unused var, referenciado por claridad del setup
+  });
+});

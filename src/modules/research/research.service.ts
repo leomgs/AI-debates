@@ -68,19 +68,33 @@ export class ResearchService {
   // research() NO es el research(topic: string) del contrato DebateAgent
   // original (se sacó de ahí — ver agents.contracts.ts) — toma topicId
   // porque ResearchSession.topicId es obligatorio en schema.prisma, y Topic
-  // le pertenece a este módulo (architecture.md §6). Pendiente de validar
-  // cuando se construya EpisodesModule: quién crea el Topic y en qué paso
-  // exacto del pipeline se le pasa el id acá.
-  async research(topicId: string): Promise<ResearchOutput> {
+  // le pertenece a este módulo (architecture.md §6). Resuelto: EpisodesModule
+  // crea el Topic en EpisodesService.createEpisode(), antes de llamar acá.
+  //
+  // manualSources (opcional, aditivo/retrocompatible): usado por
+  // EpisodesModule al reanudar un episodio en REQUIRES_HUMAN_REVIEW con
+  // reason INSUFFICIENT_EVIDENCE (api-contract.md §3, acción `resume`) — el
+  // curador inyecta fuentes manuales para superar el mínimo. research() tira
+  // la excepción ANTES de persistir nada, así que no hay fila donde
+  // "agregarlas" después: hace falta volver a correr research() completo
+  // incluyéndolas en el pool desde el arranque.
+  async research(
+    topicId: string,
+    manualSources?: Array<{ url: string; title: string; snippet: string }>
+  ): Promise<ResearchOutput> {
     const topic = await this.prisma.topic.findUniqueOrThrow({ where: { id: topicId } });
 
     const rawResults = await this.tavily.search(topic.title);
+    // Mismo shape {title, url, content} que TavilySearchResult — las fuentes
+    // manuales entran al mismo pool y pasan por el mismo dedup/hash de abajo,
+    // sin lógica separada.
+    const manualResults = (manualSources ?? []).map((s) => ({ title: s.title, url: s.url, content: s.snippet }));
 
     // Dedup por contentHash — Feature 1: "fuentes válidas con hashes de
     // contenido distintos", no simplemente >=3 resultados devueltos.
     const seenHashes = new Set<string>();
     const validSources: Array<{ title: string; url: string; snippet: string; contentHash: string }> = [];
-    for (const r of rawResults) {
+    for (const r of [...rawResults, ...manualResults]) {
       const contentHash = createHash("sha256").update(r.content).digest("hex");
       if (seenHashes.has(contentHash)) continue;
       seenHashes.add(contentHash);

@@ -130,6 +130,24 @@ describe('ResearchService', () => {
       expect(result.facts).toHaveLength(2);
     });
 
+    it('suma manualSources al pool antes del chequeo de mínimo — no lanza InsufficientEvidenceError si alcanzan (resume de INSUFFICIENT_EVIDENCE)', async () => {
+      prisma.topic.findUniqueOrThrow.mockResolvedValue({ id: TOPIC_ID, title: 'Un trend', context: 'contexto' });
+      tavily.search.mockResolvedValue([{ title: 'A', url: 'https://a.com', content: 'contenido A' }]); // solo 1, insuficiente por sí sola
+      prisma.researchSession.create.mockResolvedValue({
+        id: 'session-1',
+        sources: [persistedSource(SOURCE_A, 'contenido A'), persistedSource(SOURCE_B, 'manual B'), persistedSource(SOURCE_C, 'manual C')],
+      });
+      mockGenerateObject.mockResolvedValue({ object: { topic: 'Un trend', facts: [{ statement: 'Un hecho', sourceId: SOURCE_A }] } });
+
+      await service.research(TOPIC_ID, [
+        { url: 'https://manual-b.com', title: 'Manual B', snippet: 'manual B' },
+        { url: 'https://manual-c.com', title: 'Manual C', snippet: 'manual C' },
+      ]);
+
+      const createCall = prisma.researchSession.create.mock.calls[0][0];
+      expect(createCall.data.sources.create).toHaveLength(3); // 1 de Tavily + 2 manuales = 3, supera el mínimo
+    });
+
     it('agota los reintentos y rechaza cuando la extracción nunca matchea ResearchOutputSchema (coding-rules.md §3)', async () => {
       prisma.topic.findUniqueOrThrow.mockResolvedValue({ id: TOPIC_ID, title: 'Un trend', context: 'contexto' });
       tavily.search.mockResolvedValue([

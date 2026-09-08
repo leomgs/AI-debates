@@ -9,6 +9,7 @@ import { AgentsModule } from './modules/agents/agents.module';
 import { ResearchModule } from './modules/research/research.module';
 import { DebateModule } from './modules/debate/debate.module';
 import { FactCheckModule } from './modules/fact-check/fact-check.module';
+import { EpisodesModule } from './modules/episodes/episodes.module';
 
 @Module({
   imports: [
@@ -19,6 +20,10 @@ import { FactCheckModule } from './modules/fact-check/fact-check.module';
     ResearchModule,
     DebateModule,
     FactCheckModule,
+    // NotificationsModule llega transitivo vía EpisodesModule (que lo
+    // importa para inyectar NotificationsService en EpisodeStateService) —
+    // no hace falta importarlo acá aparte.
+    EpisodesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
