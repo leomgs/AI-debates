@@ -2,7 +2,7 @@
 
 Tracking del estado de implementación. No repite el diseño (eso vive en `architecture.md` / `features.md` / `api-contract.md` / `coding-rules.md`) — solo lista qué está hecho y qué falta, módulo por módulo, para saber en qué seguir sin releer todo el proyecto.
 
-Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-07.
+Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-08.
 
 ## 0. Fundacional (bloquea todo lo demás) — COMPLETA
 
@@ -39,7 +39,7 @@ Entidades: `Topic`, `ResearchSession`, `Source`, `EvidenceFact`.
 - [ ] Servicio de extracción de `EvidenceFact` usando `ResearchOutputSchema` (`generateObject`, ya definido en contracts)
 - [ ] Tests unitarios con LLM/proveedor de búsqueda mockeado (coding-rules.md §9)
 
-## 2. Agents (`modules/agents/`) — código funcional, falta cobertura de tests
+## 2. Agents (`modules/agents/`) — COMPLETA (código + revisión de diseño + tests)
 
 Entidad: `Agent`. Implementa `DebateAgent` (contrato ya definido).
 
@@ -50,7 +50,10 @@ Entidad: `Agent`. Implementa `DebateAgent` (contrato ya definido).
 - [x] Wiring de `buildDebaterSystemPrompt` / `buildJudgeSystemPrompt` al armar el prompt real
 - [x] Política Cockatiel alrededor de las llamadas a LLM (coding-rules.md §4) — `.parse()` de Zod **dentro** del bloque reintentado
 - [x] Seed de los 4 `Agent` (Analyst/Contrarian/Diplomat/Provocateur) + 1 `Agent` Judge en la base (`prisma/seed.ts`, wireado en `prisma.config.ts` → `migrations.seed`; correr con `npm run db:seed`. Verificado idempotente — dos corridas seguidas dejan 5 filas, no duplica, vía `findFirst`+`create`/`update` porque `Agent.name` no tiene `@unique` en el schema)
-- [ ] Tests unitarios con LLM mockeado — **pendiente a propósito**: el usuario pidió no escribirlos hasta revisar y aprobar el resto de los cambios
+- [x] Tests unitarios con LLM mockeado (`agents.service.spec.ts`, 7 tests) — `generateObject` de `ai` mockeado en el borde del SDK (jest-testing skill), `ModelProviderFactory` mockeado vía `TestingModule`. Cubre: wiring de `createDebateAgent` con el provider, `argue`/`respond`/`amend` (las dos ramas de schema) y `judge` en el happy path (system prompt correcto por persona/roundType, prompt con los datos esperados), y un caso de resiliencia (Cockatiel agota reintentos y rechaza cuando el output nunca matchea el schema — `maxAttempts: 3` = 4 invocaciones totales, 1 inicial + 3 reintentos)
+  - Nota de diseño para el próximo módulo que agregue tests: la `policy` de Cockatiel es una instancia a nivel de módulo (no exportada, no reseteable) compartida por todos los tests del archivo — un test que fuerza fallos consume el contador del `ConsecutiveBreaker`. Con un solo test de fallo al final del archivo no llega a abrir el circuito (4 de 5), pero si se agregan más casos de fallo hay que vigilar el orden o resetear el módulo entre tests (`jest.resetModules()`)
+  - Fix de infraestructura necesario para que corrieran: `cockatiel` también se publica solo como ESM (mismo problema que `@nestjs/config`, tasks.md línea 26) — se agregó a `transformIgnorePatterns` en `package.json` y `test/jest-e2e.json`
+  - **Bug real encontrado corriendo el e2e** (no relacionado a los tests nuevos en sí): `AiModule` (`modules/ai/ai.module.ts`) tenía el comentario "Global, igual que PrismaModule" pero le faltaba el decorador `@Global()` — `AgentsService` no podía resolver `ModelProviderFactory` al bootstrapear `AppModule` completo (`test/app.e2e-spec.ts` fallaba con `Nest can't resolve dependencies of the AgentsService`). Corregido agregando `@Global()`.
 
 **⚠️ PENDIENTE DE REVISIÓN DEL USUARIO — decisiones de diseño no obvias tomadas al implementar (2026-09-07)**, no pedidas explícitamente palabra por palabra en el checklist original, quedan a validar en la próxima sesión antes de seguir con Fase 1 (Research):
 - [x] **Revisado 2026-09-08**: `research()` se sacó por completo del contrato `DebateAgent` (`shared/contracts/agents.contracts.ts`) — no era un `Omit` parcial, se eliminó la firma. Motivo (architecture.md §4/§7.1): `EpisodesModule.runResearch()` llama a `ResearchModule.research(topic)` **una sola vez por episodio**, antes de que arranque el loop de rondas, y arma la Evidence Base que después viaja dentro de `DebateContext.evidenceBase` a cada `argue()`/`respond()`/`amend()`. Ningún `DebateAgent` busca evidencia nueva durante el debate — solo la lee. Fact-check (`FactCheckModule`) es un rol aparte: no busca evidencia, contrasta lo que el agente ya escribió contra la Evidence Base ya obtenida. `AgentsModule.DebaterAgent` ahora es simplemente `= DebateAgent` (ya no hace falta `Omit`).

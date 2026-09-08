@@ -77,7 +77,7 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!(@nestjs/config|dotenv-expand|es-toolkit)/)"
+      "node_modules/(?!(@nestjs/config|dotenv-expand|es-toolkit|cockatiel)/)"
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
