@@ -3,7 +3,7 @@ import { generateObject } from 'ai';
 import type { LanguageModel } from 'ai';
 import {
   retry,
-  handleAll,
+  handleWhen,
   ExponentialBackoff,
   circuitBreaker,
   ConsecutiveBreaker,
@@ -11,6 +11,8 @@ import {
 } from 'cockatiel';
 import { ModelProvider } from '@prisma/client';
 import { ModelProviderFactory } from '../ai/model-provider.factory';
+import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
+import { DailyQuotaExceededError } from '../ai/ai.errors';
 import {
   ArgumentDraft,
   ArgumentDraftSchema,
@@ -31,12 +33,17 @@ import {
 } from '../../shared/personas/agents.personas';
 
 // Política propia de AgentsModule (coding-rules.md §4) — no se comparte con
-// research/tts, que fallan distinto.
-const retryPolicy = retry(handleAll, {
+// research/tts, que fallan distinto. handleWhen (no handleAll) excluye
+// DailyQuotaExceededError — esa excepción la tira LlmRateLimiterService de
+// forma deliberada (RPD agotado, fail-fast) y reintentarla en segundos no la
+// resuelve; se aplica el mismo criterio al breaker por consistencia
+// (decision-log.md 2026-09-08, #8).
+const notDailyQuotaExceeded = (err: unknown) => !(err instanceof DailyQuotaExceededError);
+const retryPolicy = retry(handleWhen(notDailyQuotaExceeded), {
   maxAttempts: 3,
   backoff: new ExponentialBackoff(),
 });
-const breakerPolicy = circuitBreaker(handleAll, {
+const breakerPolicy = circuitBreaker(handleWhen(notDailyQuotaExceeded), {
   halfOpenAfter: 10_000,
   breaker: new ConsecutiveBreaker(5),
 });
@@ -126,6 +133,8 @@ class DebaterAgentImpl implements DebaterAgent {
   constructor(
     private readonly persona: DebaterPersona,
     private readonly model: LanguageModel,
+    private readonly provider: ModelProvider,
+    private readonly rateLimiter: LlmRateLimiterService,
   ) {}
 
   async argue(
@@ -134,6 +143,7 @@ class DebaterAgentImpl implements DebaterAgent {
   ): Promise<ArgumentDraft> {
     const system = buildDebaterSystemPrompt(this.persona, roundType);
     return policy.execute(async () => {
+      await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
         model: this.model,
         schema: ArgumentDraftSchema,
@@ -150,6 +160,7 @@ class DebaterAgentImpl implements DebaterAgent {
   ): Promise<CrossExaminationDraft> {
     const system = buildDebaterSystemPrompt(this.persona, 'CROSS_EXAMINATION');
     return policy.execute(async () => {
+      await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
         model: this.model,
         schema: CrossExaminationDraftSchema,
@@ -172,6 +183,7 @@ class DebaterAgentImpl implements DebaterAgent {
         ? CrossExaminationDraftSchema
         : ArgumentDraftSchema;
     return policy.execute(async () => {
+      await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
         model: this.model,
         schema,
@@ -185,7 +197,10 @@ class DebaterAgentImpl implements DebaterAgent {
 
 @Injectable()
 export class AgentsService {
-  constructor(private readonly modelProviderFactory: ModelProviderFactory) {}
+  constructor(
+    private readonly modelProviderFactory: ModelProviderFactory,
+    private readonly rateLimiter: LlmRateLimiterService,
+  ) {}
 
   // Factory: EpisodesModule (o quien orqueste el debate) la llama una vez por
   // EpisodeParticipant al arrancar el episodio, y reusa la misma instancia en
@@ -193,7 +208,7 @@ export class AgentsService {
   // llamada, no queda fijo en la instancia).
   createDebateAgent(persona: DebaterPersona, provider: ModelProvider): DebaterAgent {
     const model = this.modelProviderFactory.resolve(provider);
-    return new DebaterAgentImpl(persona, model);
+    return new DebaterAgentImpl(persona, model, provider, this.rateLimiter);
   }
 
   // Judge no es un DebaterPersona ni sigue el ciclo argue/respond/amend — es
@@ -205,6 +220,7 @@ export class AgentsService {
     const model = this.modelProviderFactory.resolve(provider);
     const system = buildJudgeSystemPrompt(JUDGE);
     return policy.execute(async () => {
+      await this.rateLimiter.acquire(provider);
       const result = await generateObject({
         model,
         schema: VerdictOutputSchema,

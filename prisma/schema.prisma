@@ -38,6 +38,10 @@ enum CheckpointReason {
   USAGE_LIMIT_EXCEEDED
   MAX_REVISIONS_EXCEEDED
   VALIDATION_INCONSISTENCY
+  // Cuota RPD del provider de LLM agotada (LlmRateLimiterService) — distinto
+  // de USAGE_LIMIT_EXCEEDED, que es el presupuesto propio del episodio
+  // (EpisodeUsage vs maxLlmCalls), no la cuota externa del provider.
+  PROVIDER_QUOTA_EXCEEDED
 }
 
 // Extensible a propósito: nuevos tipos de ronda = nuevos formatos de debate
@@ -370,4 +374,20 @@ model Asset {
   type      AssetType
   url       String // Ruta local o URL final del archivo renderizado/generado
   createdAt DateTime  @default(now())
+}
+
+// =========================================================================
+// 5. INFRAESTRUCTURA DE LLM (rate limiting)
+// =========================================================================
+
+// Una fila por llamada real a un LLM, usada por LlmRateLimiterService para
+// calcular RPM/RPD como ventana deslizante (COUNT sobre este log), no como
+// contadores agregados con reset explícito — evita el punto ciego de un
+// burst en el borde de dos ventanas fijas (decision-log.md 2026-09-08, #8).
+model LlmRequestLog {
+  id          String        @id @default(uuid())
+  provider    ModelProvider
+  requestedAt DateTime      @default(now())
+
+  @@index([provider, requestedAt])
 }

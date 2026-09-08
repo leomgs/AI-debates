@@ -3,6 +3,7 @@ import { generateObject } from 'ai';
 import type { LanguageModel } from 'ai';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { ModelProviderFactory } from '../ai/model-provider.factory';
+import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
 import { TavilyProvider } from './tavily.provider';
 import { ResearchService } from './research.service';
 import { InsufficientEvidenceError } from './research.errors';
@@ -40,6 +41,7 @@ describe('ResearchService', () => {
     };
     tavily = { search: jest.fn() };
     modelProviderFactory = { resolve: jest.fn().mockReturnValue(FAKE_MODEL) };
+    const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -47,6 +49,7 @@ describe('ResearchService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: TavilyProvider, useValue: tavily },
         { provide: ModelProviderFactory, useValue: modelProviderFactory },
+        { provide: LlmRateLimiterService, useValue: rateLimiter },
       ],
     }).compile();
 

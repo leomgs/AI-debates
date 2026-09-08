@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { generateObject } from "ai";
-import { retry, handleAll, ExponentialBackoff, circuitBreaker, ConsecutiveBreaker, wrap } from "cockatiel";
+import { retry, handleWhen, ExponentialBackoff, circuitBreaker, ConsecutiveBreaker, wrap } from "cockatiel";
 import { Claim, ModelProvider } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ModelProviderFactory } from "../ai/model-provider.factory";
+import { LlmRateLimiterService } from "../ai/llm-rate-limiter.service";
+import { DailyQuotaExceededError } from "../ai/ai.errors";
 import {
   ClaimExtractionOutputSchema,
   FactCheckOutput,
@@ -16,9 +18,13 @@ import { DebaterPersona } from "../../shared/personas/agents.personas";
 
 // Política propia de FactCheckModule (coding-rules.md §4) — los tres métodos
 // llaman a generateObject (misma clase de integración, igual que
-// AgentsModule), así que comparten una sola instancia.
-const retryPolicy = retry(handleAll, { maxAttempts: 3, backoff: new ExponentialBackoff() });
-const breakerPolicy = circuitBreaker(handleAll, {
+// AgentsModule), así que comparten una sola instancia. handleWhen (no
+// handleAll) excluye DailyQuotaExceededError — la tira LlmRateLimiterService
+// de forma deliberada (RPD agotado, fail-fast) y reintentarla en segundos no
+// la resuelve (decision-log.md 2026-09-08, #8).
+const notDailyQuotaExceeded = (err: unknown) => !(err instanceof DailyQuotaExceededError);
+const retryPolicy = retry(handleWhen(notDailyQuotaExceeded), { maxAttempts: 3, backoff: new ExponentialBackoff() });
+const breakerPolicy = circuitBreaker(handleWhen(notDailyQuotaExceeded), {
   halfOpenAfter: 10_000,
   breaker: new ConsecutiveBreaker(5),
 });
@@ -74,7 +80,8 @@ function buildEditorialReviewPrompt(statement: string): string {
 export class FactCheckService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly modelProviderFactory: ModelProviderFactory
+    private readonly modelProviderFactory: ModelProviderFactory,
+    private readonly rateLimiter: LlmRateLimiterService
   ) {}
 
   // Feature 3: segmenta el DRAFT en claims discretos y los clasifica. Persiste
@@ -83,6 +90,7 @@ export class FactCheckService {
   async extractClaims(argumentId: string, content: string, provider: ModelProvider): Promise<Claim[]> {
     const model = this.modelProviderFactory.resolve(provider);
     const extraction = await policy.execute(async () => {
+      await this.rateLimiter.acquire(provider);
       const result = await generateObject({
         model,
         schema: ClaimExtractionOutputSchema,
@@ -103,6 +111,7 @@ export class FactCheckService {
   async check(claim: Claim, evidenceBase: DebateContext["evidenceBase"], provider: ModelProvider): Promise<FactCheckOutput> {
     const model = this.modelProviderFactory.resolve(provider);
     const output = await policy.execute(async () => {
+      await this.rateLimiter.acquire(provider);
       const result = await generateObject({
         model,
         schema: FactCheckOutputSchema,
@@ -130,6 +139,7 @@ export class FactCheckService {
   async editorialReview(claim: Claim, persona: DebaterPersona, provider: ModelProvider): Promise<EditorialReviewOutput> {
     const model = this.modelProviderFactory.resolve(provider);
     return policy.execute(async () => {
+      await this.rateLimiter.acquire(provider);
       const result = await generateObject({
         model,
         schema: EditorialReviewOutputSchema,

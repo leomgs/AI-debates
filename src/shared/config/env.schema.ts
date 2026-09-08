@@ -23,6 +23,13 @@ export const EnvSchema = z.object({
   // arrancar el proceso sin poder ejecutar una research real.
   TAVILY_API_KEY: z.string().min(1),
 
+  // Límites de free tier de Google para LlmRateLimiterService (decision-log.md
+  // 2026-09-08, #8) — opcionales con default al valor vigente hoy. Ya
+  // cambiaron una vez en la historia del proyecto (ver ModelProviderFactory),
+  // así que conviene poder ajustarlos sin recompilar.
+  GOOGLE_RPM_LIMIT: z.coerce.number().default(15),
+  GOOGLE_RPD_LIMIT: z.coerce.number().default(500),
+
   PORT: z.coerce.number().default(3000),
 });
 

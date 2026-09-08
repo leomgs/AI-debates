@@ -1,19 +1,25 @@
 import { Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { generateObject } from "ai";
-import { retry, handleAll, ExponentialBackoff, circuitBreaker, ConsecutiveBreaker, wrap } from "cockatiel";
+import { retry, handleWhen, ExponentialBackoff, circuitBreaker, ConsecutiveBreaker, wrap } from "cockatiel";
 import { Topic, Source } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ModelProviderFactory } from "../ai/model-provider.factory";
+import { LlmRateLimiterService } from "../ai/llm-rate-limiter.service";
+import { DailyQuotaExceededError } from "../ai/ai.errors";
 import { TavilyProvider } from "./tavily.provider";
 import { InsufficientEvidenceError } from "./research.errors";
 import { ResearchOutput, ResearchOutputSchema } from "../../shared/contracts/agents.contracts";
 
 // Política propia de ResearchService (coding-rules.md §4) — la llamada al
 // LLM de extracción falla distinto a la búsqueda web de TavilyProvider
-// (rate limits/output mal formado vs. rate limits/timeouts HTTP).
-const retryPolicy = retry(handleAll, { maxAttempts: 3, backoff: new ExponentialBackoff() });
-const breakerPolicy = circuitBreaker(handleAll, {
+// (rate limits/output mal formado vs. rate limits/timeouts HTTP). handleWhen
+// (no handleAll) excluye DailyQuotaExceededError — la tira
+// LlmRateLimiterService de forma deliberada (RPD agotado, fail-fast) y
+// reintentarla en segundos no la resuelve (decision-log.md 2026-09-08, #8).
+const notDailyQuotaExceeded = (err: unknown) => !(err instanceof DailyQuotaExceededError);
+const retryPolicy = retry(handleWhen(notDailyQuotaExceeded), { maxAttempts: 3, backoff: new ExponentialBackoff() });
+const breakerPolicy = circuitBreaker(handleWhen(notDailyQuotaExceeded), {
   halfOpenAfter: 10_000,
   breaker: new ConsecutiveBreaker(5),
 });
@@ -51,7 +57,8 @@ export class ResearchService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tavily: TavilyProvider,
-    private readonly modelProviderFactory: ModelProviderFactory
+    private readonly modelProviderFactory: ModelProviderFactory,
+    private readonly rateLimiter: LlmRateLimiterService
   ) {}
 
   async createTopic(title: string, context: string): Promise<Topic> {
@@ -95,6 +102,7 @@ export class ResearchService {
 
     const model = this.modelProviderFactory.resolve(EXTRACTION_PROVIDER);
     const extraction = await policy.execute(async () => {
+      await this.rateLimiter.acquire(EXTRACTION_PROVIDER);
       const result = await generateObject({
         model,
         schema: ResearchOutputSchema,

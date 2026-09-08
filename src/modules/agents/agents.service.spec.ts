@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { generateObject } from 'ai';
 import type { LanguageModel } from 'ai';
 import { ModelProviderFactory } from '../ai/model-provider.factory';
+import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
 import { AgentsService } from './agents.service';
 import { DebateContext } from '../../shared/contracts/agents.contracts';
 import { ANALYST, JUDGE, buildDebaterSystemPrompt, buildJudgeSystemPrompt } from '../../shared/personas/agents.personas';
@@ -38,9 +39,14 @@ describe('AgentsService', () => {
   beforeEach(async () => {
     mockGenerateObject.mockReset();
     modelProviderFactory = { resolve: jest.fn().mockReturnValue(FAKE_MODEL) };
+    const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AgentsService, { provide: ModelProviderFactory, useValue: modelProviderFactory }],
+      providers: [
+        AgentsService,
+        { provide: ModelProviderFactory, useValue: modelProviderFactory },
+        { provide: LlmRateLimiterService, useValue: rateLimiter },
+      ],
     }).compile();
 
     service = module.get(AgentsService);

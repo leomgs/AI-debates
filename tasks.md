@@ -16,6 +16,8 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 
 **Nuevo esta sesión**: se creó `decision-log.md` — bitácora cronológica de decisiones no obvias tomadas a lo largo del proyecto (con el proceso de cómo se llegó a cada una, no solo el resultado), pensada para servir de insumo a un paper que el usuario está planeando escribir sobre el desarrollo de este proyecto. Mantenerla actualizada en cada decisión de ese tipo, no solo al final.
 
+**También esta sesión**: se diseñó (con el agente de arquitectura) un rate limiter proactivo para llamadas a LLM y un sistema de notificaciones internas — ver `decision-log.md` entradas 8 y 9 para el proceso completo. El rate limiter se implementa en esta misma sesión (sección 0.1 de este archivo, más abajo); las notificaciones quedan documentadas como diseño pendiente en la sección 7, porque dependen de `EpisodesModule`.
+
 ## 0. Fundacional (bloquea todo lo demás) — COMPLETA
 
 - [x] `schema.prisma` completo (todas las entidades y enums de `architecture.md` sección 6)
@@ -42,6 +44,20 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 - [x] **`scripts/smoke-test-argument.ts`** (2026-09-08, no automatizado — no es un `*.spec.ts`, corre contra APIs reales y gasta créditos): encadena `ResearchModule` → `DebateModule` → `AgentsModule` con Tavily + Gemini reales para validar el tramo "research → primer argumento OPENING" antes de que exista `EpisodesModule`. A propósito no pasa por `FactCheckModule` todavía. Correr con `npm run smoke:argument` (requiere `GOOGLE_API_KEY`/`TAVILY_API_KEY` reales en `.env`).
   - **Bug real encontrado y corregido corriendo el smoke test contra la API real**: el modelo hardcodeado en `ModelProviderFactory` para GOOGLE, `gemini-2.0-flash`, fue dado de baja por Google (404 "no longer available"). Se probó `gemini-2.5-flash` (también 404, "no longer available to new users") y `gemini-3.6-flash` (funcionó — confirmado end-to-end con research real de 9 facts + argumento OPENING generado y persistido como OFFICIAL). Revisando el dashboard de rate limits de AI Studio con el usuario se vio que TODOS los "Flash" normales de cualquier generación (3/3.5/3.6/3.7/3.8) están topeados igual en este free tier — 5 RPM / 20 RPD — mientras que las variantes "Flash Lite" tienen 15 RPM / 500 RPD. Se cambió el modelo final a **`gemini-3.5-flash-lite`** (la Lite más reciente disponible) para tener margen real de desarrollo, a cambio de algo menos de calidad/razonamiento — aceptable para este caso de uso.
   - Evaluado y descartado: "Gemini 3 Flash Live" (aparece con RPM/RPD "ilimitado" en el dashboard) — es un producto distinto, la Live API (WebSocket, voz/video en tiempo real), no compatible con `generateContent`/`generateObject` de structured output que usamos.
+
+## 0.1. Rate limiting proactivo de llamadas a LLM (`modules/ai/`) — COMPLETA (código + tests, 2026-09-08)
+
+Motivado por el free tier ajustado de Google (15 RPM / 500 RPD en `gemini-3.5-flash-lite`, ver sección 0) y porque ese límite es por API key, no por módulo — `ResearchModule`/`AgentsModule`/`FactCheckModule` comparten el mismo cupo aunque cada uno tenga su propia policy de Cockatiel. Diseño completo con el proceso de cómo se llegó a cada decisión en `decision-log.md` entrada 8.
+
+- [x] `prisma/schema.prisma`: tabla `LlmRequestLog` (`provider`, `requestedAt`, índice `[provider, requestedAt]`) + `CheckpointReason.PROVIDER_QUOTA_EXCEEDED` nuevo (distinto de `USAGE_LIMIT_EXCEEDED` — ese es presupuesto propio del episodio, este es cuota del provider). Migración `prisma/migrations/20260908190551_add_llm_rate_limiting/` aplicada, cliente regenerado
+- [x] `env.schema.ts`: `GOOGLE_RPM_LIMIT`/`GOOGLE_RPD_LIMIT` opcionales (`z.coerce.number()`), default 15/500. Sincronizado `.env.example`
+- [x] `modules/ai/ai.errors.ts`: `DailyQuotaExceededError` (mismo patrón que `InsufficientEvidenceError`) + `RateLimitWaitExceededError` (nueva, no estaba en el checklist original — cap defensivo de espera de RPM superado, señal de bug/límite mal configurado, no un caso esperado)
+- [x] `modules/ai/llm-rate-limiter.service.ts`: `acquire(provider): Promise<void>` — RPD (ventana deslizante 24hs) se chequea primero y falla rápido con `DailyQuotaExceededError`; RPM (ventana deslizante 60s) encola y espera con cap defensivo de 90s (`RateLimitWaitExceededError` si se supera). Mapa `PROVIDER_RATE_LIMITS` en código: solo GOOGLE configurado (lee de `ConfigService`), resto `null` (no-op, solo loguea la fila por observabilidad, sin chequeo de cupo)
+- [x] Mutex en memoria por `ModelProvider` (`Map<ModelProvider, Promise<void>>` con promesas encadenadas, sin dependencia nueva) para la sección crítica de `acquire()`
+- [x] Wiring en los 3 call sites existentes — `acquire(provider)` llamado dentro del bloque reintentado por Cockatiel, antes de `generateObject`, en `agents.service.ts` (los 4 puntos: `argue`/`respond`/`amend` de `DebaterAgentImpl` + `judge`), `research.service.ts` y `fact-check.service.ts` (los 3 métodos)
+- [x] `handleAll` → `handleWhen((err) => !(err instanceof DailyQuotaExceededError))` en las 3 policies de Cockatiel existentes — aplicado tanto al `retry` como al `circuitBreaker` de cada una, por consistencia
+- [x] Poda oportunista de `LlmRequestLog` (filas > 48hs) al final de `acquireLocked()` — no aplica al camino no-op (providers sin límite configurado)
+- [x] Tests: `llm-rate-limiter.service.spec.ts` nuevo (5 casos: no-op sin límite, pasa debajo del límite, `DailyQuotaExceededError` sin esperar, espera con `jest.useFakeTimers()`/`advanceTimersByTimeAsync` cuando RPM está al tope, mutex serializa llamadas concurrentes) + ajuste de los 3 specs existentes (mock de `LlmRateLimiterService` como no-op). `npx tsc --noEmit` limpio, `npm test` (35/35) y `npm run test:e2e` (1/1, `AppModule` completo sigue bootstrapeando con el wiring nuevo) verdes
 
 ## 1. Research (`modules/research/`) — COMPLETA (código + tests + verificado con API real, 2026-09-08)
 
@@ -162,6 +178,15 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
   - [ ] Validar tabla de estados válidos por acción (api-contract.md §5) → `409 Conflict` con `code: INVALID_STATE_TRANSITION` fuera de tabla
 - [ ] DTOs Zod separados de los contratos de agentes (coding-rules.md §3 — no reutilizar `ArgumentDraftSchema` como DTO)
 - [ ] Tests de integración orquestando varios módulos con todo mockeado en el borde externo (coding-rules.md §9 — únicos tests de integración del proyecto)
+
+**Notificaciones internas (diseño ya cerrado, implementar junto con `EpisodeStateService`)** — motivado por el rate limiter (sección 0.1): al encolarse llamadas a LLM, procesar un episodio puede tardar más, y el usuario no quiere quedar bloqueado esperando la respuesta HTTP. Proceso completo de diseño en `decision-log.md` entrada 9.
+
+- [ ] `prisma/schema.prisma`: tabla `Notification` (`episodeId`, `type: NotificationType`, `message`, `readAt` nullable — mismo patrón que `EpisodeCheckpoint`, sin flag booleano redundante) acoplada 1:1 a `Episode` (no genérica/polimórfica — no hay otro emisor de notificaciones hoy)
+- [ ] `enum NotificationType`: `EPISODE_COMPLETED` / `EPISODE_PENDING_REVIEW` / `EPISODE_REQUIRES_REVIEW` / `EPISODE_FAILED`
+- [ ] `modules/notifications/` — módulo standalone nuevo (controller propio, no vive dentro de `episodes/`, coding-rules.md §1) con `NotificationsService` inyectado por `EpisodeStateService`
+- [ ] `EpisodeStateService` dispara la notificación como último paso interno de `markCompleted`/`markPendingReview`/`requireHumanReview`/`markFailed` — no una llamada aparte desde el código de orquestación (mismo motivo que centralizar "un método por transición válida": evita que una transición nueva se olvide de notificar)
+- [ ] `GET /notifications?unreadOnly=true` (default `true`, sin paginación), `POST /notifications/:id/read`, `POST /notifications/read-all`
+- [ ] Documentar explícitamente en `architecture.md`/`api-contract.md` que esto es complementario al SSE de la sección 8, no un reemplazo (SSE = en vivo/efímero con la pantalla abierta; `Notification` = inbox persistente)
 
 ## 8. Real-time (SSE)
 
