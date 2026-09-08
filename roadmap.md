@@ -10,7 +10,9 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 ## Próximo paso inmediato
 
-**Fase 0 completa** (2026-09-07) — ver `tasks.md` §0 para el detalle de lo hecho, incluyendo dos hallazgos no anticipados: Prisma 7 exige un driver adapter explícito incluso para SQLite, y `@nestjs/config@12` es ESM-only (rompía los tests hasta ajustar `transformIgnorePatterns`). El próximo paso es arrancar **Fase 1**, empezando por **Agents** (ver abajo).
+**Fase 0 completa** (2026-09-07) — ver `tasks.md` §0 para el detalle de lo hecho, incluyendo dos hallazgos no anticipados: Prisma 7 exige un driver adapter explícito incluso para SQLite, y `@nestjs/config@12` es ESM-only (rompía los tests hasta ajustar `transformIgnorePatterns`).
+
+**Fase 1 / Agents: código funcional, falta cobertura de tests** (2026-09-07) — ver `tasks.md` §2 para el detalle. **Antes de seguir, revisar ahí el bloque "⚠️ PENDIENTE DE REVISIÓN DEL USUARIO"**: 3 decisiones de diseño no obvias tomadas al implementar que no estaban pedidas palabra por palabra en el checklist original (research() fuera de scope, patrón factory `createDebateAgent` para inyectar `RoundType`, método `judge()` agregado). Los tests unitarios quedan pendientes a propósito: el usuario pidió no escribirlos hasta revisar y aprobar el resto de los cambios. Próximo paso sugerido tras esa revisión: **Research** (`tasks.md` §1), siguiente módulo del orden de Fase 1.
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -26,12 +28,12 @@ Objetivo: que el proceso arranque, valide su entorno y pueda tocar la base de da
 Objetivo: construir las piezas que `EpisodesModule` va a orquestar más adelante. Por diseño (`architecture.md` §3) estos módulos no se conocen entre sí ni conocen a `Episode`, así que en principio son paralelizables. Orden sugerido cuando hay que elegir por dónde arrancar:
 
 1. **Agents** (`tasks.md` §2) — desbloquea el seed de los 5 `Agent` (4 debatientes + Judge), del cual dependen luego `EpisodeParticipant` y cualquier fixture de Debate/Episodes.
-   - [ ] Módulo (`agents.module.ts`/`.service.ts`, sin controller)
-   - [ ] `argue()`, `respond()`, `amend()` sobre `DebateAgent`
-   - [ ] Wiring de `buildDebaterSystemPrompt`/`buildJudgeSystemPrompt`
-   - [ ] Política Cockatiel (`.parse()` de Zod dentro del retry)
-   - [ ] Seed de los 5 `Agent`
-   - [ ] Tests unitarios con LLM mockeado
+   - [x] Módulo (`agents.module.ts`/`.service.ts`, sin controller)
+   - [x] `argue()`, `respond()`, `amend()` (vía factory `createDebateAgent(persona, provider, roundType)` — ver decisiones en `tasks.md` §2) + `judge()` para el veredicto
+   - [x] Wiring de `buildDebaterSystemPrompt`/`buildJudgeSystemPrompt`
+   - [x] Política Cockatiel (`.parse()` de Zod dentro del retry)
+   - [x] Seed de los 5 `Agent` (`prisma/seed.ts`, `npm run db:seed`)
+   - [ ] Tests unitarios con LLM mockeado — pendiente hasta revisión/aprobación del usuario
 2. **Research** (`tasks.md` §1) — evidence base, independiente del resto.
    - [ ] Módulo + proveedor de búsqueda web + política Cockatiel
    - [ ] Persistencia de `Source` con trazabilidad (`fetchTimestamp`/`publishedAt`/`contentHash`)

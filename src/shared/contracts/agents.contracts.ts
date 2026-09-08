@@ -129,11 +129,16 @@ export interface DebateContext {
   }>;
 }
 
+// research(topic) NO es parte de este contrato: según architecture.md §4/§7.1,
+// EpisodesModule.runResearch() llama a ResearchModule.research(topic) una sola
+// vez por episodio, antes del loop de rondas — ningún DebateAgent lo invoca ni
+// lo implementa. Pendiente: definir esa firma (probablemente
+// ResearchService.research(topic): Promise<ResearchOutput>) al construir
+// ResearchModule (tasks.md sección 1, todavía no existe).
 export interface DebateAgent {
-  research(topic: string): Promise<ResearchOutput>;
-
-  // OPENING / REBUTTAL
-  argue(context: DebateContext): Promise<ArgumentDraft>;
+  // roundType es OPENING o REBUTTAL acá (CROSS_EXAMINATION tiene su propio
+  // método, respond) — condiciona el framing del system prompt.
+  argue(context: DebateContext, roundType: "OPENING" | "REBUTTAL"): Promise<ArgumentDraft>;
 
   // CROSS_EXAMINATION — recibe el argumento puntual a responder
   respond(
@@ -141,10 +146,14 @@ export interface DebateAgent {
     target: DebateContext["officialArguments"][number]
   ): Promise<CrossExaminationDraft>;
 
-  // Re-generación tras un AmendmentFeedback (Loop de Enmienda)
+  // Re-generación tras un AmendmentFeedback (Loop de Enmienda). roundType es
+  // el de la intervención original que se está enmendando — determina tanto
+  // el framing del prompt como qué schema (ArgumentDraft/CrossExamination)
+  // corresponde re-validar.
   amend(
     context: DebateContext,
     original: ArgumentDraft | CrossExaminationDraft,
-    feedback: AmendmentFeedback
+    feedback: AmendmentFeedback,
+    roundType: RoundType
   ): Promise<ArgumentDraft | CrossExaminationDraft>;
 }

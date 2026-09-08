@@ -39,18 +39,25 @@ Entidades: `Topic`, `ResearchSession`, `Source`, `EvidenceFact`.
 - [ ] Servicio de extracción de `EvidenceFact` usando `ResearchOutputSchema` (`generateObject`, ya definido en contracts)
 - [ ] Tests unitarios con LLM/proveedor de búsqueda mockeado (coding-rules.md §9)
 
-## 2. Agents (`modules/agents/`)
+## 2. Agents (`modules/agents/`) — código funcional, falta cobertura de tests
 
 Entidad: `Agent`. Implementa `DebateAgent` (contrato ya definido).
 
-- [ ] Módulo no existe (sin controller — no expone endpoints, ver coding-rules.md §1)
-- [ ] Implementación de `DebateAgent.argue()` (OPENING/REBUTTAL) con `generateObject` + `ArgumentDraftSchema`
-- [ ] Implementación de `DebateAgent.respond()` (CROSS_EXAMINATION) con `CrossExaminationDraftSchema`
-- [ ] Implementación de `DebateAgent.amend()` (loop de enmienda, recibe `AmendmentFeedback`)
-- [ ] Wiring de `buildDebaterSystemPrompt` / `buildJudgeSystemPrompt` (ya existen en `shared/personas/`) al armar el prompt real
-- [ ] Política Cockatiel alrededor de las llamadas a LLM (coding-rules.md §4) — `.parse()` de Zod **dentro** del bloque reintentado
-- [ ] Seed de los 4 `Agent` (Analyst/Contrarian/Diplomat/Provocateur) + 1 `Agent` Judge en la base (¿seed script o migración de datos?)
-- [ ] Tests unitarios con LLM mockeado
+- [x] Módulo (`agents.module.ts` + `agents.service.ts`, sin controller — coding-rules.md §1)
+- [x] Implementación de `DebateAgent.argue()` (OPENING/REBUTTAL) con `generateObject` + `ArgumentDraftSchema`
+- [x] Implementación de `DebateAgent.respond()` (CROSS_EXAMINATION) con `CrossExaminationDraftSchema`
+- [x] Implementación de `DebateAgent.amend()` (loop de enmienda, recibe `AmendmentFeedback`)
+- [x] Wiring de `buildDebaterSystemPrompt` / `buildJudgeSystemPrompt` al armar el prompt real
+- [x] Política Cockatiel alrededor de las llamadas a LLM (coding-rules.md §4) — `.parse()` de Zod **dentro** del bloque reintentado
+- [x] Seed de los 4 `Agent` (Analyst/Contrarian/Diplomat/Provocateur) + 1 `Agent` Judge en la base (`prisma/seed.ts`, wireado en `prisma.config.ts` → `migrations.seed`; correr con `npm run db:seed`. Verificado idempotente — dos corridas seguidas dejan 5 filas, no duplica, vía `findFirst`+`create`/`update` porque `Agent.name` no tiene `@unique` en el schema)
+- [ ] Tests unitarios con LLM mockeado — **pendiente a propósito**: el usuario pidió no escribirlos hasta revisar y aprobar el resto de los cambios
+
+**⚠️ PENDIENTE DE REVISIÓN DEL USUARIO — decisiones de diseño no obvias tomadas al implementar (2026-09-07)**, no pedidas explícitamente palabra por palabra en el checklist original, quedan a validar en la próxima sesión antes de seguir con Fase 1 (Research):
+- [x] **Revisado 2026-09-08**: `research()` se sacó por completo del contrato `DebateAgent` (`shared/contracts/agents.contracts.ts`) — no era un `Omit` parcial, se eliminó la firma. Motivo (architecture.md §4/§7.1): `EpisodesModule.runResearch()` llama a `ResearchModule.research(topic)` **una sola vez por episodio**, antes de que arranque el loop de rondas, y arma la Evidence Base que después viaja dentro de `DebateContext.evidenceBase` a cada `argue()`/`respond()`/`amend()`. Ningún `DebateAgent` busca evidencia nueva durante el debate — solo la lee. Fact-check (`FactCheckModule`) es un rol aparte: no busca evidencia, contrasta lo que el agente ya escribió contra la Evidence Base ya obtenida. `AgentsModule.DebaterAgent` ahora es simplemente `= DebateAgent` (ya no hace falta `Omit`).
+- [ ] **Pendiente real, no resuelto todavía**: `ResearchModule` no existe (sección 1 de este archivo). Cuando se implemente, definir ahí la firma equivalente — probablemente `ResearchService.research(topic: string): Promise<ResearchOutput>` — reusando `ResearchOutputSchema` ya definido en `agents.contracts.ts`.
+- [x] **Revisado 2026-09-08**: `DebateAgent.argue()`/`.amend()` ahora reciben `roundType` como parámetro explícito (`agents.contracts.ts`: `argue(context, roundType: "OPENING" | "REBUTTAL")`, `amend(context, original, feedback, roundType: RoundType)`). Se descartó el patrón factory-por-turno original (`createDebateAgent(persona, provider, roundType)` fabricando una instancia nueva en cada turno) porque `DebaterAgentImpl` no tiene estado/memoria entre llamadas — todo lo que varía turno a turno ya viaja en `DebateContext` por parámetro — así que crear una instancia nueva por turno solo para cerrar sobre `roundType` era innecesario. Ahora `AgentsService.createDebateAgent(persona, provider)` crea **una sola instancia por `EpisodeParticipant`**, reusada en todos sus turnos durante el loop de rondas (architecture.md §7.2); el futuro `EpisodesModule` la crea una vez al armar los participantes (§7.1), no dentro del loop.
+- [x] **Revisado y aprobado 2026-09-08, sin cambios**: `AgentsService.judge(context, provider)` (no estaba explícito en el checklist original, pero sí mencionado como wiring de `buildJudgeSystemPrompt`): usa `VerdictOutputSchema`, corresponde a architecture.md §7.4. Judge no es un `DebaterPersona` ni sigue el ciclo argue/respond/amend, así que vive como método aparte en el service en vez de en `DebaterAgentImpl`.
+- [x] **Resuelto 2026-09-08**: `Agent.name` ahora tiene `@unique` en `schema.prisma`, con migración `prisma/migrations/20260908100801_agent_name_unique/` (`CREATE UNIQUE INDEX "Agent_name_key" ON "Agent"("name")`) aplicada a `dev.db` y Prisma Client regenerado. No había duplicados en los 5 registros existentes (Analyst/Contrarian/Diplomat/Provocateur/Judge). El seed (`prisma/seed.ts`) sigue resolviendo idempotencia a mano con `findFirst`+`create`/`update` — ahora que hay constraint de DB, se podría simplificar a `prisma.agent.upsert({ where: { name }, ... })`, pero no se tocó (no era parte de este pedido puntual).
 
 ## 3. Debate (`modules/debate/`)
 

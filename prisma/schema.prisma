@@ -157,7 +157,7 @@ model EvidenceFact {
 
 model Agent {
   id           String     @id @default(uuid())
-  name         String // Ej: "IA_Elon", "Tech_Optimist"
+  name         String @unique // Ej: "IA_Elon", "Tech_Optimist"
   // String (no enum) a propósito: los "roles" de agente son un concepto de
   // negocio en evolución (Analyst/Contrarian/...), no una lista cerrada del
   // sistema como los status. Mantenerlo flexible para poder probar personas
