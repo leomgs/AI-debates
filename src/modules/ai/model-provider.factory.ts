@@ -24,9 +24,21 @@ export class ModelProviderFactory {
         })("gpt-4.1");
 
       case "GOOGLE":
+        // gemini-2.0-flash y gemini-2.5-flash fueron dados de baja para
+        // cuentas nuevas (404 "no longer available[...]for new users") —
+        // detectado corriendo scripts/smoke-test-argument.ts contra la API
+        // real (2026-09-08). gemini-3.6-flash (el reemplazo que indica el
+        // propio error) funcionaba, pero con cuota free-tier muy ajustada:
+        // según el dashboard de rate limits de AI Studio, TODOS los "Flash"
+        // normales (cualquier generación: 3, 3.5, 3.6, 3.7, 3.8) están
+        // topeados igual en este free tier — 5 RPM / 20 RPD. Las variantes
+        // "Flash Lite" tienen 3x más RPM y 25x más RPD (15 RPM / 500 RPD) —
+        // se usa gemini-3.5-flash-lite (la Lite más reciente disponible) a
+        // cambio de algo menos de calidad/razonamiento, aceptable para este
+        // caso de uso (single-user, local).
         return createGoogleGenerativeAI({
           apiKey: this.config.get("GOOGLE_API_KEY", { infer: true }),
-        })("gemini-2.0-flash");
+        })("gemini-3.5-flash-lite");
 
       // ANTHROPIC_API_KEY/XAI_API_KEY son opcionales en env.schema.ts (no
       // hay suscripción paga contratada todavía) — si falta la key, el SDK

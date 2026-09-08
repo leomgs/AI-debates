@@ -14,6 +14,7 @@ Este proyecto empezó su documentación (`architecture.md`, `features.md`, `road
 | API contract | `../api-contract.md` | Superficie HTTP completa — referencia para `architect` y `backend-engineer`. |
 | Notas para frontend | `../frontend-notes.md` | Nuevo (2026-09-08). Bitácora de casos de UX/negocio que surgen construyendo el backend, para cuando arranque el proyecto de frontend — no es spec de producto ni contrato de API, es "esto hay que contemplarlo en la UI". `frontend-engineer`/`product-analyst` lo consultan al empezar ese proyecto. |
 | Setup / requisitos | `../setup.md` | Nuevo (2026-09-08). Checklist real de instalación y variables de entorno (qué keys son requeridas, dónde conseguirlas) — separado de `README.md`, que sigue siendo el boilerplate default de NestJS. |
+| Decision log | `../decision-log.md` | Nuevo (2026-09-08). Bitácora cronológica del *proceso* detrás de cada decisión no obvia (opciones consideradas, evidencia, resolución) — distinto de `tasks.md`, que registra el estado final. Insumo para un paper del usuario sobre el desarrollo del proyecto; actualizar en el momento de cada decisión, no al final. |
 | Convenciones de código | `../coding-rules.md` (backend) y `../../.clinerules/rules.md` (reglas generales del repo, un nivel arriba) | `backend-engineer` y `code-reviewer` deben leerlos antes de tocar código. |
 
 ## Por qué no se migró todo a `docs/`

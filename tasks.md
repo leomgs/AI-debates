@@ -4,6 +4,18 @@ Tracking del estado de implementación. No repite el diseño (eso vive en `archi
 
 Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-08.
 
+## Dónde retomar (última sesión: 2026-09-08)
+
+**Completo y verificado**: secciones 0-4 (Fundacional, Research, Agents, Debate, Fact-check) — código + tests unitarios + `tsc` limpio en todos. Además, `scripts/smoke-test-argument.ts` corrió de punta a punta **contra APIs reales** (Tavily + Gemini): creó un `Topic`, hizo research real (9 facts extraídos), generó un primer argumento OPENING con `AgentsService`, y lo persistió como `Argument` OFFICIAL vía `DebateModule` — sin pasar por `FactCheckModule` todavía (a propósito, ver el script). Esto prueba que el tramo research → argumento anda de verdad, no solo con mocks.
+
+**No hay nada roto ni a medio terminar** — el repo compila, todos los tests pasan, y el último commit está limpio. Lo que sigue es simplemente avanzar con lo que falta:
+
+- **Siguiente módulo lógico: `EpisodesModule`** (sección 7) — el orquestador. Es el más grande: máquina de estados de `Episode`, loop de rondas, `procesarBorrador`, chequeo de presupuesto, checkpoints/resume, y el controller HTTP. Varios ítems de acá ya tienen sub-notas de decisiones tomadas en sesiones anteriores que hay que respetar al implementar (buscar "decisión tomada 2026-09-08" en la sección 7).
+- Alternativa si se prefiere ir por lo más chico primero: **`TTS`** (sección 5) o **`Render`** (sección 6, P1 — no bloquea el MVP).
+- Pendiente aparte, no bloqueante: completar `README.md` (sigue siendo boilerplate de NestJS, sección 9).
+
+**Nuevo esta sesión**: se creó `decision-log.md` — bitácora cronológica de decisiones no obvias tomadas a lo largo del proyecto (con el proceso de cómo se llegó a cada una, no solo el resultado), pensada para servir de insumo a un paper que el usuario está planeando escribir sobre el desarrollo de este proyecto. Mantenerla actualizada en cada decisión de ese tipo, no solo al final.
+
 ## 0. Fundacional (bloquea todo lo demás) — COMPLETA
 
 - [x] `schema.prisma` completo (todas las entidades y enums de `architecture.md` sección 6)
@@ -27,13 +39,17 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 
 **Decisión del usuario (2026-09-07) sobre validación de env vars de LLM**: solo `GOOGLE_API_KEY` es requerida (única con acceso gratuito hoy). `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` y `XAI_API_KEY` quedan `.optional()` en `env.schema.ts` — el proceso arranca sin ellas, y `ModelProviderFactory.resolve()` recién falla si algo intenta usar un provider sin key configurada. Revisar este criterio cuando se contrate una suscripción adecuada a los demás providers.
 
-## 1. Research (`modules/research/`) — COMPLETA (código + tests), falta acción del usuario (API key real)
+- [x] **`scripts/smoke-test-argument.ts`** (2026-09-08, no automatizado — no es un `*.spec.ts`, corre contra APIs reales y gasta créditos): encadena `ResearchModule` → `DebateModule` → `AgentsModule` con Tavily + Gemini reales para validar el tramo "research → primer argumento OPENING" antes de que exista `EpisodesModule`. A propósito no pasa por `FactCheckModule` todavía. Correr con `npm run smoke:argument` (requiere `GOOGLE_API_KEY`/`TAVILY_API_KEY` reales en `.env`).
+  - **Bug real encontrado y corregido corriendo el smoke test contra la API real**: el modelo hardcodeado en `ModelProviderFactory` para GOOGLE, `gemini-2.0-flash`, fue dado de baja por Google (404 "no longer available"). Se probó `gemini-2.5-flash` (también 404, "no longer available to new users") y `gemini-3.6-flash` (funcionó — confirmado end-to-end con research real de 9 facts + argumento OPENING generado y persistido como OFFICIAL). Revisando el dashboard de rate limits de AI Studio con el usuario se vio que TODOS los "Flash" normales de cualquier generación (3/3.5/3.6/3.7/3.8) están topeados igual en este free tier — 5 RPM / 20 RPD — mientras que las variantes "Flash Lite" tienen 15 RPM / 500 RPD. Se cambió el modelo final a **`gemini-3.5-flash-lite`** (la Lite más reciente disponible) para tener margen real de desarrollo, a cambio de algo menos de calidad/razonamiento — aceptable para este caso de uso.
+  - Evaluado y descartado: "Gemini 3 Flash Live" (aparece con RPM/RPD "ilimitado" en el dashboard) — es un producto distinto, la Live API (WebSocket, voz/video en tiempo real), no compatible con `generateContent`/`generateObject` de structured output que usamos.
+
+## 1. Research (`modules/research/`) — COMPLETA (código + tests + verificado con API real, 2026-09-08)
 
 Entidades: `Topic`, `ResearchSession`, `Source`, `EvidenceFact`.
 
 - [x] Módulo (`research.module.ts` + `research.service.ts` + `tavily.provider.ts` + `research.errors.ts` + specs, sin controller — coding-rules.md §1, mismo criterio que `AgentsModule`: lo orquesta `EpisodesModule`, que todavía no existe)
 - [x] **Proveedor de búsqueda web decidido: Tavily** (investigado 2026-09-08 — free tier 1000 créditos/mes sin tarjeta, pensado para agentes LLM, encaja con `Source.title`/`url`/`snippet`). `TAVILY_API_KEY` agregada como **requerida** en `env.schema.ts`/`.env.example` (a diferencia de OPENAI/ANTHROPIC/XAI que son opcionales — Research es P0, no tiene sentido arrancar sin poder ejecutar una research real)
-  - **Acción pendiente del usuario**: generar una key real en https://app.tavily.com y completarla en `.env` — con `TAVILY_API_KEY` vacía el proceso NO arranca (`validateEnv` falla rápido, coding-rules.md §8, a propósito). Los tests no la necesitan real: `test/jest-e2e.setup.ts` ya tiene un valor dummy.
+  - [x] **Resuelto 2026-09-08**: el usuario generó `GOOGLE_API_KEY`/`TAVILY_API_KEY` reales y las completó en `.env` — verificado funcionando con `scripts/smoke-test-argument.ts` (ver sección 0).
 - [x] Política Cockatiel para el proveedor de búsqueda (`tavily.provider.ts`, `maxAttempts: 3`) — separada de la política de `generateObject` de `research.service.ts` (fallan distinto, coding-rules.md §4)
 - [x] Persistencia de `Source` con `fetchTimestamp` (default de schema), `publishedAt` (queda `null` — Tavily no lo devuelve en `/search` general, ya es opcional en el schema), `contentHash` (sha256 del `content` calculado en `ResearchService.research()`, usado también para deduplicar resultados antes de persistir — AC 1.2)
 - [x] Excepción tipada `InsufficientEvidenceError` (`research.errors.ts`, coding-rules.md §5) cuando hay <3 fuentes válidas con hash distinto — no se persiste `ResearchSession` si esto pasa
