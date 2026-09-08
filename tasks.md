@@ -82,17 +82,19 @@ Entidades: `Debate`, `DebateRound`, `Argument`, `ArgumentHistory`, `Verdict`.
 - [x] **Resuelto 2026-09-08**: confirmado por el usuario — el diagrama de architecture.md §3 (`DebateModule` con `AgentsModule`/`FactCheckModule` "debajo") estaba desactualizado de una versión anterior, de cuando la orquestación se revisaba a mano y todavía no estaba definida en detalle. `EpisodesModule` es quien coordina los tres módulos por separado; `DebateModule` no importa ni `AgentsModule` ni `FactCheckModule`, como ya estaba implementado. Diagrama corregido en architecture.md §3 (los 6 módulos de dominio cuelgan directo de `EpisodesModule`, sin jerarquía intermedia).
 - [x] **Resuelto 2026-09-08**: `pickCrossExaminationTarget` tira `NoCrossExaminationTargetError` (excepción tipada, `debate.errors.ts`) si el oponente no tiene ningún `Argument` OFFICIAL — se descartó la idea inicial de dejarlo como `Error` genérico al encontrar un caso concreto y alcanzable en operación normal (no solo un bug de orquestación): un curador puede resolver un `MAX_REVISIONS_EXCEEDED` con la acción `reject` en vez de arreglar el draft, dejando a ese agente sin ningún argumento OFFICIAL para cuando arranca CROSS_EXAMINATION. Mapea a `CheckpointReason.VALIDATION_INCONSISTENCY`, que ya existía en el schema para exactamente este tipo de caso ("inconsistencia en validación intermedia que no rompe el backend pero requiere árbitro humano", features.md Feature 4) — no hizo falta agregar un reason nuevo. Ver `frontend-notes.md` (entrada 2026-09-08) para el flujo de resolución propuesto (acción `regenerate`) y su impacto en la UI, todavía no implementado.
 
-## 4. Fact-check (`modules/fact-check/`)
+## 4. Fact-check (`modules/fact-check/`) — COMPLETA (código + tests)
 
 Entidades: `Claim`, `FactCheck`.
 
-- [ ] Módulo no existe
-- [ ] Claim extraction (`ClaimExtractionOutputSchema`, ya definido) — segmentar DRAFT en `FACTUAL`/`OPINION`/`PREDICTION`/`SUBJECTIVE`
-- [ ] Fact-checking estricto de claims `FACTUAL` contra la Evidence Base (`FactCheckOutputSchema`) — trazabilidad obligatoria a `sourceIds` (AC 1.2)
-- [ ] Filtro editorial para claims no factuales (`EditorialReviewOutputSchema`) usando `persona.editorialRules`
-- [ ] Paralelización de fact-checking agrupada por `ModelProvider` (arquitectura §7.3 — nunca 2 llamadas concurrentes al mismo provider)
-- [ ] Excepción tipada para `MAX_REVISIONS_EXCEEDED` (coding-rules.md §5)
-- [ ] Tests unitarios
+- [x] Módulo (`fact-check.module.ts` + `fact-check.service.ts` + spec, sin controller — mismo criterio que Agents/Research/Debate). Una sola política Cockatiel para los tres métodos (misma clase de integración — generateObject —, igual criterio que AgentsModule)
+- [x] Claim extraction (`ClaimExtractionOutputSchema`, ya definido) — segmentar DRAFT en `FACTUAL`/`OPINION`/`PREDICTION`/`SUBJECTIVE` (`extractClaims`, persiste cada `Claim`)
+- [x] Fact-checking estricto de claims `FACTUAL` contra la Evidence Base (`FactCheckOutputSchema`) — trazabilidad obligatoria a `sourceIds` (AC 1.2) (`check`, persiste `FactCheck` conectado a `Claim` y a las `Source` citadas — incluso si el resultado es FALSE, queda auditado)
+- [x] Filtro editorial para claims no factuales (`EditorialReviewOutputSchema`) usando `persona.editorialRules` (`editorialReview` — no persiste nada, el schema no tiene tabla para esto, el orquestador reacciona directo al resultado)
+- [x] Tests unitarios (`fact-check.service.spec.ts`, 4 tests)
+
+**⚠️ Dos ítems del checklist original que, al revisarlos, no le corresponden a este módulo** (mismo patrón que otras sesiones — encontrado al implementar, marcado para que lo confirmes):
+- **"Paralelización de fact-checking agrupada por ModelProvider"**: `check()`/`editorialReview()` acá son de a un claim por vez, con el `provider` como parámetro explícito (a diferencia de Research, donde quedó hardcodeado — acá el futuro orquestador ya sabe qué provider usar por claim). La lógica de "disparar muchas llamadas en paralelo sin pisar el rate limit de un mismo provider" es coordinación entre MUCHAS llamadas simultáneas — eso es trabajo de `EpisodesModule.procesarBorrador` (arquitectura §7.3, ya trackeado en la sección 7 de este archivo), no algo que `FactCheckModule` pueda hacer por sí solo llamando de a un claim genérico.
+- **"Excepción tipada para MAX_REVISIONS_EXCEEDED"**: por el mismo motivo que ya establecimos con `DebateModule.rejectArgument()` (sección 3) — el conteo de intentos contra `episode.maxRevisionAttempts` necesita el dato de `Episode`, que `FactCheckModule` no conoce (coding-rules.md §5: "Ningún otro módulo conoce EpisodeStatus ni CheckpointReason"). No tiene sentido que `FactCheckModule` tire esa excepción si nunca ve el contador — es `EpisodesModule` quien cuenta los intentos en su propio loop y decide la transición directo, sin necesitar capturar nada de acá. No se implementó.
 
 ## 5. TTS (`modules/tts/`)
 
@@ -125,6 +127,8 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
 - [ ] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION (arquitectura §7.2)
   - [ ] Capturar `NoCrossExaminationTargetError` de `DebateModule.pickCrossExaminationTarget` → `EpisodeCheckpoint` con `reason: VALIDATION_INCONSISTENCY` → `Episode → REQUIRES_HUMAN_REVIEW` → resolución esperada vía acción `regenerate` (ver `frontend-notes.md` 2026-09-08, decisión tomada 2026-09-08 sección 3 de este archivo)
 - [ ] `procesarBorrador` — orquesta claim extraction + fact-check/editorial + loop de enmienda (arquitectura §7.3)
+  - [ ] Paralelización de las llamadas a `FactCheckService.check()`/`.editorialReview()` por claim, agrupadas por `ModelProvider` (nunca 2 llamadas concurrentes al mismo provider) — decisión tomada 2026-09-08 (`tasks.md` sección 4): `FactCheckModule` opera de a un claim, esta coordinación entre múltiples llamadas simultáneas es de acá, no de ese módulo
+  - [ ] Conteo de `intentos` contra `episode.maxRevisionAttempts` → si se agota, `EpisodeCheckpoint` con `reason: MAX_REVISIONS_EXCEEDED` → `Episode → REQUIRES_HUMAN_REVIEW` — decisión tomada 2026-09-08 (`tasks.md` sección 4): no hace falta una excepción tipada de `FactCheckModule` para esto, `EpisodesModule` ya tiene el dato de `Episode` y decide la transición directo en su propio loop
 - [ ] Chequeo de presupuesto (`EpisodeUsage` vs `maxLlmCalls`/`maxSearchQueries`/`maxTtsSegments`) antes de cada llamada externa (AC 2.1)
 - [ ] Persistencia de `EpisodeCheckpoint` como historial (nunca se pisa) al entrar a `REQUIRES_HUMAN_REVIEW`
 - [ ] Lógica de `Resume` (retoma desde `checkpoint.fromState`/`debateRoundId`) y escalado a `FAILED` si la misma causa se repite tras un resume

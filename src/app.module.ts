@@ -8,6 +8,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { ResearchModule } from './modules/research/research.module';
 import { DebateModule } from './modules/debate/debate.module';
+import { FactCheckModule } from './modules/fact-check/fact-check.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { DebateModule } from './modules/debate/debate.module';
     AgentsModule,
     ResearchModule,
     DebateModule,
+    FactCheckModule,
   ],
   controllers: [AppController],
   providers: [AppService],
