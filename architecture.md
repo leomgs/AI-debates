@@ -40,20 +40,18 @@ Cada módulo de dominio (`research`, `agents`, `debate`, `fact-check`, `tts`, `r
 `EpisodesModule` es el único módulo que conoce el pipeline completo. Todo lo demás es un módulo de dominio que no sabe que `Episode` existe.
 
 ```
-                    ┌───────────────────┐
-                    │   EpisodesModule   │  (orquestador — único que conoce
-                    │  (Episode,         │   el pipeline completo)
-                    │   EpisodeUsage,    │
-                    │   EpisodeCheckpoint)│
-                    └─────────┬─────────┘
-           ┌──────────────────┼──────────────────┬─────────────┐
-           ▼                  ▼                  ▼             ▼
-     ResearchModule      DebateModule         TtsModule    RenderModule
-                               │
-                    ┌──────────┴──────────┐
-                    ▼                     ▼
-              AgentsModule          FactCheckModule
+                                ┌───────────────────┐
+                                │   EpisodesModule   │  (orquestador — único que conoce
+                                │  (Episode,         │   el pipeline completo)
+                                │   EpisodeUsage,    │
+                                │   EpisodeCheckpoint)│
+                                └─────────┬─────────┘
+        ┌───────────────┬─────────────────┼─────────────────┬───────────────┬─────────────┐
+        ▼                ▼                ▼                 ▼               ▼             ▼
+  ResearchModule   AgentsModule     DebateModule      FactCheckModule    TtsModule    RenderModule
 ```
+
+`EpisodesModule` llama a los seis módulos de dominio por separado y coordina el flujo entre ellos (ver §7) — ningún módulo de dominio importa a otro. En particular, `DebateModule` no importa `AgentsModule` ni `FactCheckModule`: es persistencia/reglas de negocio puras sobre `Debate`/`DebateRound`/`Argument`/`ArgumentHistory`/`Verdict`, sin llamar a ningún LLM ni proveedor externo (a diferencia de lo que sugería una versión anterior de este diagrama, desactualizada de cuando la orquestación todavía no estaba definida en detalle).
 
 Regla: las flechas solo van hacia abajo. `AgentsModule` no importa nada de `EpisodesModule` ni de `DebateModule` — solo expone un servicio que, dado un `DebateContext` (definido en `shared/contracts/`), devuelve un `ArgumentDraft` o `CrossExaminationDraft`. Esto es lo que permite testear cada módulo de dominio de forma aislada, sin levantar el pipeline entero.
 

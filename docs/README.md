@@ -12,6 +12,8 @@ Este proyecto empezó su documentación (`architecture.md`, `features.md`, `road
 | `docs/roadmap/` | `../roadmap.md` + `../tasks.md` | Documentos vivos y activos — `roadmap-planner` los actualiza in place. No se usa una carpeta `docs/roadmap/` separada para no fragmentar la fuente de verdad de qué está hecho. |
 | `docs/research/` | `docs/research/` (esta carpeta) | Nuevo. |
 | API contract | `../api-contract.md` | Superficie HTTP completa — referencia para `architect` y `backend-engineer`. |
+| Notas para frontend | `../frontend-notes.md` | Nuevo (2026-09-08). Bitácora de casos de UX/negocio que surgen construyendo el backend, para cuando arranque el proyecto de frontend — no es spec de producto ni contrato de API, es "esto hay que contemplarlo en la UI". `frontend-engineer`/`product-analyst` lo consultan al empezar ese proyecto. |
+| Setup / requisitos | `../setup.md` | Nuevo (2026-09-08). Checklist real de instalación y variables de entorno (qué keys son requeridas, dónde conseguirlas) — separado de `README.md`, que sigue siendo el boilerplate default de NestJS. |
 | Convenciones de código | `../coding-rules.md` (backend) y `../../.clinerules/rules.md` (reglas generales del repo, un nivel arriba) | `backend-engineer` y `code-reviewer` deben leerlos antes de tocar código. |
 
 ## Por qué no se migró todo a `docs/`

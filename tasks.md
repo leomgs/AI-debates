@@ -66,17 +66,21 @@ Entidad: `Agent`. Implementa `DebateAgent` (contrato ya definido).
 - [x] **Revisado y aprobado 2026-09-08, sin cambios**: `AgentsService.judge(context, provider)` (no estaba explícito en el checklist original, pero sí mencionado como wiring de `buildJudgeSystemPrompt`): usa `VerdictOutputSchema`, corresponde a architecture.md §7.4. Judge no es un `DebaterPersona` ni sigue el ciclo argue/respond/amend, así que vive como método aparte en el service en vez de en `DebaterAgentImpl`.
 - [x] **Resuelto 2026-09-08**: `Agent.name` ahora tiene `@unique` en `schema.prisma`, con migración `prisma/migrations/20260908100801_agent_name_unique/` (`CREATE UNIQUE INDEX "Agent_name_key" ON "Agent"("name")`) aplicada a `dev.db` y Prisma Client regenerado. No había duplicados en los 5 registros existentes (Analyst/Contrarian/Diplomat/Provocateur/Judge). El seed (`prisma/seed.ts`) sigue resolviendo idempotencia a mano con `findFirst`+`create`/`update` — ahora que hay constraint de DB, se podría simplificar a `prisma.agent.upsert({ where: { name }, ... })`, pero no se tocó (no era parte de este pedido puntual).
 
-## 3. Debate (`modules/debate/`)
+## 3. Debate (`modules/debate/`) — COMPLETA (código + tests)
 
 Entidades: `Debate`, `DebateRound`, `Argument`, `ArgumentHistory`, `Verdict`.
 
-- [ ] Módulo no existe
-- [ ] Creación de `DebateRound` tipada por `RoundType`
-- [ ] Promoción de `Argument` DRAFT → OFFICIAL (Feature 2 — aislar DRAFT del contexto del oponente)
-- [ ] Selección aleatoria de `respondsToId` en CROSS_EXAMINATION (arquitectura §7.2 — evitar repetir target si hay más de uno disponible)
-- [ ] Trazabilidad de mutación (`ArgumentHistory`, `Origin: Human_Edited` al editar — Feature 5)
-- [ ] Persistencia de `Verdict` vía `VerdictOutputSchema`
-- [ ] Tests unitarios
+- [x] Módulo (`debate.module.ts` + `debate.service.ts` + spec, sin controller — mismo criterio que Agents/Research, lo orquesta `EpisodesModule`). Sin política Cockatiel: no llama a ningún servicio externo, solo Prisma
+- [x] `createDebate(topicId)` + Creación de `DebateRound` tipada por `RoundType` (`createRound`)
+- [x] `createDraftArgument` (no itemizado explícito en el checklist original pero necesario como base — deja status/origin sin setear, confía en los `@default` de `schema.prisma`) + Promoción de `Argument` DRAFT → OFFICIAL (`promoteToOfficial`) + `rejectArgument` (terminal, la llama `EpisodesModule` cuando `procesarBorrador` agota `maxRevisionAttempts`, architecture.md §7.3)
+- [x] Selección aleatoria de `respondsToId` en CROSS_EXAMINATION (`pickCrossExaminationTarget`, arquitectura §7.2 — evitar repetir target si hay más de uno disponible; si ya fueron todos targeteados, repite alguno)
+- [x] Trazabilidad de mutación (Feature 5): **dos métodos separados** en vez de uno genérico con flag — `reviseDraft` (loop de enmienda por fact-check fallido → `ArgumentHistory.status = REJECTED`, mismo origin) y `editByHuman` (edición editorial post-hoc → `ArgumentHistory.status = SUPERSEDED` + `Argument.origin → HUMAN_EDITED`)
+- [x] Persistencia de `Verdict` vía `VerdictOutputSchema` (`createVerdict`, mapea `winnerAgentId` → `winnerId`)
+- [x] Tests unitarios (`debate.service.spec.ts`, 12 tests) — Prisma mockeado, sin LLM/servicio externo de por medio
+
+**⚠️ Pendiente de revisión del usuario** (decisiones de diseño no obvias, mismo patrón que Agents/Research — validar antes de construir `EpisodesModule`):
+- [x] **Resuelto 2026-09-08**: confirmado por el usuario — el diagrama de architecture.md §3 (`DebateModule` con `AgentsModule`/`FactCheckModule` "debajo") estaba desactualizado de una versión anterior, de cuando la orquestación se revisaba a mano y todavía no estaba definida en detalle. `EpisodesModule` es quien coordina los tres módulos por separado; `DebateModule` no importa ni `AgentsModule` ni `FactCheckModule`, como ya estaba implementado. Diagrama corregido en architecture.md §3 (los 6 módulos de dominio cuelgan directo de `EpisodesModule`, sin jerarquía intermedia).
+- [x] **Resuelto 2026-09-08**: `pickCrossExaminationTarget` tira `NoCrossExaminationTargetError` (excepción tipada, `debate.errors.ts`) si el oponente no tiene ningún `Argument` OFFICIAL — se descartó la idea inicial de dejarlo como `Error` genérico al encontrar un caso concreto y alcanzable en operación normal (no solo un bug de orquestación): un curador puede resolver un `MAX_REVISIONS_EXCEEDED` con la acción `reject` en vez de arreglar el draft, dejando a ese agente sin ningún argumento OFFICIAL para cuando arranca CROSS_EXAMINATION. Mapea a `CheckpointReason.VALIDATION_INCONSISTENCY`, que ya existía en el schema para exactamente este tipo de caso ("inconsistencia en validación intermedia que no rompe el backend pero requiere árbitro humano", features.md Feature 4) — no hizo falta agregar un reason nuevo. Ver `frontend-notes.md` (entrada 2026-09-08) para el flujo de resolución propuesto (acción `regenerate`) y su impacto en la UI, todavía no implementado.
 
 ## 4. Fact-check (`modules/fact-check/`)
 
@@ -119,6 +123,7 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
 - [ ] `EpisodeStateService` (coding-rules.md §6) — único escritor de `Episode.status`, un método por transición válida
 - [ ] Selección de participantes al crear el episodio (arquitectura §7.1 — 2 de 4 personas + Judge con provider distinto + sorteo de orden de turnos)
 - [ ] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION (arquitectura §7.2)
+  - [ ] Capturar `NoCrossExaminationTargetError` de `DebateModule.pickCrossExaminationTarget` → `EpisodeCheckpoint` con `reason: VALIDATION_INCONSISTENCY` → `Episode → REQUIRES_HUMAN_REVIEW` → resolución esperada vía acción `regenerate` (ver `frontend-notes.md` 2026-09-08, decisión tomada 2026-09-08 sección 3 de este archivo)
 - [ ] `procesarBorrador` — orquesta claim extraction + fact-check/editorial + loop de enmienda (arquitectura §7.3)
 - [ ] Chequeo de presupuesto (`EpisodeUsage` vs `maxLlmCalls`/`maxSearchQueries`/`maxTtsSegments`) antes de cada llamada externa (AC 2.1)
 - [ ] Persistencia de `EpisodeCheckpoint` como historial (nunca se pisa) al entrar a `REQUIRES_HUMAN_REVIEW`

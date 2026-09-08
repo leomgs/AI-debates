@@ -7,6 +7,7 @@ import { PrismaModule } from './shared/prisma/prisma.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { ResearchModule } from './modules/research/research.module';
+import { DebateModule } from './modules/debate/debate.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ResearchModule } from './modules/research/research.module';
     AiModule,
     AgentsModule,
     ResearchModule,
+    DebateModule,
   ],
   controllers: [AppController],
   providers: [AppService],
