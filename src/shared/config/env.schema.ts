@@ -17,6 +17,12 @@ export const EnvSchema = z.object({
 
   GOOGLE_TTS_API_KEY: z.string().optional(), // según el wrapper de google-tts-api que termines usando
 
+  // Requerida: proveedor de búsqueda web decidido para ResearchModule
+  // (free tier: 1000 créditos/mes sin tarjeta — ver tasks.md sección 1).
+  // A diferencia de OPENAI/ANTHROPIC/XAI, Research es P0 y no tiene sentido
+  // arrancar el proceso sin poder ejecutar una research real.
+  TAVILY_API_KEY: z.string().min(1),
+
   PORT: z.coerce.number().default(3000),
 });
 

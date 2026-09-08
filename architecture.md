@@ -11,6 +11,7 @@ Este documento formaliza las decisiones de arquitectura tomadas durante el dise�
 | Vercel AI SDK | Abstracción multi-provider de LLMs, structured output |
 | Zod 4 | Contratos de input/output de agentes (`shared/contracts/`) |
 | Cockatiel | Retry / circuit breaker por integración externa |
+| Tavily | Proveedor de búsqueda web para `ResearchModule` (Feature 1) — free tier 1000 créditos/mes sin tarjeta |
 | google-tts-api | TTS inicial, gratuito, reemplazable por ElevenLabs vía `AudioProvider` |
 | Jest | Tests unitarios e integración |
 

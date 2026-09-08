@@ -27,17 +27,21 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 
 **Decisión del usuario (2026-09-07) sobre validación de env vars de LLM**: solo `GOOGLE_API_KEY` es requerida (única con acceso gratuito hoy). `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` y `XAI_API_KEY` quedan `.optional()` en `env.schema.ts` — el proceso arranca sin ellas, y `ModelProviderFactory.resolve()` recién falla si algo intenta usar un provider sin key configurada. Revisar este criterio cuando se contrate una suscripción adecuada a los demás providers.
 
-## 1. Research (`modules/research/`)
+## 1. Research (`modules/research/`) — COMPLETA (código + tests), falta acción del usuario (API key real)
 
 Entidades: `Topic`, `ResearchSession`, `Source`, `EvidenceFact`.
 
-- [ ] Módulo no existe (`research.module.ts` / `.service.ts` / `.controller.ts`? / `.service.spec.ts` / `dto/`)
-- [ ] Proveedor de búsqueda web (integración externa — falta decidir/contratar el proveedor)
-- [ ] Política Cockatiel para el proveedor de búsqueda (coding-rules.md §4)
-- [ ] Persistencia de `Source` con `fetchTimestamp`, `publishedAt`, `contentHash` (AC 1.2 — trazabilidad)
-- [ ] Excepción tipada `InsufficientEvidenceError` (coding-rules.md §5) cuando hay <3 fuentes válidas
-- [ ] Servicio de extracción de `EvidenceFact` usando `ResearchOutputSchema` (`generateObject`, ya definido en contracts)
-- [ ] Tests unitarios con LLM/proveedor de búsqueda mockeado (coding-rules.md §9)
+- [x] Módulo (`research.module.ts` + `research.service.ts` + `tavily.provider.ts` + `research.errors.ts` + specs, sin controller — coding-rules.md §1, mismo criterio que `AgentsModule`: lo orquesta `EpisodesModule`, que todavía no existe)
+- [x] **Proveedor de búsqueda web decidido: Tavily** (investigado 2026-09-08 — free tier 1000 créditos/mes sin tarjeta, pensado para agentes LLM, encaja con `Source.title`/`url`/`snippet`). `TAVILY_API_KEY` agregada como **requerida** en `env.schema.ts`/`.env.example` (a diferencia de OPENAI/ANTHROPIC/XAI que son opcionales — Research es P0, no tiene sentido arrancar sin poder ejecutar una research real)
+  - **Acción pendiente del usuario**: generar una key real en https://app.tavily.com y completarla en `.env` — con `TAVILY_API_KEY` vacía el proceso NO arranca (`validateEnv` falla rápido, coding-rules.md §8, a propósito). Los tests no la necesitan real: `test/jest-e2e.setup.ts` ya tiene un valor dummy.
+- [x] Política Cockatiel para el proveedor de búsqueda (`tavily.provider.ts`, `maxAttempts: 3`) — separada de la política de `generateObject` de `research.service.ts` (fallan distinto, coding-rules.md §4)
+- [x] Persistencia de `Source` con `fetchTimestamp` (default de schema), `publishedAt` (queda `null` — Tavily no lo devuelve en `/search` general, ya es opcional en el schema), `contentHash` (sha256 del `content` calculado en `ResearchService.research()`, usado también para deduplicar resultados antes de persistir — AC 1.2)
+- [x] Excepción tipada `InsufficientEvidenceError` (`research.errors.ts`, coding-rules.md §5) cuando hay <3 fuentes válidas con hash distinto — no se persiste `ResearchSession` si esto pasa
+- [x] Servicio de extracción de `EvidenceFact` usando `ResearchOutputSchema` (`generateObject`, ya definido en contracts) — usa provider `GOOGLE` hardcodeado (única key requerida garantizada hoy, ver decisión 2026-09-07); revisar si `EpisodesModule` termina necesitando elegir el provider de research por episodio
+- [x] Tests unitarios con LLM/proveedor de búsqueda mockeado (coding-rules.md §9): `research.service.spec.ts` (7 tests — dedup, `InsufficientEvidenceError`, extracción y persistencia de `EvidenceFact`, agotamiento de reintentos) + `tavily.provider.spec.ts` (2 tests, `fetch` mockeado — request shape con Bearer auth, agotamiento de reintentos ante status no-ok)
+
+**⚠️ Pendiente de revisión del usuario** (decisión no obvia, análoga a las de `AgentsModule` — validar antes de construir `EpisodesModule`):
+- `ResearchService.research(topicId: string)` toma el id de un `Topic` ya persistido, no el string del tema directo — porque `ResearchSession.topicId` es obligatorio en `schema.prisma` y `Topic` le pertenece a este módulo (architecture.md §6). Se agregó `ResearchService.createTopic(title, context)` aparte. Todavía no está definido quién llama a `createTopic()` y en qué paso exacto del pipeline (`EpisodesModule` no existe aún) — asumido que será el orquestador al recibir el tema del usuario, antes de `runResearch()`.
 
 ## 2. Agents (`modules/agents/`) — COMPLETA (código + revisión de diseño + tests)
 

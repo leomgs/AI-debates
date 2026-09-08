@@ -6,6 +6,7 @@ import { validateEnv } from './shared/config/env.schema';
 import { PrismaModule } from './shared/prisma/prisma.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AgentsModule } from './modules/agents/agents.module';
+import { ResearchModule } from './modules/research/research.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { AgentsModule } from './modules/agents/agents.module';
     PrismaModule,
     AiModule,
     AgentsModule,
+    ResearchModule,
   ],
   controllers: [AppController],
   providers: [AppService],
