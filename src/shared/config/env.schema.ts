@@ -38,6 +38,15 @@ export const EnvSchema = z.object({
   OPENROUTER_RPM_LIMIT: z.coerce.number().default(20),
   OPENROUTER_RPD_LIMIT: z.coerce.number().default(50),
 
+  // TtsModule (decision-log.md 2026-09-09, #19/#20) — motor activo para todo
+  // el proceso (no por llamada, a diferencia de ModelProviderFactory: los
+  // catálogos de voz de los 3 motores son incompatibles entre sí). Default
+  // LOCAL: sin key, sin costo, sin riesgo de discontinuación.
+  TTS_PROVIDER: z.enum(["LOCAL", "GOOGLE_TTS", "OPENROUTER"]).default("LOCAL"),
+  // AC 6.1 (features.md Feature 6) — carpeta base de LocalDiskStorageProvider.
+  // Gitignoreada (binarios generados, regenerables desde AudioAsset).
+  AUDIO_STORAGE_DIR: z.string().min(1).default("./outputs/audios"),
+
   PORT: z.coerce.number().default(3000),
 });
 

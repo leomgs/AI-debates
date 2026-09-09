@@ -88,6 +88,11 @@ enum AudioProvider {
   OPENAI
   GOOGLE_TTS
   LOCAL
+  // 3 proveedores seleccionables vía TTS_PROVIDER (env var, resuelto una
+  // sola vez a nivel de deployment, no por llamada) — decision-log.md
+  // 2026-09-09, #19/#20. ELEVENLABS/OPENAI quedan sin usar, sin costo en
+  // mantenerlos (YAGNI de borrarlos).
+  OPENROUTER
 }
 
 // Modelos LLM intercambiables por persona/episodio (idea original, sección 4).
@@ -182,7 +187,12 @@ model Agent {
   role         String? // Ej: "ANALYST", "CONTRARIAN", "JUDGE"
   avatarUrl    String? // Asset visual para Remotion
   systemPrompt String // Personalidad y directrices del agente
-  voiceId      String // ID abstracto para tu TTSProvider (ej: "es-male-1")
+  // Json, no String: los 3 AudioProvider tienen catálogos de voz
+  // incompatibles entre sí (nombre de modelo Piper vs. código de idioma de
+  // Google vs. parámetro voice de fish-audio) — guarda un ID por proveedor
+  // soportado, shape Record<"LOCAL"|"GOOGLE_TTS"|"OPENROUTER", string>
+  // (src/modules/tts/voice-id.types.ts). decision-log.md 2026-09-09, #20.
+  voiceId      Json
   arguments    Argument[]
   verdicts     Verdict[] // En caso de que este agente actúe como Juez
   episodeParticipations EpisodeParticipant[]

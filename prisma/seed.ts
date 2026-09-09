@@ -7,6 +7,7 @@ import {
   buildJudgeSystemPrompt,
   DebaterPersona,
 } from '../src/shared/personas/agents.personas';
+import { VoiceIdMap } from '../src/modules/tts/voice-id.types';
 
 // Script standalone fuera del bootstrap de Nest — no hay ConfigService acá,
 // mismo patrón de lectura de DATABASE_URL que prisma.config.ts.
@@ -16,15 +17,20 @@ const prisma = new PrismaClient({
   }),
 });
 
-// IDs abstractos placeholder para el TTSProvider (Feature 6, todavía no
-// implementado — Fase 3 del roadmap). Ajustar cuando se elija el proveedor real.
-const DEBATER_VOICE_IDS: Record<DebaterPersona['id'], string> = {
-  ANALYST: 'es-male-1',
-  CONTRARIAN: 'es-male-2',
-  DIPLOMAT: 'es-female-1',
-  PROVOCATEUR: 'es-female-2',
+// Un voice ID por AudioProvider soportado (decision-log.md 2026-09-09, #20).
+// GOOGLE_TTS es la misma "es" para los 5 agentes a propósito: google-tts-api
+// tiene una sola voz por idioma, no diferencia por persona (limitación de
+// producto conocida, no un bug — ver tasks.md sección 5). LOCAL usa
+// placeholders todavía: los nombres reales de modelo Piper se confirman
+// contra el catálogo real de echogarden en la etapa 2 de TTS. OPENROUTER usa
+// placeholders hasta el spike de validación contra fish-audio (etapa 5).
+const DEBATER_VOICE_IDS: Record<DebaterPersona['id'], VoiceIdMap> = {
+  ANALYST: { LOCAL: 'es-male-1', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  CONTRARIAN: { LOCAL: 'es-male-2', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  DIPLOMAT: { LOCAL: 'es-female-1', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  PROVOCATEUR: { LOCAL: 'es-female-2', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
 };
-const JUDGE_VOICE_ID = 'es-neutral-1';
+const JUDGE_VOICE_ID: VoiceIdMap = { LOCAL: 'es-neutral-1', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
 
 // Snapshot informativo: el prompt real que ve el LLM en cada ronda lo arma
 // AgentsService vía buildDebaterSystemPrompt (roundType-específico) — este
@@ -44,7 +50,7 @@ async function upsertAgentByName(data: {
   name: string;
   role: string;
   systemPrompt: string;
-  voiceId: string;
+  voiceId: VoiceIdMap;
 }) {
   const existing = await prisma.agent.findFirst({ where: { name: data.name } });
   if (existing) {
