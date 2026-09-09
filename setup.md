@@ -29,7 +29,9 @@ Copiá `.env.example` a `.env` y completá lo de abajo. La validación vive en `
 | `ANTHROPIC_API_KEY` | No | Habilita ANTHROPIC como `ModelProvider` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) — de pago |
 | `XAI_API_KEY` | No | Habilita XAI (Grok) como `ModelProvider` | [console.x.ai](https://console.x.ai) — de pago |
 | `OPENROUTER_API_KEY` | No | Habilita OPENROUTER como `ModelProvider` — da acceso a modelos `:free` reales (`ModelProviderFactory` sortea entre `nvidia/nemotron-3-super-120b-a12b:free` y `liquid/lfm-2.5-2.6b:free`, ambos validados a mano contra la API real, ver `decision-log.md` entrada 13) | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) — free tier real, **sin tarjeta** |
-| `GOOGLE_TTS_API_KEY` | No | Pensada para `TtsModule` (todavía no existe, sección 5 de `tasks.md`) | **No hace falta gestionar nada todavía**: el paquete instalado (`google-tts-api` en `package.json`) es un wrapper no oficial sobre Google Translate TTS y no pide API key. Esta variable queda para si en el futuro se migra a `@google-cloud/text-to-speech` o ElevenLabs (sí piden key) |
+| `GOOGLE_TTS_API_KEY` | No | Reservada para el proveedor Google de `TtsModule` (todavía no implementado, sección 5 de `tasks.md` — el proveedor Local sí lo está) | **No hace falta gestionar nada todavía**: el paquete `google-tts-api` es un wrapper no oficial sobre Google Translate TTS y no pide API key. Esta variable queda para si en el futuro se migra a `@google-cloud/text-to-speech` o ElevenLabs (sí piden key) |
+| `TTS_PROVIDER` | No (default `LOCAL`) | Motor de TTS activo para todo el proceso — `LOCAL`\|`GOOGLE_TTS`\|`OPENROUTER` (`decision-log.md` entradas 19-20). Solo `LOCAL` está implementado hoy | — |
+| `AUDIO_STORAGE_DIR` | No (default `./outputs/audios`) | Carpeta donde `LocalDiskStorageProvider` escribe el audio generado (AC 6.1). Gitignoreada — binarios regenerables, nunca se versionan | — |
 | `PORT` | No (default `3000`) | Puerto HTTP del server Nest | — |
 
 **Las que importan para arrancar ya mismo**: `GOOGLE_API_KEY` y `TAVILY_API_KEY`. Las de OPENAI/ANTHROPIC/XAI/OPENROUTER se pueden dejar vacías — el proceso arranca igual, y `ModelProviderFactory` recién tira error si algo intenta resolver ese provider puntual sin key. Sumar `OPENROUTER_API_KEY` (gratis, sin tarjeta) es la forma más simple de que el Judge tenga un provider realmente distinto al de los debatientes (arquitectura §7.1) sin depender de una suscripción paga a OpenAI/Anthropic/XAI.
@@ -58,10 +60,13 @@ npx tsc --noEmit    # type-check sin emitir
 
 ## 5. Scripts de validación manual (no automatizados, gastan créditos reales)
 
-No son `*.spec.ts` — corren contra APIs reales a propósito, para probar cosas que un mock no puede (ver `decision-log.md` entradas 6, 11, 12, 13 para ejemplos de bugs reales que solo aparecieron corriendo estos scripts):
+No son `*.spec.ts` — corren contra APIs/motores reales a propósito, para probar cosas que un mock no puede (ver `decision-log.md` entradas 6, 11, 12, 13, 21-22 para ejemplos de bugs/hallazgos reales que solo aparecieron corriendo estos scripts):
 
 ```bash
 npm run smoke:argument   # research -> primer argumento OPENING (sin FactCheckModule ni EpisodesModule)
 npm run smoke:episode    # pipeline completo de un Episode (research -> debate -> judging), rondas recortadas
+npm run smoke:tts        # ídem + approve -> síntesis de audio real (TTS_PROVIDER=LOCAL por default, sin costo — descarga modelos de voz Piper la primera vez)
 npx ts-node scripts/validate-openrouter-models.ts   # valida structured output contra modelos :free de OpenRouter
 ```
+
+**Nota sobre `OPENROUTER_API_KEY` y smoke tests reales**: el free tier de OpenRouter tiene cupo diario — si un smoke test falla con un error de rate limit de OpenRouter, no es un bug: correr esa invocación puntual con `OPENROUTER_API_KEY=` vacío (sin tocar `.env`) alcanza para que la selección de participantes no lo sortee como candidato (`decision-log.md` entrada 22).
