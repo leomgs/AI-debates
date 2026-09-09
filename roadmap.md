@@ -2,7 +2,7 @@
 
 Documento de secuenciación. No repite el detalle de cada ítem (eso vive en `tasks.md`) — organiza y prioriza lo que `tasks.md` ya trackea, en el orden en que técnicamente conviene implementarlo, respetando las dependencias de `architecture.md` (sección 3, dirección de dependencias) y las prioridades P0/P1 de `features.md`. No agrega alcance nuevo: cada tarea referencia su ítem equivalente en `tasks.md`.
 
-Última revisión: 2026-09-07.
+Última revisión: 2026-09-09.
 
 ## Objetivo
 
@@ -10,9 +10,11 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 ## Próximo paso inmediato
 
-**Fase 0 completa** (2026-09-07) — ver `tasks.md` §0 para el detalle de lo hecho, incluyendo dos hallazgos no anticipados: Prisma 7 exige un driver adapter explícito incluso para SQLite, y `@nestjs/config@12` es ESM-only (rompía los tests hasta ajustar `transformIgnorePatterns`).
+**Fases 0, 1 y 2 completas** (última verificada contra APIs reales el 2026-09-08 — ver `tasks.md` §0-4/7 y `decision-log.md` entradas 1-18 para el detalle y el proceso de cada decisión no obvia). El backend ya corre el pipeline completo de punta a punta: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW`, con SSE en vivo, notificaciones, resume/recovery y curaduría humana (`approve`/`edit`/`regenerate`/`reject`/`resume`) — todo verificado con `scripts/smoke-test-episode.ts` contra Tavily + Gemini reales, última corrida limpia (`PENDING_REVIEW`, 2 argumentos OFFICIAL, veredicto, cero claims fallidos).
 
-**Fase 1 / Agents: código funcional, falta cobertura de tests** (2026-09-07) — ver `tasks.md` §2 para el detalle. **Antes de seguir, revisar ahí el bloque "⚠️ PENDIENTE DE REVISIÓN DEL USUARIO"**: 3 decisiones de diseño no obvias tomadas al implementar que no estaban pedidas palabra por palabra en el checklist original (research() fuera de scope, patrón factory `createDebateAgent` para inyectar `RoundType`, método `judge()` agregado). Los tests unitarios quedan pendientes a propósito: el usuario pidió no escribirlos hasta revisar y aprobar el resto de los cambios. Próximo paso sugerido tras esa revisión: **Research** (`tasks.md` §1), siguiente módulo del orden de Fase 1.
+**Falta para cerrar el MVP P0** (Fase 3, ver abajo): el módulo `TTS` — es la única pieza P0 sin código todavía. `Render` es P1, no bloquea.
+
+Alternativa igual de razonable a seguir con TTS: retomar el scaffolding de frontend, pausado a propósito hasta tener esta superficie HTTP real — ya está disponible.
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -23,64 +25,42 @@ Objetivo: que el proceso arranque, valide su entorno y pueda tocar la base de da
 - [x] Verificar `.env.example` sincronizado con `env.schema.ts` (`tasks.md` §0)
 - [x] Habilitar `ANTHROPIC`/`XAI` en `ModelProviderFactory` (`tasks.md` §0) — con `GOOGLE_API_KEY` como única env var requerida (decisión del usuario, ver `tasks.md` §0)
 
-## Fase 1 — Módulos de dominio (aislados, testeables sin levantar el pipeline)
+## Fase 1 — Módulos de dominio (aislados, testeables sin levantar el pipeline) — COMPLETA
 
-Objetivo: construir las piezas que `EpisodesModule` va a orquestar más adelante. Por diseño (`architecture.md` §3) estos módulos no se conocen entre sí ni conocen a `Episode`, así que en principio son paralelizables. Orden sugerido cuando hay que elegir por dónde arrancar:
+Objetivo: construir las piezas que `EpisodesModule` orquesta. Por diseño (`architecture.md` §3) estos módulos no se conocen entre sí ni conocen a `Episode`. Los 4 módulos están completos, con tests unitarios y `tsc` limpio — detalle en `tasks.md` §1-4.
 
-1. **Agents** (`tasks.md` §2) — desbloquea el seed de los 5 `Agent` (4 debatientes + Judge), del cual dependen luego `EpisodeParticipant` y cualquier fixture de Debate/Episodes.
-   - [x] Módulo (`agents.module.ts`/`.service.ts`, sin controller)
-   - [x] `argue()`, `respond()`, `amend()` (vía factory `createDebateAgent(persona, provider, roundType)` — ver decisiones en `tasks.md` §2) + `judge()` para el veredicto
-   - [x] Wiring de `buildDebaterSystemPrompt`/`buildJudgeSystemPrompt`
-   - [x] Política Cockatiel (`.parse()` de Zod dentro del retry)
-   - [x] Seed de los 5 `Agent` (`prisma/seed.ts`, `npm run db:seed`)
-   - [ ] Tests unitarios con LLM mockeado — pendiente hasta revisión/aprobación del usuario
-2. **Research** (`tasks.md` §1) — evidence base, independiente del resto.
-   - [ ] Módulo + proveedor de búsqueda web + política Cockatiel
-   - [ ] Persistencia de `Source` con trazabilidad (`fetchTimestamp`/`publishedAt`/`contentHash`)
-   - [ ] `InsufficientEvidenceError`
-   - [ ] Extracción de `EvidenceFact` (`ResearchOutputSchema`)
-   - [ ] Tests unitarios
-3. **Fact-check** (`tasks.md` §4) — depende conceptualmente de que existan claims/evidence a verificar, pero se puede construir y testear con evidencia mockeada sin esperar a que Research esté terminado.
-   - [ ] Módulo + claim extraction + fact-checking estricto + filtro editorial
-   - [ ] Paralelización agrupada por `ModelProvider`
-   - [ ] Excepción `MAX_REVISIONS_EXCEEDED`
-   - [ ] Tests unitarios
-4. **Debate** (`tasks.md` §3) — capa de persistencia de rondas/argumentos/veredicto; el módulo más ligado a lo que `Episodes` va a necesitar directamente.
-   - [ ] Módulo + `DebateRound` tipado + promoción DRAFT→OFFICIAL
-   - [ ] Selección aleatoria de `respondsToId` en CROSS_EXAMINATION
-   - [ ] `ArgumentHistory` (`Origin: Human_Edited`)
-   - [ ] Persistencia de `Verdict`
-   - [ ] Tests unitarios
+1. **Agents** (`tasks.md` §2) — `argue()`/`respond()`/`amend()`/`judge()`, seed de los 5 `Agent`, tests unitarios con LLM mockeado. Sumado después: identidad real de agentes en `DebateContext` y prompt anti-alucinación reforzado (`decision-log.md` entradas 16, 18).
+2. **Research** (`tasks.md` §1) — Tavily como proveedor de búsqueda, `InsufficientEvidenceError`, extracción de `EvidenceFact`, verificado contra API real.
+3. **Fact-check** (`tasks.md` §4) — claim extraction, fact-checking estricto con trazabilidad a `sourceIds`, filtro editorial. Sumado después: `editorialReview` recibe el argumento completo, no el claim aislado (entradas 11-12), y se fuerza siempre a `GOOGLE` (entrada 14).
+4. **Debate** (`tasks.md` §3) — `DebateRound` tipado, promoción DRAFT→OFFICIAL, selección de `respondsToId`, `ArgumentHistory`, `Verdict`.
 
-Nota: si se prefiere paralelizar entre varias personas/sesiones, estos 4 módulos son la unidad de paralelización natural del proyecto — no hay imports cruzados entre ellos.
+## Fase 2 — Episodes: el orquestador (entrega el MVP demoable) — COMPLETA
 
-## Fase 2 — Episodes: el orquestador (entrega el MVP demoable)
+Objetivo: integrar Fase 1 en el pipeline completo `CREATED → RESEARCHING → READY_FOR_DEBATE → DEBATING → JUDGING → PENDING_REVIEW`, con control de costos y curaduría humana. Detalle completo en `tasks.md` §7.
 
-Objetivo: integrar Fase 1 en el pipeline completo `CREATED → RESEARCHING → READY_FOR_DEBATE → DEBATING → JUDGING → PENDING_REVIEW`, con control de costos y curaduría humana. Esta es la fase de mayor riesgo/complejidad (algoritmo ya resuelto en `architecture.md` §7) y la que hace demostrable el producto por primera vez.
+- [x] `EpisodeStateService` — único escritor de `Episode.status`
+- [x] Selección de participantes (2 de 4 personas + Judge con provider distinto + orden de turnos)
+- [x] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION
+- [x] `procesarBorrador` (claim extraction + fact-check/editorial + loop de enmienda) — ahora también rechaza claims `UNSUPPORTED`, no solo `FALSE`/`MISLEADING` (`decision-log.md` entrada 17)
+- [x] Chequeo de presupuesto (`EpisodeUsage`) antes de cada llamada externa (AC 2.1) — `UPDATE` atómico tras corregir una condición de carrera real (entrada 15)
+- [x] `EpisodeCheckpoint` como historial al entrar a `REQUIRES_HUMAN_REVIEW`
+- [x] `Resume` + escalado a `FAILED` si se repite la causa
+- [x] Idempotencia post-caída del proceso (`EpisodeRecoveryService`)
+- [x] Controller: `POST /episodes`, `GET /episodes`, `GET /episodes/:id`, acciones `approve`/`edit`/`regenerate`/`reject`/`resume`, tabla de transiciones → `409 INVALID_STATE_TRANSITION`. `GET /episodes/:id/audio/:audioAssetId/url` y `GET /episodes/:id/manifest` quedan fuera a propósito (dependen de TTS/Render, Fase 3/4)
+- [x] DTOs Zod separados de los contratos de agentes
+- [x] Tests de integración multi-módulo, todo mockeado en el borde externo
+- [x] Formato de error HTTP consistente `{ error: { code, message } }`
+- [x] Seed de config default de `Episode` (vive como `@default` en `schema.prisma`, no requiere seed aparte)
 
-- [ ] `EpisodeStateService` — único escritor de `Episode.status` (`tasks.md` §7)
-- [ ] Selección de participantes (2 de 4 personas + Judge con provider distinto + orden de turnos)
-- [ ] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION
-- [ ] `procesarBorrador` (claim extraction + fact-check/editorial + loop de enmienda)
-- [ ] Chequeo de presupuesto (`EpisodeUsage`) antes de cada llamada externa (AC 2.1)
-- [ ] `EpisodeCheckpoint` como historial al entrar a `REQUIRES_HUMAN_REVIEW`
-- [ ] `Resume` + escalado a `FAILED` si se repite la causa
-- [ ] Idempotencia post-caída del proceso
-- [ ] Controller: `POST /episodes`, `GET /episodes`, `GET /episodes/:id`, `GET /episodes/:id/audio/:audioAssetId/url`, acciones `approve`/`edit`/`regenerate`/`reject`/`resume`, tabla de transiciones → `409 INVALID_STATE_TRANSITION`
-- [ ] DTOs Zod separados de los contratos de agentes
-- [ ] Tests de integración (los únicos del proyecto, todo mockeado en el borde externo)
-- [ ] Formato de error HTTP consistente `{ error: { code, message } }` (`tasks.md` §9) — recién aplica ahora que existe el primer controller real
-- [ ] Seed de config default de `Episode` (`tasks.md` §9)
-
-Al cerrar esta fase, el backend puede completar un episodio de punta a punta hasta `PENDING_REVIEW`/`APPROVED`, aunque sin audio ni video todavía — ya es un flujo curable por un humano vía API.
+Cerrada esta fase, el backend completa un episodio de punta a punta hasta `PENDING_REVIEW`/`APPROVED`, aunque sin audio ni video todavía — verificado contra APIs reales (Tavily + Gemini), no solo con mocks.
 
 ## Fase 3 — Real-time y cierre del MVP P0 (TTS)
 
-Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0), y dar visibilidad en vivo del progreso (Feature 8, también P0). Depende de que Fase 2 ya emita puntos de enganche (inicio de research, turnos de agentes, fact-checks, aprobación de argumentos, entrada a revisión).
+Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0). El real-time (Feature 8, también P0) ya está resuelto.
 
-- [ ] `GET /episodes/:id/events` (SSE) + los 6 eventos definidos (`tasks.md` §8)
-- [ ] TTS: módulo, `AudioProvider` (google-tts-api inicial), generación de `AudioAsset` por segmento, presigned URLs (AC 6.1), regeneración atómica de un `sequenceIndex` (AC 6.2), Cockatiel (`tasks.md` §5)
-- [ ] Wirear la transición `GENERATING_AUDIO → READY_FOR_RENDER` en `EpisodeStateService`/orquestación (gap no listado explícitamente en `tasks.md` §7 pero necesario: hoy el checklist de Episodes cubre hasta `PENDING_REVIEW`/`Resume`, falta el tramo post-aprobación que dispara TTS)
+- [x] `GET /episodes/:id/events` (SSE) + los 6 eventos definidos (`tasks.md` §8) — COMPLETA
+- [ ] TTS: módulo, `AudioProvider` (google-tts-api inicial), generación de `AudioAsset` por segmento, presigned URLs (AC 6.1), regeneración atómica de un `sequenceIndex` (AC 6.2), Cockatiel (`tasks.md` §5) — **único ítem P0 sin código todavía**
+- [ ] Wirear la transición `GENERATING_AUDIO → READY_FOR_RENDER` en `EpisodeStateService`/orquestación (hoy el pipeline cubre hasta `PENDING_REVIEW`/`Resume`, falta el tramo post-aprobación que dispara TTS)
 - [ ] `README.md` real (`tasks.md` §9)
 - [ ] `04-development/testing-strategy.md` (`tasks.md` §9) — ya hay módulos implementados para documentar el patrón real usado
 
@@ -97,9 +77,10 @@ Objetivo: producir el `.mp4` final. No bloquea el MVP core (`features.md` marca 
 
 ## Decisiones abiertas (el usuario debe resolverlas, no se infieren)
 
-- **Proveedor de búsqueda web para Research** (`tasks.md` §1) — no está decidido/contratado. Bloquea el arranque real de la Fase 1.1 (Research); se puede empezar el módulo con la integración mockeada, pero la elección de proveedor (y su costo/rate limits) condiciona la política Cockatiel y las credenciales en `.env.schema.ts`.
 - **Estrategia de seed/fixtures de la Evidence Base para desarrollo local** (`tasks.md` §9) — research contra APIs reales tiene costo; hay que decidir si se graban fixtures de respuestas reales, se usa un proveedor de bajo costo en dev, o se mockea por completo mientras no se apunte a producción.
-- **Proveedor de storage para `AudioAsset`** — `features.md` (AC 6.1) exige abstraer disco local / S3 / R2 / GCS pero no fija cuál usar en el MVP; conviene decidirlo antes de la Fase 3 para no re-trabajar el `AudioProvider`.
+- **Proveedor de storage para `AudioAsset`** — `features.md` (AC 6.1) exige abstraer disco local / S3 / R2 / GCS pero no fija cuál usar en el MVP; conviene decidirlo antes de arrancar TTS (Fase 3) para no re-trabajar el `AudioProvider`.
+
+**Resueltas**: proveedor de búsqueda web para Research → **Tavily** (`tasks.md` §1, decidido 2026-09-08).
 
 ## Referencias
 
