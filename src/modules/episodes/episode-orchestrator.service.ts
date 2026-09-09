@@ -8,6 +8,8 @@ import { NoCrossExaminationTargetError } from "../debate/debate.errors";
 import { AgentsService } from "../agents/agents.service";
 import { FactCheckService } from "../fact-check/fact-check.service";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../ai/ai.errors";
+import { TtsService } from "../tts/tts.service";
+import { TtsProviderUnavailableError } from "../tts/tts.errors";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
@@ -115,6 +117,7 @@ export class EpisodeOrchestratorService {
     private readonly debate: DebateService,
     private readonly agents: AgentsService,
     private readonly factCheck: FactCheckService,
+    private readonly tts: TtsService,
     private readonly participants: EpisodeParticipantsService,
     private readonly state: EpisodeStateService,
     private readonly budget: EpisodeBudgetService,
@@ -231,6 +234,49 @@ export class EpisodeOrchestratorService {
     const refreshed = await this.prisma.episode.findUniqueOrThrow({ where: { id: episodeId }, select: { status: true } });
     if (refreshed.status !== "PENDING_REVIEW") {
       await this.state.markPendingReview(episodeId);
+    }
+  }
+
+  // Entrypoint público separado de runPipeline() a propósito: la transición
+  // APPROVED -> GENERATING_AUDIO la dispara una acción humana explícita
+  // (EpisodeActionsService.approve()), no el pipeline automático — a
+  // diferencia de research/debate/judging, que se encadenan solos. Mismo
+  // try/catch/finally que runPipeline (etapa 2 de TTS, tasks.md sección 5).
+  async runAudioPipeline(episodeId: string): Promise<void> {
+    try {
+      await this.runAudioPhase(episodeId);
+    } catch (err) {
+      await this.handlePipelineError(episodeId, err);
+    } finally {
+      this.events.complete(episodeId);
+    }
+  }
+
+  // Idempotente por re-chequeo de lo ya persistido (mismo criterio que el
+  // resto del pipeline): un Argument con audioAssetId ya asignado se salta,
+  // lo que hace que esta misma fase sirva para la corrida inicial, un resume
+  // y una recuperación post-caída (EpisodeRecoveryService) sin ramas de
+  // código separadas — Feature 4: "si el estado es GENERATING_AUDIO, se
+  // asume el guion como de solo lectura y se retoman exclusivamente las
+  // llamadas de audio pendientes".
+  async runAudioPhase(episodeId: string): Promise<void> {
+    const episode = await this.prisma.episode.findUniqueOrThrow({ where: { id: episodeId }, select: { status: true } });
+    if (episode.status === "APPROVED" || episode.status === "REQUIRES_HUMAN_REVIEW") {
+      await this.state.markGeneratingAudio(episodeId);
+    }
+
+    const ordered = await this.tts.getOrderedOfficialArguments(episodeId);
+    for (const argument of ordered) {
+      if (argument.audioAssetId) continue; // ya sintetizado — idempotencia de resume/recovery
+      await this.budget.withTtsCall(episodeId, () => this.tts.synthesizeSegment(episodeId, argument));
+    }
+
+    // Guard explícito por status de origen, mismo motivo que
+    // runResearchPhase (§7.3 arriba): esta fase puede re-ejecutarse con el
+    // episodio ya en READY_FOR_RENDER (re-entrada idempotente).
+    const refreshed = await this.prisma.episode.findUniqueOrThrow({ where: { id: episodeId }, select: { status: true } });
+    if (refreshed.status === "GENERATING_AUDIO") {
+      await this.state.markReadyForRender(episodeId);
     }
   }
 
@@ -533,6 +579,13 @@ export class EpisodeOrchestratorService {
       return;
     }
     if (err instanceof DailyQuotaExceededError || err instanceof RateLimitWaitExceededError) {
+      await this.state.requireHumanReview(episodeId, "PROVIDER_QUOTA_EXCEEDED");
+      return;
+    }
+    if (err instanceof TtsProviderUnavailableError) {
+      // Mismo reason que DailyQuotaExceededError/RateLimitWaitExceededError
+      // — "el proveedor externo no pudo resolver la llamada", sin necesidad
+      // de un CheckpointReason nuevo (decision-log.md 2026-09-09, #20).
       await this.state.requireHumanReview(episodeId, "PROVIDER_QUOTA_EXCEEDED");
       return;
     }

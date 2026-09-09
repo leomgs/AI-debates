@@ -20,6 +20,13 @@ export class EpisodeBudgetService {
     return this.withBudget(episodeId, "searchRequests", fn);
   }
 
+  // AC 2.1 no distingue entre LLM/búsqueda/TTS — TtsService.synthesizeSegment
+  // pasa por acá igual que cualquier otra llamada externa (etapa 2 de TTS,
+  // tasks.md sección 5).
+  async withTtsCall<T>(episodeId: string, fn: () => Promise<T>): Promise<T> {
+    return this.withBudget(episodeId, "ttsRequests", fn);
+  }
+
   // Bug real encontrado corriendo scripts/smoke-test-episode.ts contra APIs
   // reales (2026-09-08, ver decision-log.md): processDraft verifica los
   // claims de un argumento en paralelo (Promise.all sobre withLlmCall, D-7
@@ -34,11 +41,12 @@ export class EpisodeBudgetService {
   // UPDATE condicional).
   private async withBudget<T>(
     episodeId: string,
-    metric: "llmCalls" | "searchRequests",
+    metric: "llmCalls" | "searchRequests" | "ttsRequests",
     fn: () => Promise<T>
   ): Promise<T> {
     const episode = await this.prisma.episode.findUniqueOrThrow({ where: { id: episodeId } });
-    const limit = metric === "llmCalls" ? episode.maxLlmCalls : episode.maxSearchQueries;
+    const limit =
+      metric === "llmCalls" ? episode.maxLlmCalls : metric === "searchRequests" ? episode.maxSearchQueries : episode.maxTtsSegments;
 
     const claimed = await this.prisma.episodeUsage.updateMany({
       where: { episodeId, [metric]: { lt: limit } },

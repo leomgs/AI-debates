@@ -41,7 +41,7 @@ describe("EpisodeActionsService", () => {
   let agentsService: { createDebateAgent: jest.Mock };
   let stateService: { markApproved: jest.Mock; markCancelled: jest.Mock; resumeFromCheckpoint: jest.Mock };
   let budgetService: { withLlmCall: jest.Mock };
-  let orchestrator: { runPipeline: jest.Mock };
+  let orchestrator: { runPipeline: jest.Mock; runAudioPipeline: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -71,7 +71,10 @@ describe("EpisodeActionsService", () => {
       resumeFromCheckpoint: jest.fn().mockResolvedValue({ id: EPISODE_ID, status: "RESEARCHING" }),
     };
     budgetService = { withLlmCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()) };
-    orchestrator = { runPipeline: jest.fn().mockResolvedValue(undefined) };
+    orchestrator = {
+      runPipeline: jest.fn().mockResolvedValue(undefined),
+      runAudioPipeline: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -89,9 +92,10 @@ describe("EpisodeActionsService", () => {
   });
 
   describe("approve/reject", () => {
-    it("approve delega en EpisodeStateService.markApproved", async () => {
+    it("approve delega en EpisodeStateService.markApproved y dispara runAudioPipeline fire-and-forget (etapa 2 de TTS)", async () => {
       await service.approve(EPISODE_ID);
       expect(stateService.markApproved).toHaveBeenCalledWith(EPISODE_ID);
+      expect(orchestrator.runAudioPipeline).toHaveBeenCalledWith(EPISODE_ID);
     });
 
     it("reject delega en EpisodeStateService.markCancelled", async () => {
@@ -206,6 +210,19 @@ describe("EpisodeActionsService", () => {
       prisma.episodeCheckpoint.findFirst.mockResolvedValue({ reason: "USAGE_LIMIT_EXCEEDED" });
       await expect(service.resume(EPISODE_ID, {})).rejects.toThrow(ZodError);
       expect(stateService.resumeFromCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it("checkpoint con fromState GENERATING_AUDIO dispara runAudioPipeline en vez de runPipeline (etapa 2 de TTS)", async () => {
+      prisma.episodeCheckpoint.findFirst.mockResolvedValue({
+        reason: "PROVIDER_QUOTA_EXCEEDED",
+        fromState: "GENERATING_AUDIO",
+      });
+
+      await service.resume(EPISODE_ID, {});
+
+      expect(stateService.resumeFromCheckpoint).toHaveBeenCalledWith(EPISODE_ID);
+      expect(orchestrator.runAudioPipeline).toHaveBeenCalledWith(EPISODE_ID);
+      expect(orchestrator.runPipeline).not.toHaveBeenCalled();
     });
 
     it("INSUFFICIENT_EVIDENCE: propaga manualSources a runPipeline sin tocar límites", async () => {

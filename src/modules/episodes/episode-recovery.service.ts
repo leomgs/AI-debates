@@ -10,10 +10,14 @@ import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 // (episode-orchestrator.service.ts) que ya usan la corrida inicial y el
 // resume manual — no hay lógica de recovery separada.
 //
-// GENERATING_AUDIO/RENDERING quedan FUERA del `where` a propósito: TTS/Render
-// no existen todavía (tasks.md secciones 5/6), así que un episodio nunca
-// llega a esos estados hoy. Cuando esos módulos se implementen, sumarlos acá
-// con el mismo criterio.
+// RENDERING queda FUERA del `where` a propósito: Render no existe todavía
+// (tasks.md sección 6, P1), así que un episodio nunca llega a ese estado
+// hoy. Cuando ese módulo se implemente, sumarlo acá con el mismo criterio.
+// GENERATING_AUDIO sí se cubre (etapa 2 de TTS) — implementación literal del
+// escenario de Feature 4: "si el estado es GENERATING_AUDIO, se asume el
+// guion como de solo lectura y se retoman exclusivamente las llamadas de
+// audio pendientes" (runAudioPhase es idempotente por audioAssetId ya
+// asignado, mismo mecanismo que el resto del pipeline).
 @Injectable()
 export class EpisodeRecoveryService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EpisodeRecoveryService.name);
@@ -25,7 +29,7 @@ export class EpisodeRecoveryService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     const stuck = await this.prisma.episode.findMany({
-      where: { status: { in: ["RESEARCHING", "DEBATING", "JUDGING"] } },
+      where: { status: { in: ["RESEARCHING", "DEBATING", "JUDGING", "GENERATING_AUDIO"] } },
     });
 
     for (const episode of stuck) {
@@ -34,9 +38,11 @@ export class EpisodeRecoveryService implements OnApplicationBootstrap {
       // EpisodeActionsService.resume (decisión D-11 del plan) — no hay cola
       // de jobs, y bootstrap no debe bloquearse esperando que cada episodio
       // termine su pipeline.
-      void this.orchestrator
-        .runPipeline(episode.id)
-        .catch((err) => this.logger.error(`Recovery de ${episode.id} falló`, err instanceof Error ? err.stack : err));
+      const pipeline =
+        episode.status === "GENERATING_AUDIO"
+          ? this.orchestrator.runAudioPipeline(episode.id)
+          : this.orchestrator.runPipeline(episode.id);
+      void pipeline.catch((err) => this.logger.error(`Recovery de ${episode.id} falló`, err instanceof Error ? err.stack : err));
     }
   }
 }

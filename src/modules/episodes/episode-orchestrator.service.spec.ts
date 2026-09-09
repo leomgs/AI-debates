@@ -7,6 +7,8 @@ import { NoCrossExaminationTargetError } from "../debate/debate.errors";
 import { AgentsService } from "../agents/agents.service";
 import { FactCheckService } from "../fact-check/fact-check.service";
 import { DailyQuotaExceededError } from "../ai/ai.errors";
+import { TtsService } from "../tts/tts.service";
+import { TtsProviderUnavailableError } from "../tts/tts.errors";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
@@ -83,9 +85,12 @@ describe("EpisodeOrchestratorService", () => {
     markJudging: jest.Mock;
     markPendingReview: jest.Mock;
     requireHumanReview: jest.Mock;
+    markGeneratingAudio: jest.Mock;
+    markReadyForRender: jest.Mock;
   };
-  let budgetService: { withLlmCall: jest.Mock; withSearchRequest: jest.Mock };
+  let budgetService: { withLlmCall: jest.Mock; withSearchRequest: jest.Mock; withTtsCall: jest.Mock };
   let eventsService: { emit: jest.Mock; complete: jest.Mock };
+  let ttsService: { getOrderedOfficialArguments: jest.Mock; synthesizeSegment: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -122,6 +127,8 @@ describe("EpisodeOrchestratorService", () => {
       markJudging: jest.fn(),
       markPendingReview: jest.fn(),
       requireHumanReview: jest.fn(),
+      markGeneratingAudio: jest.fn(),
+      markReadyForRender: jest.fn(),
     };
     // Reusadas tal cual en Fase C para runDebatePhase/processDraft — mismo
     // wrapper transparente que ejecuta fn() sin chequeo real de presupuesto,
@@ -129,8 +136,10 @@ describe("EpisodeOrchestratorService", () => {
     budgetService = {
       withLlmCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
       withSearchRequest: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
+      withTtsCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
     };
     eventsService = { emit: jest.fn(), complete: jest.fn() };
+    ttsService = { getOrderedOfficialArguments: jest.fn().mockResolvedValue([]), synthesizeSegment: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -140,6 +149,7 @@ describe("EpisodeOrchestratorService", () => {
         { provide: DebateService, useValue: debateService },
         { provide: AgentsService, useValue: agentsService },
         { provide: FactCheckService, useValue: factCheckService },
+        { provide: TtsService, useValue: ttsService },
         { provide: EpisodeParticipantsService, useValue: participantsService },
         { provide: EpisodeStateService, useValue: stateService },
         { provide: EpisodeBudgetService, useValue: budgetService },
@@ -393,6 +403,50 @@ describe("EpisodeOrchestratorService", () => {
       await service.runPipeline(EPISODE_ID);
 
       expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "VALIDATION_INCONSISTENCY");
+    });
+  });
+
+  describe("runAudioPhase / runAudioPipeline (etapa 2 de TTS)", () => {
+    it("idempotente: sintetiza solo los Argument sin audioAssetId, marca GENERATING_AUDIO al entrar y READY_FOR_RENDER al terminar", async () => {
+      prisma.episode.findUniqueOrThrow
+        .mockResolvedValueOnce({ status: "APPROVED" })
+        .mockResolvedValueOnce({ status: "GENERATING_AUDIO" });
+      ttsService.getOrderedOfficialArguments.mockResolvedValue([
+        { id: "arg-1", audioAssetId: "existing-asset" },
+        { id: "arg-2", audioAssetId: null },
+      ]);
+      ttsService.synthesizeSegment.mockResolvedValue({ id: "asset-2" });
+
+      await service.runAudioPhase(EPISODE_ID);
+
+      expect(stateService.markGeneratingAudio).toHaveBeenCalledWith(EPISODE_ID);
+      expect(ttsService.synthesizeSegment).toHaveBeenCalledTimes(1);
+      expect(ttsService.synthesizeSegment).toHaveBeenCalledWith(EPISODE_ID, { id: "arg-2", audioAssetId: null });
+      expect(budgetService.withTtsCall).toHaveBeenCalledTimes(1);
+      expect(stateService.markReadyForRender).toHaveBeenCalledWith(EPISODE_ID);
+    });
+
+    it("no re-transiciona a GENERATING_AUDIO si el episodio ya está ahí (re-entrada de resume/recovery)", async () => {
+      prisma.episode.findUniqueOrThrow
+        .mockResolvedValueOnce({ status: "GENERATING_AUDIO" })
+        .mockResolvedValueOnce({ status: "GENERATING_AUDIO" });
+      ttsService.getOrderedOfficialArguments.mockResolvedValue([]);
+
+      await service.runAudioPhase(EPISODE_ID);
+
+      expect(stateService.markGeneratingAudio).not.toHaveBeenCalled();
+      expect(stateService.markReadyForRender).toHaveBeenCalledWith(EPISODE_ID);
+    });
+
+    it("TtsProviderUnavailableError -> requireHumanReview(PROVIDER_QUOTA_EXCEEDED) vía runAudioPipeline", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValueOnce({ status: "APPROVED" });
+      ttsService.getOrderedOfficialArguments.mockResolvedValue([{ id: "arg-1", audioAssetId: null }]);
+      ttsService.synthesizeSegment.mockRejectedValue(new TtsProviderUnavailableError("LOCAL"));
+
+      await service.runAudioPipeline(EPISODE_ID);
+
+      expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "PROVIDER_QUOTA_EXCEEDED");
+      expect(eventsService.complete).toHaveBeenCalledWith(EPISODE_ID);
     });
   });
 

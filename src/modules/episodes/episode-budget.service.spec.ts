@@ -115,4 +115,40 @@ describe("EpisodeBudgetService", () => {
       await expect(service.withSearchRequest(EPISODE_ID, jest.fn())).rejects.toThrow(BudgetExceededError);
     });
   });
+
+  describe("withTtsCall", () => {
+    it("chequea contra maxTtsSegments (no maxLlmCalls/maxSearchQueries) y ejecuta fn cuando hay margen", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({
+        id: EPISODE_ID,
+        maxLlmCalls: 25,
+        maxSearchQueries: 5,
+        maxTtsSegments: 40,
+      });
+      prisma.episodeUsage.updateMany.mockResolvedValue({ count: 1 });
+      const fn = jest.fn().mockResolvedValue("audio-asset");
+
+      const result = await service.withTtsCall(EPISODE_ID, fn);
+
+      expect(result).toBe("audio-asset");
+      expect(prisma.episodeUsage.updateMany).toHaveBeenCalledWith({
+        where: { episodeId: EPISODE_ID, ttsRequests: { lt: 40 } },
+        data: { ttsRequests: { increment: 1 } },
+      });
+    });
+
+    it("lanza BudgetExceededError con metric ttsRequests en el límite", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({
+        id: EPISODE_ID,
+        maxLlmCalls: 25,
+        maxSearchQueries: 5,
+        maxTtsSegments: 40,
+      });
+      prisma.episodeUsage.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.withTtsCall(EPISODE_ID, jest.fn())).rejects.toMatchObject({
+        metric: "ttsRequests",
+        limit: 40,
+      });
+    });
+  });
 });

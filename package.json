@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "db:seed": "prisma db seed",
     "smoke:argument": "ts-node scripts/smoke-test-argument.ts",
-    "smoke:episode": "ts-node scripts/smoke-test-episode.ts"
+    "smoke:episode": "ts-node scripts/smoke-test-episode.ts",
+    "smoke:tts": "ts-node scripts/smoke-test-tts.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.116",
@@ -37,6 +38,7 @@
     "ai": "^6.0.277",
     "better-sqlite3": "^13.0.3",
     "cockatiel": "^4.0.0",
+    "echogarden": "^3.4.0",
     "google-tts-api": "^2.0.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

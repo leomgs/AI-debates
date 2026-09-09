@@ -20,6 +20,10 @@ const ALLOWED_FROM: Partial<Record<EpisodeStatus, EpisodeStatus[]>> = {
   PENDING_REVIEW: ["JUDGING"],
   APPROVED: ["PENDING_REVIEW"],
   CANCELLED: ["PENDING_REVIEW", "REQUIRES_HUMAN_REVIEW"],
+  // Etapa 2 de TTS (tasks.md sección 5) — mismo patrón que el resto: un
+  // método por estado destino, reusado en flujo normal y en resume/recovery.
+  GENERATING_AUDIO: ["APPROVED", "REQUIRES_HUMAN_REVIEW"],
+  READY_FOR_RENDER: ["GENERATING_AUDIO"],
 };
 
 // markFailed() se usa en dos escenarios con la misma mecánica (crear
@@ -30,11 +34,17 @@ const ALLOWED_FROM: Partial<Record<EpisodeStatus, EpisodeStatus[]>> = {
 // caller que quiera terminar un episodio ya parqueado en
 // REQUIRES_HUMAN_REVIEW sin pasar por un resume. Por eso el conjunto de
 // origen permitido es más amplio que "solo REQUIRES_HUMAN_REVIEW".
-const FAILED_ALLOWED_FROM: EpisodeStatus[] = ["RESEARCHING", "DEBATING", "JUDGING", "REQUIRES_HUMAN_REVIEW"];
+const FAILED_ALLOWED_FROM: EpisodeStatus[] = [
+  "RESEARCHING",
+  "DEBATING",
+  "JUDGING",
+  "GENERATING_AUDIO",
+  "REQUIRES_HUMAN_REVIEW",
+];
 
-// GENERATING_AUDIO/READY_FOR_RENDER/RENDERING/COMPLETED no tienen método
-// todavía — TTS/Render no existen (YAGNI). Se agregan después con el mismo
-// patrón (ALLOWED_FROM + notify), sin tocar lo ya escrito acá.
+// RENDERING/COMPLETED todavía no tienen método — Render no existe (YAGNI,
+// tasks.md sección 6, P1). Se agregan después con el mismo patrón
+// (ALLOWED_FROM + notify), sin tocar lo ya escrito acá.
 
 @Injectable()
 export class EpisodeStateService {
@@ -82,6 +92,18 @@ export class EpisodeStateService {
     return this.transition(episodeId, "CANCELLED");
   }
 
+  // Etapa 2 de TTS — sin NotificationType propio (mismo criterio que
+  // markApproved/markCancelled: son transiciones internas del pipeline
+  // automático, no un desenlace que requiera avisar al curador fuera de la
+  // pantalla del episodio; el SSE en vivo sigue cubriendo visibilidad).
+  async markGeneratingAudio(episodeId: string): Promise<Episode> {
+    return this.transition(episodeId, "GENERATING_AUDIO");
+  }
+
+  async markReadyForRender(episodeId: string): Promise<Episode> {
+    return this.transition(episodeId, "READY_FOR_RENDER");
+  }
+
   // Estado transversal (features.md Feature 4): se gatilla desde CUALQUIER
   // fase activa. Detección de "la misma causa volvió a ocurrir tras un
   // resume": se compara `reason` contra el EpisodeCheckpoint más reciente de
@@ -91,7 +113,7 @@ export class EpisodeStateService {
   // repitió" (no hace falta ningún contador aparte).
   async requireHumanReview(episodeId: string, reason: CheckpointReason, debateRoundId?: string): Promise<Episode> {
     const episode = await this.loadOrThrow(episodeId);
-    this.assertFrom(episode.status, ["RESEARCHING", "DEBATING", "JUDGING"], "REQUIRES_HUMAN_REVIEW");
+    this.assertFrom(episode.status, ["RESEARCHING", "DEBATING", "JUDGING", "GENERATING_AUDIO"], "REQUIRES_HUMAN_REVIEW");
 
     const lastCheckpoint = await this.prisma.episodeCheckpoint.findFirst({
       where: { episodeId },

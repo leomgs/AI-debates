@@ -36,8 +36,16 @@ export class EpisodeActionsService {
     private readonly orchestrator: EpisodeOrchestratorService
   ) {}
 
+  // Dispara la etapa 2 de TTS fire-and-forget, mismo criterio que
+  // resume()/EpisodeRecoveryService (decisión D-11 del plan de
+  // EpisodesModule) — approve() no debe bloquear esperando que termine de
+  // sintetizar todo el audio del episodio.
   async approve(episodeId: string): Promise<Episode> {
-    return this.state.markApproved(episodeId);
+    const episode = await this.state.markApproved(episodeId);
+    void this.orchestrator
+      .runAudioPipeline(episodeId)
+      .catch((err) => this.logger.error(`runAudioPipeline (post-approve) falló para ${episodeId}`, err instanceof Error ? err.stack : err));
+    return episode;
   }
 
   async edit(episodeId: string, dto: EditActionDto): Promise<Argument> {
@@ -129,9 +137,17 @@ export class EpisodeActionsService {
     const opts = await this.applyResumeBody(episodeId, checkpoint.reason, body);
 
     const episode = await this.state.resumeFromCheckpoint(episodeId);
-    void this.orchestrator
-      .runPipeline(episodeId, opts)
-      .catch((err) => this.logger.error(`runPipeline (post-resume) falló para ${episodeId}`, err instanceof Error ? err.stack : err));
+    // Etapa 2 de TTS: un checkpoint con fromState GENERATING_AUDIO retoma
+    // solo las llamadas de audio pendientes (runAudioPipeline, idempotente
+    // por audioAssetId ya asignado) — runPipeline() rehace research/debate/
+    // judging, que ya están completos y no deben re-ejecutarse.
+    const resumedPipeline =
+      checkpoint.fromState === "GENERATING_AUDIO"
+        ? this.orchestrator.runAudioPipeline(episodeId)
+        : this.orchestrator.runPipeline(episodeId, opts);
+    void resumedPipeline.catch((err) =>
+      this.logger.error(`pipeline (post-resume) falló para ${episodeId}`, err instanceof Error ? err.stack : err)
+    );
     return episode;
   }
 

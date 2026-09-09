@@ -18,19 +18,22 @@ const prisma = new PrismaClient({
 });
 
 // Un voice ID por AudioProvider soportado (decision-log.md 2026-09-09, #20).
+// LOCAL: nombres reales del catálogo Piper/vits de echogarden, confirmados
+// corriendo `Echogarden.requestVoiceList({ engine: 'vits', language: 'es' })`
+// contra el paquete real (7 voces es-ES/es-MX disponibles hoy, 1 sola
+// femenina — es_MX-claude-high). Se priorizan tiers "medium"/"high" (mejor
+// calidad que "low"/"x_low") y se evita repetir voz entre personas.
 // GOOGLE_TTS es la misma "es" para los 5 agentes a propósito: google-tts-api
 // tiene una sola voz por idioma, no diferencia por persona (limitación de
-// producto conocida, no un bug — ver tasks.md sección 5). LOCAL usa
-// placeholders todavía: los nombres reales de modelo Piper se confirman
-// contra el catálogo real de echogarden en la etapa 2 de TTS. OPENROUTER usa
+// producto conocida, no un bug — ver tasks.md sección 5). OPENROUTER usa
 // placeholders hasta el spike de validación contra fish-audio (etapa 5).
 const DEBATER_VOICE_IDS: Record<DebaterPersona['id'], VoiceIdMap> = {
-  ANALYST: { LOCAL: 'es-male-1', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
-  CONTRARIAN: { LOCAL: 'es-male-2', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
-  DIPLOMAT: { LOCAL: 'es-female-1', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
-  PROVOCATEUR: { LOCAL: 'es-female-2', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  ANALYST: { LOCAL: 'es_ES-davefx-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  CONTRARIAN: { LOCAL: 'es_ES-sharvard-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  DIPLOMAT: { LOCAL: 'es_MX-claude-high', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+  PROVOCATEUR: { LOCAL: 'es_MX-ald-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
 };
-const JUDGE_VOICE_ID: VoiceIdMap = { LOCAL: 'es-neutral-1', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
+const JUDGE_VOICE_ID: VoiceIdMap = { LOCAL: 'es_ES-mls_10246-low', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
 
 // Snapshot informativo: el prompt real que ve el LLM en cada ronda lo arma
 // AgentsService vía buildDebaterSystemPrompt (roundType-específico) — este

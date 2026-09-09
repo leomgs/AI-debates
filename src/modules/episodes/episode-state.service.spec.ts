@@ -55,6 +55,9 @@ describe("EpisodeStateService", () => {
       ["markApproved", "PENDING_REVIEW", "APPROVED"],
       ["markCancelled", "PENDING_REVIEW", "CANCELLED"],
       ["markCancelled", "REQUIRES_HUMAN_REVIEW", "CANCELLED"],
+      ["markGeneratingAudio", "APPROVED", "GENERATING_AUDIO"],
+      ["markGeneratingAudio", "REQUIRES_HUMAN_REVIEW", "GENERATING_AUDIO"],
+      ["markReadyForRender", "GENERATING_AUDIO", "READY_FOR_RENDER"],
     ] as const)("%s permite la transición desde %s hacia %s", async (method, from, to) => {
       prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeRow(from));
       prisma.episode.update.mockResolvedValue(episodeRow(to));
@@ -97,7 +100,7 @@ describe("EpisodeStateService", () => {
   });
 
   describe("requireHumanReview", () => {
-    it.each(["RESEARCHING", "DEBATING", "JUDGING"] as const)(
+    it.each(["RESEARCHING", "DEBATING", "JUDGING", "GENERATING_AUDIO"] as const)(
       "desde %s, sin checkpoint previo, crea el checkpoint y transiciona a REQUIRES_HUMAN_REVIEW",
       async (from) => {
         prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeRow(from));

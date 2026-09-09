@@ -21,7 +21,7 @@ export class InvalidEpisodeTransitionError extends Error {
 export class BudgetExceededError extends Error {
   constructor(
     public readonly reason: "USAGE_LIMIT_EXCEEDED",
-    public readonly metric: "llmCalls" | "searchRequests",
+    public readonly metric: "llmCalls" | "searchRequests" | "ttsRequests",
     public readonly limit: number
   ) {
     super(`Se alcanzó el límite de ${metric} (${limit}) configurado para este episodio.`);

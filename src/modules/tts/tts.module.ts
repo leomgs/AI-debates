@@ -9,11 +9,11 @@ import { AUDIO_PROVIDER, AUDIO_STORAGE } from "./tts.tokens";
 // la etapa 2 de TTS), y los 2 endpoints HTTP de la etapa 3 (AC 6.1/6.2) se
 // agregan a EpisodesController existente, no a uno nuevo acá.
 //
-// AUDIO_PROVIDER está atado directo a EchogardenAudioProvider (stub, etapa
-// 1) — el switch por TTS_PROVIDER entre los 3 motores recién tiene sentido
-// cuando existe una segunda implementación real que elegir (etapa 4, Google).
-// Antes de eso sería una rama muerta apuntando a símbolos que no existen
-// todavía.
+// AUDIO_PROVIDER está atado directo a EchogardenAudioProvider (único motor
+// real implementado — etapa 2 de TTS) — el switch por TTS_PROVIDER entre
+// los 3 motores recién tiene sentido cuando existe una segunda
+// implementación real que elegir (etapa 4, Google). Antes de eso sería una
+// rama muerta apuntando a símbolos que no existen todavía.
 @Module({
   providers: [
     LocalDiskStorageProvider,
