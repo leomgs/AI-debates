@@ -78,8 +78,20 @@ interface ProcessDraftParams {
 // del debatiente sin cambios — no tienen refine, no mostraron este problema.
 const EDITORIAL_REVIEW_PROVIDER = "GOOGLE" as const;
 
+// UNSUPPORTED cuenta como falla, no solo FALSE/MISLEADING (decision-log.md
+// 2026-09-09, #17) — un claim FACTUAL sin respaldo en la Evidence Base es
+// exactamente lo que el system prompt del debatiente promete no hacer ("no
+// inventes datos ni cifras"); dejarlo pasar permitía cifras inventadas
+// (ratings de MyAnimeList inexistentes en la evidencia, visto en un smoke
+// test real) sin disparar el loop de enmienda. CONTESTED queda afuera a
+// propósito: implica que las fuentes se contradicen entre sí, no que el
+// claim se inventó, y no hay caso real todavía que justifique tratarlo igual.
 function isFactCheckFailure(result: FactCheckOutput): boolean {
-  return result.veracity === "FALSE" || result.veracity === "MISLEADING";
+  return (
+    result.veracity === "FALSE" ||
+    result.veracity === "MISLEADING" ||
+    result.veracity === "UNSUPPORTED"
+  );
 }
 
 function isEditorialFailure(result: EditorialReviewOutput): boolean {
