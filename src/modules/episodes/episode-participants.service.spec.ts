@@ -72,6 +72,18 @@ describe("EpisodeParticipantsService", () => {
     expect(debaterProviders).toEqual(["GOOGLE", "GOOGLE"]);
   });
 
+  it("incluye OPENROUTER entre los disponibles cuando OPENROUTER_API_KEY está configurada", async () => {
+    config.get.mockImplementation((key: string) => (key === "OPENROUTER_API_KEY" ? "sk-or-fake" : undefined));
+    // free=[OPENROUTER] (length 1) -> randomIndex(1) siempre 0
+    mockRandomSequence([0.01, 0.01, 0.1, 0.1, 0.9]);
+
+    await service.selectParticipants(EPISODE_ID, DEBATE_ID);
+
+    const data = prisma.episodeParticipant.createMany.mock.calls[0][0].data;
+    const judge = data.find((p: { isJudge: boolean }) => p.isJudge);
+    expect(judge.modelProvider).toBe("OPENROUTER");
+  });
+
   it("cae a sortear entre todos los disponibles cuando solo hay 1 provider (fallback documentado)", async () => {
     // config.get siempre undefined -> solo GOOGLE disponible
     mockRandomSequence([0.01, 0.01, 0.5, 0.5, 0.5]);

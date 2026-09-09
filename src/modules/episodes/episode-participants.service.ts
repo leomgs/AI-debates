@@ -46,6 +46,7 @@ export class EpisodeParticipantsService {
     if (this.config.get("OPENAI_API_KEY", { infer: true })) providers.push("OPENAI");
     if (this.config.get("ANTHROPIC_API_KEY", { infer: true })) providers.push("ANTHROPIC");
     if (this.config.get("XAI_API_KEY", { infer: true })) providers.push("XAI");
+    if (this.config.get("OPENROUTER_API_KEY", { infer: true })) providers.push("OPENROUTER");
     return providers;
   }
 

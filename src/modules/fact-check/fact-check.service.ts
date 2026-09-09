@@ -69,11 +69,21 @@ function buildEditorialReviewSystemPrompt(persona: DebaterPersona): string {
     `Sos un editor que revisa si un texto respeta la personalidad de ${persona.displayName} y las reglas de moderación básicas — no si es cierto o falso, eso no es tu función.`,
     `Reglas que no puede romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
     `Reglas que siempre debe cumplir: ${persona.editorialRules.required.join("; ")}.`,
+    "La afirmación a revisar es UN claim extraído de un argumento más largo — puede depender de datos o razonamiento que aparecen en otra parte de ese argumento. Evaluá la afirmación en el contexto del argumento completo (te lo paso abajo), no de forma aislada. Por ejemplo, una afirmación de peso que se apoya en un dato citado en una oración cercana del mismo argumento NO rompe una regla de 'no hacer afirmaciones sin respaldo', aunque el dato no esté repetido en la afirmación misma.",
   ].join("\n\n");
 }
 
-function buildEditorialReviewPrompt(statement: string): string {
-  return `Afirmación a revisar: "${statement}"`;
+// argumentContent: bug real encontrado corriendo scripts/smoke-test-episode.ts
+// contra APIs reales (decision-log.md 2026-09-08 #11/#12) — evaluar el claim
+// sin el argumento completo alrededor hacía que el editor rechazara
+// afirmaciones bien respaldadas (el respaldo vivía en una oración vecina, no
+// en el claim mismo, ya que extractClaims segmenta el argumento en
+// afirmaciones discretas). Esto disparaba el loop de enmienda repetidamente
+// sin necesidad, agotando el presupuesto de LLM del episodio.
+function buildEditorialReviewPrompt(statement: string, argumentContent: string): string {
+  return [`Afirmación a revisar: "${statement}"`, `Argumento completo del que salió esta afirmación:\n"${argumentContent}"`].join(
+    "\n\n"
+  );
 }
 
 @Injectable()
@@ -136,7 +146,12 @@ export class FactCheckService {
   // Ruteo OPINION/PREDICTION/SUBJECTIVE (Feature 3) — no hay tabla propia
   // para esto en schema.prisma, así que no persiste nada: el orquestador
   // reacciona directo al resultado (loop de enmienda si passed=false).
-  async editorialReview(claim: Claim, persona: DebaterPersona, provider: ModelProvider): Promise<EditorialReviewOutput> {
+  async editorialReview(
+    claim: Claim,
+    persona: DebaterPersona,
+    provider: ModelProvider,
+    argumentContent: string
+  ): Promise<EditorialReviewOutput> {
     const model = this.modelProviderFactory.resolve(provider);
     return policy.execute(async () => {
       await this.rateLimiter.acquire(provider);
@@ -144,7 +159,7 @@ export class FactCheckService {
         model,
         schema: EditorialReviewOutputSchema,
         system: buildEditorialReviewSystemPrompt(persona),
-        prompt: buildEditorialReviewPrompt(claim.statement),
+        prompt: buildEditorialReviewPrompt(claim.statement, argumentContent),
       });
       return EditorialReviewOutputSchema.parse(result.object);
     });

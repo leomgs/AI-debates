@@ -248,7 +248,7 @@ export class EpisodeOrchestratorService {
           this.budget.withLlmCall<FactCheckOutput | EditorialReviewOutput>(episodeId, () =>
             claim.type === "FACTUAL"
               ? this.factCheck.check(claim, context.evidenceBase, provider)
-              : this.factCheck.editorialReview(claim, persona, provider)
+              : this.factCheck.editorialReview(claim, persona, provider, currentContent)
           )
         )
       );

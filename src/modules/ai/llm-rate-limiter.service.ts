@@ -48,6 +48,10 @@ export class LlmRateLimiterService {
         rpm: config.get("GOOGLE_RPM_LIMIT", { infer: true }),
         rpd: config.get("GOOGLE_RPD_LIMIT", { infer: true }),
       },
+      OPENROUTER: {
+        rpm: config.get("OPENROUTER_RPM_LIMIT", { infer: true }),
+        rpd: config.get("OPENROUTER_RPD_LIMIT", { infer: true }),
+      },
       OPENAI: null,
       ANTHROPIC: null,
       XAI: null,

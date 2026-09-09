@@ -4,6 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createXai } from "@ai-sdk/xai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { ModelProvider } from "@prisma/client";
 import type { Env } from "../../shared/config/env.schema";
@@ -52,6 +53,24 @@ export class ModelProviderFactory {
         return createXai({
           apiKey: this.config.get("XAI_API_KEY", { infer: true }),
         })("grok-4");
+
+      case "OPENROUTER": {
+        // Validado a mano contra la API real (2026-09-08, ver decision-log.md)
+        // — de 5 modelos :free que declaran soporte de structured_outputs en
+        // OpenRouter, estos 2 lo cumplen de verdad con generateObject. Se
+        // sortea entre ambos en cada resolve() (no una vez por proceso) para
+        // que "usar los dos modelos" sea real y no solo el primero que
+        // aparezca en el código. Los dos comparten la MISMA cuenta/key, así
+        // que comparten un único cupo real de RPM/RPD — por eso es un solo
+        // ModelProvider.OPENROUTER en vez de dos valores de enum separados:
+        // LlmRateLimiterService trackea el cupo por ModelProvider, y dos
+        // valores para la misma key hubiera subestimado el uso real.
+        const OPENROUTER_MODELS = ["nvidia/nemotron-3-super-120b-a12b:free", "liquid/lfm-2.5-2.6b:free"] as const;
+        const modelId = OPENROUTER_MODELS[Math.floor(Math.random() * OPENROUTER_MODELS.length)];
+        return createOpenRouter({
+          apiKey: this.config.get("OPENROUTER_API_KEY", { infer: true }),
+        })(modelId);
+      }
 
       default: {
         const _exhaustive: never = provider;

@@ -101,7 +101,7 @@ describe('FactCheckService', () => {
       mockGenerateObject.mockResolvedValue({ object: { passed: true } });
       const claim = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'una opinión fuerte', type: 'OPINION' as const };
 
-      const output = await service.editorialReview(claim, ANALYST, 'GOOGLE');
+      const output = await service.editorialReview(claim, ANALYST, 'GOOGLE', 'Un argumento completo con datos y esta opinión fuerte al final.');
 
       expect(output.passed).toBe(true);
       expect(prisma.claim.create).not.toHaveBeenCalled();
@@ -109,13 +109,18 @@ describe('FactCheckService', () => {
       const call = mockGenerateObject.mock.calls[0][0];
       expect(call.system).toContain(ANALYST.displayName);
       expect(call.prompt).toContain('una opinión fuerte');
+      // Bug real corrigido (decision-log.md 2026-09-08 #11/#12): el prompt
+      // debe incluir el argumento completo, no solo el claim aislado — así
+      // el editor puede ver el respaldo que vive en otra oración del mismo
+      // argumento en vez de rechazar afirmaciones bien fundamentadas.
+      expect(call.prompt).toContain('Un argumento completo con datos y esta opinión fuerte al final.');
     });
 
     it('agota los reintentos y rechaza cuando el output nunca matchea EditorialReviewOutputSchema (coding-rules.md §3)', async () => {
       mockGenerateObject.mockResolvedValue({ object: { passed: false } }); // passed=false sin violatedRule/reason -> falla el .refine()
       const claim = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'algo', type: 'OPINION' as const };
 
-      await expect(service.editorialReview(claim, ANALYST, 'GOOGLE')).rejects.toThrow();
+      await expect(service.editorialReview(claim, ANALYST, 'GOOGLE', 'Un argumento completo.')).rejects.toThrow();
 
       // maxAttempts: 3 en cockatiel = 1 intento inicial + 3 reintentos = 4 invocaciones.
       expect(mockGenerateObject).toHaveBeenCalledTimes(4);

@@ -97,6 +97,7 @@ enum ModelProvider {
   GOOGLE
   ANTHROPIC
   XAI
+  OPENROUTER
 }
 
 enum AssetType {
