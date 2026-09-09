@@ -26,6 +26,7 @@ import {
   VerdictOutputSchema,
 } from '../../shared/contracts/agents.contracts';
 import {
+  DEBATER_PERSONAS,
   DebaterPersona,
   JUDGE,
   buildDebaterSystemPrompt,
@@ -58,11 +59,19 @@ function formatEvidence(evidenceBase: DebateContext['evidenceBase']): string {
 
 function formatOfficialArguments(
   officialArguments: DebateContext['officialArguments'],
+  participants: DebateContext['participants'],
 ): string {
   if (officialArguments.length === 0)
     return '(ninguno todavía — sos el primero en hablar)';
   return officialArguments
-    .map((arg) => `- [${arg.roundType}] agente ${arg.agentId}: ${arg.content}`)
+    .map((arg) => {
+      // Fallback al agentId crudo si no matchea ningún participant — no
+      // debería pasar en la práctica (participants siempre incluye a los
+      // dos debatientes del episodio), pero evita perder la línea entera.
+      const displayName =
+        participants.find((p) => p.agentId === arg.agentId)?.displayName ?? arg.agentId;
+      return `- [${arg.roundType}] ${displayName}: ${arg.content}`;
+    })
     .join('\n');
 }
 
@@ -70,7 +79,7 @@ function buildArguePrompt(context: DebateContext): string {
   return [
     `Tema del debate: ${context.topic}`,
     `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
-    `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments)}`,
+    `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
     `Generá tu argumento para esta intervención.`,
   ].join('\n\n');
 }
@@ -79,11 +88,13 @@ function buildRespondPrompt(
   context: DebateContext,
   target: DebateContext['officialArguments'][number],
 ): string {
+  const targetName =
+    context.participants.find((p) => p.agentId === target.agentId)?.displayName ?? target.agentId;
   return [
     `Tema del debate: ${context.topic}`,
     `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
-    `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments)}`,
-    `Te toca hacer cross-examination del siguiente argumento puntual (agente ${target.agentId}, id: ${target.id}):\n"${target.content}"`,
+    `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
+    `Te toca hacer cross-examination del siguiente argumento puntual (de ${targetName}, id: ${target.id}):\n"${target.content}"`,
     `Generá tu respuesta dirigida específicamente a ese argumento. En el campo respondsToId devolvé exactamente este id: ${target.id}.`,
   ].join('\n\n');
 }
@@ -111,11 +122,16 @@ function buildAmendPrompt(
     .join('\n\n');
 }
 
+function formatParticipants(participants: DebateContext['participants']): string {
+  return participants.map((p) => `- ${p.displayName}: agentId ${p.agentId}`).join('\n');
+}
+
 function buildJudgePrompt(context: DebateContext): string {
   return [
     `Tema debatido: ${context.topic}`,
-    `Transcripción completa del debate (argumentos oficiales, en orden):\n${formatOfficialArguments(context.officialArguments)}`,
-    `Emití tu veredicto. Si corresponde declarar un ganador, winnerAgentId debe ser el id de uno de los agentes que participó del debate; si no hay un ganador claro, winnerAgentId puede ser null.`,
+    `Agentes que participaron de este debate (para saber qué agentId devolver en winnerAgentId):\n${formatParticipants(context.participants)}`,
+    `Transcripción completa del debate (argumentos oficiales, en orden):\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
+    `Emití tu veredicto. Si corresponde declarar un ganador, winnerAgentId debe ser el agentId (de la lista de arriba) de uno de los agentes que participó del debate; si no hay un ganador claro, winnerAgentId puede ser null.`,
   ].join('\n\n');
 }
 
@@ -137,11 +153,20 @@ class DebaterAgentImpl implements DebaterAgent {
     private readonly rateLimiter: LlmRateLimiterService,
   ) {}
 
+  // Solo 2 debatientes por episodio (architecture.md §7.1) — el oponente es
+  // el único otro participant con un personaId distinto al propio. Se
+  // resuelve acá (no en el orquestador) porque DebaterAgentImpl es quien
+  // conoce this.persona.id, y context.participants ya viaja en cada llamada.
+  private findOpponent(context: DebateContext): DebaterPersona | undefined {
+    const other = context.participants.find((p) => p.personaId !== this.persona.id);
+    return other ? DEBATER_PERSONAS[other.personaId] : undefined;
+  }
+
   async argue(
     context: DebateContext,
     roundType: 'OPENING' | 'REBUTTAL',
   ): Promise<ArgumentDraft> {
-    const system = buildDebaterSystemPrompt(this.persona, roundType);
+    const system = buildDebaterSystemPrompt(this.persona, roundType, this.findOpponent(context));
     return policy.execute(async () => {
       await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
@@ -158,7 +183,7 @@ class DebaterAgentImpl implements DebaterAgent {
     context: DebateContext,
     target: DebateContext['officialArguments'][number],
   ): Promise<CrossExaminationDraft> {
-    const system = buildDebaterSystemPrompt(this.persona, 'CROSS_EXAMINATION');
+    const system = buildDebaterSystemPrompt(this.persona, 'CROSS_EXAMINATION', this.findOpponent(context));
     return policy.execute(async () => {
       await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
@@ -177,7 +202,7 @@ class DebaterAgentImpl implements DebaterAgent {
     feedback: AmendmentFeedback,
     roundType: RoundType,
   ): Promise<ArgumentDraft | CrossExaminationDraft> {
-    const system = buildDebaterSystemPrompt(this.persona, roundType);
+    const system = buildDebaterSystemPrompt(this.persona, roundType, this.findOpponent(context));
     const schema =
       roundType === 'CROSS_EXAMINATION'
         ? CrossExaminationDraftSchema

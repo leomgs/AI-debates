@@ -5,7 +5,7 @@ import { ModelProviderFactory } from '../ai/model-provider.factory';
 import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
 import { AgentsService } from './agents.service';
 import { DebateContext } from '../../shared/contracts/agents.contracts';
-import { ANALYST, JUDGE, buildDebaterSystemPrompt, buildJudgeSystemPrompt } from '../../shared/personas/agents.personas';
+import { ANALYST, CONTRARIAN, JUDGE, buildDebaterSystemPrompt, buildJudgeSystemPrompt } from '../../shared/personas/agents.personas';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -28,9 +28,13 @@ function buildContext(overrides: Partial<DebateContext> = {}): DebateContext {
       facts: [{ statement: 'El 40% de las empresas ya usa copilotos de IA', sourceId: '11111111-1111-4111-8111-111111111111' }],
     },
     officialArguments: [],
+    participants: [],
     ...overrides,
   };
 }
+
+const AGENT_A_ID = '55555555-5555-4555-8555-555555555555';
+const AGENT_B_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('AgentsService', () => {
   let service: AgentsService;
@@ -74,6 +78,23 @@ describe('AgentsService', () => {
       expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'REBUTTAL'));
       expect(call.prompt).toContain(context.topic);
       expect(call.prompt).toContain(context.evidenceBase.facts[0].statement);
+    });
+
+    it('identifica al oponente en el system prompt cuando context.participants trae 2 personas', async () => {
+      mockGenerateObject.mockResolvedValue({ object: { content: 'La evidencia muestra una adopción creciente.' } });
+      const agent = service.createDebateAgent(ANALYST, 'GOOGLE');
+      const context = buildContext({
+        participants: [
+          { agentId: AGENT_A_ID, personaId: ANALYST.id, displayName: ANALYST.displayName },
+          { agentId: AGENT_B_ID, personaId: CONTRARIAN.id, displayName: CONTRARIAN.displayName },
+        ],
+      });
+
+      await agent.argue(context, 'REBUTTAL');
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'REBUTTAL', CONTRARIAN));
+      expect(call.system).toContain(CONTRARIAN.displayName);
     });
   });
 

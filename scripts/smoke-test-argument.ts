@@ -40,7 +40,12 @@ async function main() {
   const analystAgent = await prisma.agent.findFirstOrThrow({ where: { name: 'Analyst' } });
 
   console.log('5. Generando el primer argumento OPENING (Gemini)...');
-  const context: DebateContext = { topic: topic.title, evidenceBase: researchOutput, officialArguments: [] };
+  const context: DebateContext = {
+    topic: topic.title,
+    evidenceBase: researchOutput,
+    officialArguments: [],
+    participants: [{ agentId: analystAgent.id, personaId: ANALYST.id, displayName: ANALYST.displayName }],
+  };
   const debaterAgent = agents.createDebateAgent(ANALYST, 'GOOGLE');
   const draft = await debaterAgent.argue(context, 'OPENING');
   console.log(`   Draft:\n   "${draft.content}"`);

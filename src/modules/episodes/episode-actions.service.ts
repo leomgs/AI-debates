@@ -69,7 +69,7 @@ export class EpisodeActionsService {
     });
     const persona = DEBATER_PERSONAS[participant.agent.role as DebaterPersona["id"]];
     const agentInstance = this.agents.createDebateAgent(persona, participant.modelProvider);
-    const context = await this.buildDebateContext(episode.debateId, episode.debate.topic.title, episode.debate.topic.id);
+    const context = await this.buildDebateContext(episodeId, episode.debateId, episode.debate.topic.title, episode.debate.topic.id);
 
     let newContent: string;
     if (argument.debateRound.type === "CROSS_EXAMINATION") {
@@ -186,7 +186,12 @@ export class EpisodeActionsService {
   // Versión mínima del buildDebateContext de EpisodeOrchestratorService — no
   // se reusa esa (privada, y este caso solo necesita el estado ACTUAL de
   // officialArguments, sin la lógica de fases/rondas del orquestador).
-  private async buildDebateContext(debateId: string, topicTitle: string, topicId: string): Promise<DebateContext> {
+  private async buildDebateContext(
+    episodeId: string,
+    debateId: string,
+    topicTitle: string,
+    topicId: string
+  ): Promise<DebateContext> {
     const facts = await this.prisma.evidenceFact.findMany({
       where: { source: { researchSession: { topicId } } },
     });
@@ -194,6 +199,10 @@ export class EpisodeActionsService {
       where: { debateRound: { debateId }, status: "OFFICIAL" },
       include: { debateRound: true },
       orderBy: { createdAt: "asc" },
+    });
+    const debaterParticipants = await this.prisma.episodeParticipant.findMany({
+      where: { episodeId, isJudge: false },
+      include: { agent: true },
     });
 
     return {
@@ -208,6 +217,10 @@ export class EpisodeActionsService {
         content: a.content,
         roundType: a.debateRound.type,
       })),
+      participants: debaterParticipants.map((p) => {
+        const persona = DEBATER_PERSONAS[p.agent.role as DebaterPersona["id"]];
+        return { agentId: p.agentId, personaId: persona.id, displayName: persona.displayName };
+      }),
     };
   }
 }

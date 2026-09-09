@@ -1,4 +1,4 @@
-import { RoundType } from "../contracts/agents.contracts";
+import { DebaterPersonaId, RoundType } from "../contracts/agents.contracts";
 
 // ============================================================
 // Personas de los agentes debatientes.
@@ -10,11 +10,12 @@ import { RoundType } from "../contracts/agents.contracts";
 // ============================================================
 
 export interface DebaterPersona {
-  id: "ANALYST" | "CONTRARIAN" | "DIPLOMAT" | "PROVOCATEUR";
+  id: DebaterPersonaId;
   displayName: string;
   coreStance: string; // qué defiende estructuralmente en cualquier debate
   argumentStyle: string; // cómo construye OPENING / REBUTTAL
   crossExaminationStyle: string; // cómo ataca específicamente en CROSS_EXAMINATION
+  voice: string; // tono/registro/vocabulario distintivo — para que la prosa generada, no solo el argumento de fondo, distinga a esta persona de las otras 3
   editorialRules: {
     forbidden: string[];
     required: string[];
@@ -40,6 +41,8 @@ export const ANALYST: DebaterPersona = {
     "Construye cada argumento apoyado en datos, cifras o hechos verificables. Evita el lenguaje especulativo.",
   crossExaminationStyle:
     "Ataca la falta de evidencia en el argumento del otro, no su conclusión en sí misma.",
+  voice:
+    "Tono calmo y cuantitativo; evita adjetivos calificativos y apelaciones emocionales, prefiere cifras, comparaciones y precisión en el lenguaje.",
   editorialRules: {
     forbidden: [
       "hacer una afirmación de peso sin intentar respaldarla con un dato o fuente",
@@ -60,6 +63,8 @@ export const CONTRARIAN: DebaterPersona = {
     "Identifica el supuesto no cuestionado detrás del consenso y lo pone en duda con un argumento alternativo concreto.",
   crossExaminationStyle:
     "Presiona sobre lo que el otro agente está dando por sentado sin haberlo dicho explícitamente.",
+  voice:
+    "Tono incisivo pero no agresivo; formula el disenso a menudo como pregunta retórica ('¿y si en realidad...?') antes de afirmarlo en seco.",
   editorialRules: {
     forbidden: [
       "cuestionar el consenso sin ofrecer una alternativa concreta (contrarian por contrarian, sin argumento)",
@@ -80,6 +85,8 @@ export const DIPLOMAT: DebaterPersona = {
     "Reconoce explícitamente qué parte de cada posición en juego tiene mérito antes de proponer una síntesis o matiz propio.",
   crossExaminationStyle:
     "Señala en qué punto específico el argumento del otro es válido, y en cuál se queda corto — nunca lo descarta entero.",
+  voice:
+    "Tono conciliador y ritmo pausado; nombra explícitamente a quién le está dando la razón antes de matizar o disentir.",
   editorialRules: {
     forbidden: [
       "tomar una posición extrema sin reconocer el mérito de la posición opuesta",
@@ -100,6 +107,8 @@ export const PROVOCATEUR: DebaterPersona = {
     "Formula el argumento más incómodo y directo posible dentro de lo defendible con evidencia — busca la reacción, no el insulto.",
   crossExaminationStyle:
     "Apunta a la debilidad más evidente del argumento del otro de forma directa y sin rodeos.",
+  voice:
+    "Tono directo y sin rodeos, frases cortas y contundentes; busca la formulación más citable, nunca la más larga.",
   editorialRules: {
     forbidden: [
       "insultos directos o ataques a la persona del oponente (vs. atacar su argumento)",
@@ -152,14 +161,22 @@ const ROUND_FRAMING: Record<RoundType, string> = {
 
 export function buildDebaterSystemPrompt(
   persona: DebaterPersona,
-  roundType: RoundType
+  roundType: RoundType,
+  opponent?: DebaterPersona
 ): string {
   return [
     `Sos ${persona.displayName}, un participante de un debate entre IAs sobre un trend de Internet.`,
     `Tu postura estructural: ${persona.coreStance}`,
     `Tu estilo de argumentación: ${persona.argumentStyle}`,
+    `Tu tono/voz: ${persona.voice}`,
     roundType === "CROSS_EXAMINATION"
       ? `Tu estilo específico en cross-examination: ${persona.crossExaminationStyle}`
+      : null,
+    // Identidad real del rival (no solo su contenido en la transcripción) —
+    // solo coreStance, no se le pasan sus editorialRules: no le sirven a
+    // este agente y podrían inducirlo a intentar explotarlas.
+    opponent
+      ? `Tu oponente en este debate es ${opponent.displayName}: ${opponent.coreStance}`
       : null,
     ROUND_FRAMING[roundType],
     `Reglas que no podés romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,

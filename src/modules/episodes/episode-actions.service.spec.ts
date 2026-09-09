@@ -29,7 +29,7 @@ describe("EpisodeActionsService", () => {
   let prisma: {
     episode: { findUniqueOrThrow: jest.Mock; update: jest.Mock };
     episodeCheckpoint: { findFirst: jest.Mock };
-    episodeParticipant: { findFirstOrThrow: jest.Mock };
+    episodeParticipant: { findFirstOrThrow: jest.Mock; findMany: jest.Mock };
     argument: { findUniqueOrThrow: jest.Mock; findMany: jest.Mock };
     evidenceFact: { findMany: jest.Mock };
   };
@@ -50,7 +50,7 @@ describe("EpisodeActionsService", () => {
         update: jest.fn(),
       },
       episodeCheckpoint: { findFirst: jest.fn() },
-      episodeParticipant: { findFirstOrThrow: jest.fn() },
+      episodeParticipant: { findFirstOrThrow: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
       argument: { findUniqueOrThrow: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
       evidenceFact: { findMany: jest.fn().mockResolvedValue([]) },
     };

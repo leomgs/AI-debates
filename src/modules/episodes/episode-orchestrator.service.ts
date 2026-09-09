@@ -449,6 +449,11 @@ export class EpisodeOrchestratorService {
       orderBy: { createdAt: "asc" },
     });
 
+    // Judge no entra acá — nunca es citable en officialArguments.agentId
+    // (architecture.md §7.1: solo los 2 debatientes generan Argument), así
+    // que no hace falta resolverlo para la transcripción ni para el oponente.
+    const debaterParticipants = episode.participants.filter((p) => !p.isJudge);
+
     return {
       topic: topicTitle,
       evidenceBase: {
@@ -461,6 +466,10 @@ export class EpisodeOrchestratorService {
         content: a.content,
         roundType: a.debateRound.type,
       })),
+      participants: debaterParticipants.map((p) => {
+        const persona = this.personaOf(p);
+        return { agentId: p.agentId, personaId: persona.id, displayName: persona.displayName };
+      }),
     };
   }
 

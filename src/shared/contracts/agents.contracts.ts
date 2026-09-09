@@ -116,6 +116,12 @@ export type VerdictOutput = z.infer<typeof VerdictOutputSchema>;
 // fases tipadas de RoundType y a respondsToId para cross-examination)
 // ============================================================
 
+// Definido acá (no en agents.personas.ts) para que DebateContext pueda
+// referenciarlo sin crear un import circular — agents.personas.ts ya
+// depende de este archivo para RoundType, así que DebaterPersona.id usa
+// este mismo tipo en vez de duplicar el union.
+export type DebaterPersonaId = "ANALYST" | "CONTRARIAN" | "DIPLOMAT" | "PROVOCATEUR";
+
 export interface DebateContext {
   topic: string;
   evidenceBase: ResearchOutput;
@@ -126,6 +132,15 @@ export interface DebateContext {
     agentId: string;
     content: string;
     roundType: RoundType;
+  }>;
+  // Identidad de quienes debaten en este episodio (Judge no participa acá,
+  // no es un "agentId" citable en officialArguments). Permite resolver
+  // agentId -> displayName al armar la transcripción (en vez de un UUID
+  // crudo) y que cada DebaterAgent identifique a su oponente por personaId.
+  participants: Array<{
+    agentId: string;
+    personaId: DebaterPersonaId;
+    displayName: string;
   }>;
 }
 
