@@ -12,7 +12,7 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 **Fases 0, 1 y 2 completas** (última verificada contra APIs reales el 2026-09-08 — ver `tasks.md` §0-4/7 y `decision-log.md` entradas 1-18 para el detalle y el proceso de cada decisión no obvia). El backend ya corre el pipeline completo de punta a punta: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW`, con SSE en vivo, notificaciones, resume/recovery y curaduría humana (`approve`/`edit`/`regenerate`/`reject`/`resume`) — todo verificado con `scripts/smoke-test-episode.ts` contra Tavily + Gemini reales, última corrida limpia (`PENDING_REVIEW`, 2 argumentos OFFICIAL, veredicto, cero claims fallidos).
 
-**Falta para cerrar el MVP P0** (Fase 3, ver abajo): el módulo `TTS` — es la única pieza P0 sin código todavía. `Render` es P1, no bloquea.
+**Falta para cerrar el MVP P0** (Fase 3, ver abajo): el módulo `TTS` — es la única pieza P0 sin código todavía. Su diseño ya está decidido (2026-09-09, `decision-log.md` entradas 19-20, `tasks.md` §5) — 3 proveedores seleccionables (Local/Google/OpenRouter), build en 5 etapas empezando por Local end-to-end — pero la implementación todavía no arrancó. `Render` es P1, no bloquea.
 
 Alternativa igual de razonable a seguir con TTS: retomar el scaffolding de frontend, pausado a propósito hasta tener esta superficie HTTP real — ya está disponible.
 
@@ -59,7 +59,7 @@ Cerrada esta fase, el backend completa un episodio de punta a punta hasta `PENDI
 Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0). El real-time (Feature 8, también P0) ya está resuelto.
 
 - [x] `GET /episodes/:id/events` (SSE) + los 6 eventos definidos (`tasks.md` §8) — COMPLETA
-- [ ] TTS: módulo, `AudioProvider` (google-tts-api inicial), generación de `AudioAsset` por segmento, presigned URLs (AC 6.1), regeneración atómica de un `sequenceIndex` (AC 6.2), Cockatiel (`tasks.md` §5) — **único ítem P0 sin código todavía**
+- [ ] TTS: **diseño completo decidido 2026-09-09** (`decision-log.md` entradas 19-20), implementación pendiente — **único ítem P0 sin código todavía**. 3 `AudioProvider` seleccionables vía env var (Local `echogarden`+Piper, Google `google-tts-api`, OpenRouter `fish-audio/s2.1-pro-free:free`), `AudioStorageProvider` separado para AC 6.1, migración `Agent.voiceId` a `Json`, regeneración atómica de `sequenceIndex` derivada sin columna nueva (AC 6.2), wiring en `EpisodeBudgetService`/`EpisodeStateService`/`EpisodeOrchestratorService`/`EpisodeRecoveryService`, Cockatiel por proveedor externo (`tasks.md` §5). Build en 5 etapas verificables, empezando por Local end-to-end.
 - [ ] Wirear la transición `GENERATING_AUDIO → READY_FOR_RENDER` en `EpisodeStateService`/orquestación (hoy el pipeline cubre hasta `PENDING_REVIEW`/`Resume`, falta el tramo post-aprobación que dispara TTS)
 - [ ] `README.md` real (`tasks.md` §9)
 - [ ] `04-development/testing-strategy.md` (`tasks.md` §9) — ya hay módulos implementados para documentar el patrón real usado

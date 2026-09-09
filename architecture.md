@@ -13,7 +13,7 @@ Este documento formaliza las decisiones de arquitectura tomadas durante el dise�
 | Zod 4 | Contratos de input/output de agentes (`shared/contracts/`) y DTOs HTTP (`modules/episodes/dto/`, `modules/notifications/dto/`) — capas separadas aunque el shape a veces coincida (coding-rules.md §3) |
 | Cockatiel | Retry / circuit breaker por integración externa |
 | Tavily | Proveedor de búsqueda web para `ResearchModule` (Feature 1) — free tier 1000 créditos/mes sin tarjeta |
-| google-tts-api | TTS inicial, gratuito, reemplazable por ElevenLabs vía `AudioProvider` (todavía no implementado, ver `tasks.md` sección 5) |
+| echogarden + Piper / google-tts-api / OpenRouter | **Diseño de `TtsModule` decidido, implementación pendiente** (`tasks.md` sección 5, `decision-log.md` entradas 19-20) — 3 proveedores seleccionables vía `AudioProvider` (env var `TTS_PROVIDER`, no por llamada): Local (`echogarden`+Piper, sin key), Google (`google-tts-api`, ya instalado sin usar) y OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por validación manual antes de implementarse) |
 | Jest | Tests unitarios e integración |
 
 ## 2. Mapa de módulos
@@ -29,7 +29,8 @@ src/
                            LlmRateLimiterService (gate proactivo de RPM/RPD, LlmRequestLog)
     notifications/       ← Notification/NotificationType — inbox interno consultado por polling,
                            complementario al SSE de episodes/ (no lo reemplaza)
-    tts/                ← Feature 6: AudioAsset (todavía no existe, tasks.md sección 5)
+    tts/                ← Feature 6: AudioAsset, 3 AudioProvider seleccionables + AudioStorageProvider
+                           (diseño decidido, código todavía no existe — tasks.md sección 5)
     render/             ← Feature 7/9: RemotionManifest, Asset (P1, todavía no existe)
     episodes/            ← Feature 2/4/5: Episode, EpisodeParticipant, EpisodeUsage,
                            EpisodeCheckpoint — el orquestador
@@ -102,7 +103,7 @@ Cada módulo que habla con un servicio externo envuelve esa llamada donde vive l
 - `ResearchModule` — retry/circuit-breaker alrededor del proveedor de búsqueda web (rate limits, timeouts) y, por separado, alrededor de la extracción con LLM.
 - `AgentsModule` — alrededor de las llamadas a LLM vía AI SDK (rate limits, respuestas mal formadas que no pasan el `.parse()` de Zod).
 - `FactCheckModule` — una sola policy para sus tres métodos (`extractClaims`/`check`/`editorialReview`, misma clase de integración).
-- `TtsModule` — alrededor de google-tts-api / ElevenLabs (todavía no implementado).
+- `TtsModule` — una policy propia por cada uno de los 2 proveedores externos (`google-tts.provider.ts`, `openrouter-audio.provider.ts`); el proveedor Local (`echogarden`) no la necesita, sin red en steady-state. Diseño decidido, todavía no implementado (`tasks.md` sección 5, `decision-log.md` entradas 19-20).
 
 Las policies de retry usan `handleWhen` (no `handleAll`) para excluir explícitamente `DailyQuotaExceededError` — esa excepción la tira `LlmRateLimiterService` a propósito (cuota diaria agotada) y reintentarla en segundos no la resuelve (ver §5.2).
 
@@ -126,7 +127,7 @@ El modelo de datos completo vive en `schema.prisma` (comentado inline). Resumen 
 - **fact-check**: `Claim`, `FactCheck`
 - **ai**: `LlmRequestLog` (estado persistido del rate limiter, §5.2) — no es un módulo de dominio de producto, es infraestructura
 - **notifications**: `Notification` (acoplada 1:1 a `Episode` — no hay otro emisor de notificaciones en el sistema, se descartó un modelo genérico/polimórfico por generalización prematura)
-- **tts**: `AudioAsset` (modelado en el schema, módulo todavía no implementado)
+- **tts**: `AudioAsset` (schema gana `AudioProvider.OPENROUTER` y `Agent.voiceId` pasa a `Json` cuando se implemente — módulo todavía no implementado, diseño decidido en `decision-log.md` entradas 19-20)
 - **render**: `Asset` (modelado en el schema, módulo todavía no implementado, P1)
 - **episodes**: `Episode`, `EpisodeParticipant` (qué `Agent` + qué `ModelProvider` participa, y quién es el Judge), `EpisodeUsage`, `EpisodeCheckpoint` (historial, no 1:1 — ver Feature 10 de `features.md`)
 

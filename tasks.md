@@ -141,15 +141,26 @@ Entidades: `Claim`, `FactCheck`.
 
 ## 5. TTS (`modules/tts/`)
 
-Entidad: `AudioAsset`.
+Entidad: `AudioAsset`. **Diseño completo decidido 2026-09-09** (`decision-log.md` entradas 19-20) — implementación todavía pendiente, esta sección documenta el plan acordado para no re-derivarlo en la próxima sesión.
 
-- [ ] Módulo no existe
-- [ ] `AudioProvider` interface/abstracción (google-tts-api como implementación inicial, ver architecture.md stack)
-- [ ] Generación de `AudioAsset` por segmento (`storageKey`, `provider`, `durationMs`, `mimeType`)
-- [ ] Presigned URLs bajo demanda (AC 6.1) — abstrae disco local / S3 / R2 / GCS
-- [ ] Regeneración atómica de un único `sequenceIndex` sin alterar el resto (AC 6.2)
-- [ ] Política Cockatiel alrededor de google-tts-api/ElevenLabs (coding-rules.md §4)
-- [ ] Tests unitarios
+- [ ] Módulo no existe todavía. **3 proveedores seleccionables** vía `TTS_PROVIDER` (env var, resuelto por un token de DI a nivel de módulo — no por llamada como `ModelProviderFactory`, porque los catálogos de voz de los 3 motores son incompatibles entre sí):
+  - **Local** (`echogarden` npm + modelos Piper ONNX) — sin key, sin costo, corre en el mismo proceso Node, sin child_process/Python. No es 100% sin red: los modelos de voz se descargan a un cache local la primera vez que se usa cada voz.
+  - **Google** (`google-tts-api@^2.0.2`, ya instalado sin usar) — wrapper no oficial sobre Google Translate TTS, sin key. Limitación conocida: una sola voz por idioma, no diferencia por persona.
+  - **OpenRouter** (`fish-audio/s2.1-pro-free:free` vía `POST /api/v1/audio/speech`) — gratis hoy, multilingüe, pero sin SLA y con permanencia ambigua en la documentación del vendor. Se construye último, gateado por un script de validación manual (`scripts/validate-openrouter-tts.ts`, mismo criterio que `scripts/validate-openrouter-models.ts`) porque nadie pegó todavía al endpoint real.
+  - Descartados: `deepgram/flux-tts:free` de OpenRouter (inglés únicamente, promo vence 12/09/2026), Coqui XTTS-v2 (licencia CPML no comercial, pesado), Bark (sin clonación de voz, inestable). Proceso completo en `decision-log.md` entrada 19.
+- [ ] `AudioProvider` interface + 3 implementaciones (`local-echogarden.provider.ts`, `google-tts.provider.ts`, `openrouter-audio.provider.ts`), cada una con su propia policy de Cockatiel (coding-rules.md §4)
+- [ ] `AudioStorageProvider` interface — eje **separado** del motor de TTS (AC 6.1 vs. quién generó el audio). `LocalDiskStorageProvider` inicial: disco local en `outputs/audios/<episodeId>/<audioAssetId>.mp3`, gitignoreado desde el mismo commit que crea el módulo (no en uno aparte — son binarios regenerables, igual que el resto de este proyecto evita comprometer generado)
+- [ ] Migración: `Agent.voiceId` de `String` a `Json` (`Record<"LOCAL"|"GOOGLE_TTS"|"OPENROUTER", string>` — un voice ID por motor soportado)
+- [ ] `AudioProvider` enum (`schema.prisma`) gana el valor `OPENROUTER`
+- [ ] Generación de `AudioAsset` por segmento (`storageKey`, `provider`, `durationMs`, `mimeType`) — "segmento" = un `Argument` OFFICIAL (1:1 ya modelado vía `Argument.audioAssetId @unique`, sin necesidad de un concepto de segmentación nuevo)
+- [ ] Presigned URLs bajo demanda (AC 6.1) — ruta de entrega firmada (HMAC + expiración) sobre disco local; misma interfaz sirve para S3/R2/GCS más adelante sin reshapear `AudioAsset`/callers
+- [ ] Regeneración atómica de un único `sequenceIndex` sin alterar el resto (AC 6.2) — **sin columna nueva**: se deriva del orden por `createdAt` de `officialArguments`, mismo patrón que ya usa el orquestador para el orden de turnos (architecture.md §7.2, decisión D-4) y que ya arma `RemotionManifest.timeline`. La atomicidad es un simple swap de FK (`Argument.audioAssetId`)
+- [ ] Wiring en `EpisodesModule`: `EpisodeBudgetService.withTtsCall()` (mismo patrón atómico `UPDATE ... WHERE metric < limit` que `llmCalls`/`searchRequests`), `EpisodeStateService.markGeneratingAudio()`/`markReadyForRender()` (mismo patrón `ALLOWED_FROM`), `EpisodeOrchestratorService.runAudioPhase()`/`runAudioPipeline()` (idempotente, mismo shape que `runPipeline`), disparo desde `EpisodeActionsService.approve()` (fire-and-forget, mismo criterio que `resume()`), rama nueva en `EpisodeRecoveryService` para episodios en `GENERATING_AUDIO`
+- [ ] Política Cockatiel por cada provider externo (Google/OpenRouter — Local no la necesita, sin red en steady-state) (coding-rules.md §4)
+- [ ] Tests unitarios (mock de proveedores externos y motor local, coding-rules.md §9)
+- [ ] Smoke test real (`scripts/smoke-test-tts.ts`, a crear) antes de dar el módulo por completo — mismo criterio que `smoke-test-episode.ts`
+
+**Orden de build** (5 etapas verificables, mismo criterio que `EpisodesModule` — decision-log #10/#20): (1) schema + esqueleto del módulo, (2) Local/Echogarden de punta a punta hasta `READY_FOR_RENDER` (camino crítico, el resto son alternativas detrás de la misma interfaz), (3) regeneración atómica + URLs firmadas, (4) Google como segundo proveedor, (5) OpenRouter último, tras el spike de validación.
 
 ## 6. Render (`modules/render/`)
 
