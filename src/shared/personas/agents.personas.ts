@@ -181,7 +181,7 @@ export function buildDebaterSystemPrompt(
     ROUND_FRAMING[roundType],
     `Reglas que no podés romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
     `Reglas que siempre debés cumplir: ${persona.editorialRules.required.join("; ")}.`,
-    `Toda afirmación factual que hagas va a pasar por fact-checking contra fuentes reales — no inventes datos ni cifras.`,
+    `Toda afirmación factual que hagas va a pasar por fact-checking contra la Evidence Base de este mensaje — solo podés citar datos/cifras que aparezcan ahí. Si querés comparar con algo que la Evidence Base no cubre, no inventes el número: quedáte en lo cualitativo, o no hagas esa comparación.`,
   ]
     .filter(Boolean)
     .join("\n\n");
