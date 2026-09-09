@@ -9,10 +9,11 @@ Este documento formaliza las decisiones de arquitectura tomadas durante el dise�
 | NestJS 11 | Framework de API + arquitectura modular + orquestación |
 | Prisma 7 | Persistencia (SQLite en desarrollo local) |
 | Vercel AI SDK | Abstracción multi-provider de LLMs, structured output |
-| Zod 4 | Contratos de input/output de agentes (`shared/contracts/`) |
+| OpenRouter | Quinto `ModelProvider` — dos modelos `:free` validados a mano contra la API real (`nvidia/nemotron-3-super-120b-a12b`, `liquid/lfm-2.5-2.6b`), free tier sin tarjeta. Ver `decision-log.md` entrada 13 para el proceso de validación |
+| Zod 4 | Contratos de input/output de agentes (`shared/contracts/`) y DTOs HTTP (`modules/episodes/dto/`, `modules/notifications/dto/`) — capas separadas aunque el shape a veces coincida (coding-rules.md §3) |
 | Cockatiel | Retry / circuit breaker por integración externa |
 | Tavily | Proveedor de búsqueda web para `ResearchModule` (Feature 1) — free tier 1000 créditos/mes sin tarjeta |
-| google-tts-api | TTS inicial, gratuito, reemplazable por ElevenLabs vía `AudioProvider` |
+| google-tts-api | TTS inicial, gratuito, reemplazable por ElevenLabs vía `AudioProvider` (todavía no implementado, ver `tasks.md` sección 5) |
 | Jest | Tests unitarios e integración |
 
 ## 2. Mapa de módulos
@@ -20,20 +21,28 @@ Este documento formaliza las decisiones de arquitectura tomadas durante el dise�
 ```
 src/
   modules/
-    research/         ← Feature 1: Topic, ResearchSession, Source, EvidenceFact
-    agents/            ← Agent (entidad) + implementaciones de DebateAgent por persona
-    debate/            ← Debate, DebateRound, Argument, ArgumentHistory, Verdict
-    fact-check/         ← Feature 3: Claim, FactCheck, filtro editorial
-    tts/               ← Feature 6: AudioAsset
-    render/            ← Feature 7/9: RemotionManifest, Asset
-    episodes/           ← Feature 2/4/5: Episode, EpisodeUsage, EpisodeCheckpoint — el orquestador
+    research/          ← Feature 1: Topic, ResearchSession, Source, EvidenceFact
+    agents/             ← Agent (entidad) + implementaciones de DebateAgent por persona
+    debate/             ← Debate, DebateRound, Argument, ArgumentHistory, Verdict
+    fact-check/          ← Feature 3: Claim, FactCheck, filtro editorial
+    ai/                 ← ModelProviderFactory (mapea ModelProvider -> cliente del AI SDK) +
+                           LlmRateLimiterService (gate proactivo de RPM/RPD, LlmRequestLog)
+    notifications/       ← Notification/NotificationType — inbox interno consultado por polling,
+                           complementario al SSE de episodes/ (no lo reemplaza)
+    tts/                ← Feature 6: AudioAsset (todavía no existe, tasks.md sección 5)
+    render/             ← Feature 7/9: RemotionManifest, Asset (P1, todavía no existe)
+    episodes/            ← Feature 2/4/5: Episode, EpisodeParticipant, EpisodeUsage,
+                           EpisodeCheckpoint — el orquestador
   shared/
-    prisma/            ← PrismaService, módulo global
-    contracts/          ← agents.contracts.ts (Zod schemas + DebateAgent + DebateContext)
-    personas/           ← agent-personas.ts (personas + system prompts)
+    prisma/             ← PrismaService, módulo global
+    config/              ← env.schema.ts (Zod) + validateEnv, única fuente de verdad de env vars
+    contracts/           ← agents.contracts.ts (Zod schemas + DebateAgent + DebateContext)
+    personas/            ← agents.personas.ts (4 DebaterPersona + JudgePersona + builders de system prompt)
+    http/                ← ZodValidationPipe + HttpErrorFilter (formato de error HTTP consistente,
+                           api-contract.md §1) — genéricos, no específicos de episodes
 ```
 
-Cada módulo de dominio (`research`, `agents`, `debate`, `fact-check`, `tts`, `render`) es responsable de un conjunto de entidades del `schema.prisma` y no conoce a `episodes`.
+Cada módulo de dominio (`research`, `agents`, `debate`, `fact-check`, `tts`, `render`) es responsable de un conjunto de entidades del `schema.prisma` y no conoce a `episodes`. `ai` y `notifications` no son módulos de dominio en ese sentido — `ai` es infraestructura compartida (como `PrismaModule`, marcado `@Global()`) y `notifications` es un módulo standalone con su propio controller HTTP, importado explícitamente por `EpisodesModule` para que `EpisodeStateService` pueda inyectar `NotificationsService`.
 
 ## 3. Dirección de dependencias
 
@@ -43,48 +52,69 @@ Cada módulo de dominio (`research`, `agents`, `debate`, `fact-check`, `tts`, `r
                                 ┌───────────────────┐
                                 │   EpisodesModule   │  (orquestador — único que conoce
                                 │  (Episode,         │   el pipeline completo)
+                                │   EpisodeParticipant,│
                                 │   EpisodeUsage,    │
                                 │   EpisodeCheckpoint)│
                                 └─────────┬─────────┘
-        ┌───────────────┬─────────────────┼─────────────────┬───────────────┬─────────────┐
-        ▼                ▼                ▼                 ▼               ▼             ▼
-  ResearchModule   AgentsModule     DebateModule      FactCheckModule    TtsModule    RenderModule
+        ┌───────────────┬─────────────────┼─────────────────┬───────────────┬─────────────┬─────────────────┐
+        ▼                ▼                ▼                 ▼               ▼             ▼                 ▼
+  ResearchModule   AgentsModule     DebateModule      FactCheckModule    TtsModule    RenderModule   NotificationsModule
 ```
 
-`EpisodesModule` llama a los seis módulos de dominio por separado y coordina el flujo entre ellos (ver §7) — ningún módulo de dominio importa a otro. En particular, `DebateModule` no importa `AgentsModule` ni `FactCheckModule`: es persistencia/reglas de negocio puras sobre `Debate`/`DebateRound`/`Argument`/`ArgumentHistory`/`Verdict`, sin llamar a ningún LLM ni proveedor externo (a diferencia de lo que sugería una versión anterior de este diagrama, desactualizada de cuando la orquestación todavía no estaba definida en detalle).
+`EpisodesModule` llama a los seis módulos de dominio por separado y coordina el flujo entre ellos (ver §7) — ningún módulo de dominio importa a otro. En particular, `DebateModule` no importa `AgentsModule` ni `FactCheckModule`: es persistencia/reglas de negocio puras sobre `Debate`/`DebateRound`/`Argument`/`ArgumentHistory`/`Verdict`, sin llamar a ningún LLM ni proveedor externo.
+
+`AiModule` es distinto de los seis de arriba: es infraestructura global (`@Global()`, mismo criterio que `PrismaModule`) — `ResearchModule`, `AgentsModule` y `FactCheckModule` lo inyectan directo, sin que `EpisodesModule` medie. `NotificationsModule` sí cuelga de `EpisodesModule` en el diagrama porque, a diferencia de `AiModule`, tiene su propio controller HTTP (`GET /notifications`) — es un módulo de aplicación con superficie propia, no infraestructura transversal.
 
 Regla: las flechas solo van hacia abajo. `AgentsModule` no importa nada de `EpisodesModule` ni de `DebateModule` — solo expone un servicio que, dado un `DebateContext` (definido en `shared/contracts/`), devuelve un `ArgumentDraft` o `CrossExaminationDraft`. Esto es lo que permite testear cada módulo de dominio de forma aislada, sin levantar el pipeline entero.
 
-`shared/` no depende de ningún módulo — es el único código que todos pueden importar sin generar ciclos. No tiene `@Injectable()` ni nada acoplado a NestJS: son tipos, schemas Zod y funciones puras.
+`shared/` no depende de ningún módulo — es el único código que todos pueden importar sin generar ciclos. No tiene `@Injectable()` ni nada acoplado a NestJS (con la excepción de `shared/http/`, que sí son primitivas de NestJS — `PipeTransform`/`ExceptionFilter` — pero genéricas, sin lógica de negocio ni imports de ningún módulo).
 
 ## 4. Patrón de orquestación: Episode como dueño único del estado
 
-`Episode.status` (`EpisodeStatus`) es la única máquina de estados del sistema (ver `specs.md` Feature 4 para la definición completa de estados y transiciones). Ningún otro módulo muta ese campo directamente — solo `EpisodesModule` escribe en `Episode`.
+`Episode.status` (`EpisodeStatus`) es la única máquina de estados del sistema (ver `features.md` Feature 4 para la definición completa de estados y transiciones). Ningún otro módulo muta ese campo directamente — solo `EpisodeStateService` (dentro de `episodes/`) escribe en `Episode.status`, con un método por estado destino en vez de por arista `from→to` (permite reusar el mismo método en el flujo normal y en un resume, ver §7.1 y `decision-log.md` entrada 10).
 
-El chequeo de presupuesto de la **AC 2.1** (`max_llm_calls`, `max_search_queries`, `max_tts_segments`) vive exclusivamente en `EpisodesModule`, antes de invocar cualquier módulo de dominio:
+El chequeo de presupuesto de la **AC 2.1** (`maxLlmCalls`/`maxSearchQueries`/`maxTtsSegments`) vive en `EpisodeBudgetService` (`episodes/episode-budget.service.ts`), consumido por `EpisodeOrchestratorService` antes de cada llamada externa:
 
 ```
-EpisodesModule.runResearch(episodeId)
-  1. lee EpisodeUsage del episodio
-  2. si searchRequests >= maxSearchQueries → transición a REQUIRES_HUMAN_REVIEW
-     (reason: USAGE_LIMIT_EXCEEDED) y corta acá
-  3. si hay margen → llama a ResearchModule.research(topic)
-  4. incrementa EpisodeUsage.searchRequests con el resultado
+EpisodeOrchestratorService.runResearchPhase(episodeId)
+  1. si ya existe research completa para el topic (idempotencia) -> no llama a research() de nuevo
+  2. si no: EpisodeBudgetService.withSearchRequest(() =>
+              EpisodeBudgetService.withLlmCall(() =>
+                ResearchService.research(topicId, manualSources?)))
+     — research() consume TANTO 1 search request COMO 1 llamada LLM (la
+       extracción de EvidenceFact), así que se envuelve con los dos
+       wrappers anidados. Si cualquiera de los dos contadores ya está en
+       el límite, EpisodeBudgetService lanza BudgetExceededError ANTES de
+       llamar a research() — el orquestador lo mapea a
+       REQUIRES_HUMAN_REVIEW (reason: USAGE_LIMIT_EXCEEDED)
 ```
 
-`ResearchModule`, `AgentsModule` y `TtsModule` no conocen `EpisodeUsage` ni saben que existe un presupuesto — reciben la orden de ejecutar, la ejecutan, y devuelven el resultado. La responsabilidad de decidir *si* se puede ejecutar es exclusiva del orquestador.
+`ResearchModule`, `AgentsModule` y `FactCheckModule` no conocen `EpisodeUsage` ni saben que existe un presupuesto — reciben la orden de ejecutar, la ejecutan, y devuelven el resultado (o lanzan su propia excepción tipada si fallan). La responsabilidad de decidir *si* se puede ejecutar es exclusiva de `EpisodeBudgetService`.
 
-Mismo patrón para `EpisodeCheckpoint`: solo `EpisodesModule` lo crea, y solo él resuelve la acción `Resume` (retomando desde `checkpoint.fromState` / `checkpoint.debateRoundId`).
+Mismo patrón para `EpisodeCheckpoint`: solo `EpisodeStateService.requireHumanReview()` lo crea, y solo `EpisodeStateService.resumeFromCheckpoint()` resuelve la acción `Resume` (retomando desde `checkpoint.fromState` — `EpisodeOrchestratorService.runPipeline()` es idempotente por re-chequeo de lo ya persistido en cada fase, así que el mismo método sirve para la corrida inicial, un resume, y una recuperación post-caída sin ramas de código por caller).
 
-## 5. Resiliencia (Cockatiel)
+## 5. Resiliencia
 
-No hay una política de retry/circuit-breaker centralizada — cada módulo que habla con un servicio externo envuelve esa llamada donde vive la integración, porque cada una falla distinto:
+### 5.1 Cockatiel (reactivo — retry / circuit breaker)
 
-- `ResearchModule` — retry/circuit-breaker alrededor del proveedor de búsqueda web (rate limits, timeouts).
+Cada módulo que habla con un servicio externo envuelve esa llamada donde vive la integración, con su propia instancia de policy (no se comparte una policy global entre módulos, fallan distinto):
+
+- `ResearchModule` — retry/circuit-breaker alrededor del proveedor de búsqueda web (rate limits, timeouts) y, por separado, alrededor de la extracción con LLM.
 - `AgentsModule` — alrededor de las llamadas a LLM vía AI SDK (rate limits, respuestas mal formadas que no pasan el `.parse()` de Zod).
-- `TtsModule` — alrededor de google-tts-api / ElevenLabs (rate limits, cuotas).
+- `FactCheckModule` — una sola policy para sus tres métodos (`extractClaims`/`check`/`editorialReview`, misma clase de integración).
+- `TtsModule` — alrededor de google-tts-api / ElevenLabs (todavía no implementado).
 
-`EpisodesModule` no envuelve nada con Cockatiel directamente — consume los servicios de dominio, que ya devuelven resultados resueltos (éxito o excepción final tras agotar reintentos). Si un módulo de dominio agota sus reintentos y lanza, el orquestador lo captura y decide la transición de estado correspondiente (`FAILED` o `REQUIRES_HUMAN_REVIEW` según la causa).
+Las policies de retry usan `handleWhen` (no `handleAll`) para excluir explícitamente `DailyQuotaExceededError` — esa excepción la tira `LlmRateLimiterService` a propósito (cuota diaria agotada) y reintentarla en segundos no la resuelve (ver §5.2).
+
+`EpisodesModule` no envuelve nada con Cockatiel directamente — consume los servicios de dominio, que ya devuelven resultados resueltos (éxito o excepción final tras agotar reintentos). Si un módulo de dominio agota sus reintentos y lanza, `EpisodeOrchestratorService.handlePipelineError()` lo captura y decide la transición de estado correspondiente (`FAILED` o `REQUIRES_HUMAN_REVIEW` según la causa, vía `EpisodeStateService`).
+
+### 5.2 `LlmRateLimiterService` (proactivo — gate por `ModelProvider`)
+
+A diferencia de Cockatiel (reactivo, por integración), `LlmRateLimiterService` (`ai/llm-rate-limiter.service.ts`) es un único gate **proactivo**, indexado por `ModelProvider` — el RPM/RPD de un free tier es un límite por API key, no por módulo llamante, así que Research/Agents/FactCheck comparten el mismo cupo aunque cada uno tenga su propia policy de Cockatiel aislada. `acquire(provider)` se llama **dentro** del bloque que cada servicio ya reintenta con Cockatiel, justo antes de `generateObject` — así los reintentos internos de Cockatiel también respetan el rate limit, no lo esquivan.
+
+El estado se persiste en `LlmRequestLog` (una fila por request, ventana deslizante) para sobrevivir a reinicios del proceso. RPM espera (encola con un cap defensivo ~90s); RPD falla rápido con `DailyQuotaExceededError` (fail-fast — no tiene sentido esperar horas). Los límites concretos son configurables por env var (`GOOGLE_RPM_LIMIT`/`GOOGLE_RPD_LIMIT`, `OPENROUTER_RPM_LIMIT`/`OPENROUTER_RPD_LIMIT`) — `OPENAI`/`ANTHROPIC`/`XAI` no tienen límite proactivo configurado hoy (no hay uso real). Proceso de diseño completo en `decision-log.md` entrada 8.
+
+**Nota sobre `OPENROUTER`**: dos modelos `:free` distintos comparten la misma cuenta/key de OpenRouter, y por lo tanto el mismo cupo real — por eso es un único valor de `ModelProvider` (no dos), con `ModelProviderFactory.resolve('OPENROUTER')` sorteando entre ambos modelos en cada llamada. Modelarlos como dos providers separados le hubiera hecho subestimar el uso real a `LlmRateLimiterService` (`decision-log.md` entrada 13).
 
 ## 6. Modelo de dominio
 
@@ -94,9 +124,11 @@ El modelo de datos completo vive en `schema.prisma` (comentado inline). Resumen 
 - **agents**: `Agent`
 - **debate**: `Debate`, `DebateRound` (tipada por `RoundType`: `OPENING`/`REBUTTAL`/`CROSS_EXAMINATION`), `Argument` (con `respondsToId` auto-referencial para cross-examination), `ArgumentHistory`, `Verdict`
 - **fact-check**: `Claim`, `FactCheck`
-- **tts**: `AudioAsset`
-- **render**: `Asset`
-- **episodes**: `Episode`, `EpisodeUsage`, `EpisodeCheckpoint` (historial, no 1:1 — ver Feature 10 de `features.md`)
+- **ai**: `LlmRequestLog` (estado persistido del rate limiter, §5.2) — no es un módulo de dominio de producto, es infraestructura
+- **notifications**: `Notification` (acoplada 1:1 a `Episode` — no hay otro emisor de notificaciones en el sistema, se descartó un modelo genérico/polimórfico por generalización prematura)
+- **tts**: `AudioAsset` (modelado en el schema, módulo todavía no implementado)
+- **render**: `Asset` (modelado en el schema, módulo todavía no implementado, P1)
+- **episodes**: `Episode`, `EpisodeParticipant` (qué `Agent` + qué `ModelProvider` participa, y quién es el Judge), `EpisodeUsage`, `EpisodeCheckpoint` (historial, no 1:1 — ver Feature 10 de `features.md`)
 
 `Topic` y `Debate` no tienen `status` propio — se derivan consultando el `Episode` asociado (ver sección 4).
 
@@ -110,78 +142,102 @@ Decisiones de diseño (acordadas con el usuario) que resuelven la ambigüedad qu
 - **Asignación de cross-examination aleatoria** — quién examina qué argumento puntual, para que sea parejo entre agentes.
 - **Paralelización solo en el fact-checking de claims** dentro de un mismo argumento — nunca en la generación de los argumentos en sí (son secuenciales por diseño, ver punto anterior).
 
+Implementado en `EpisodeOrchestratorService` (`episodes/episode-orchestrator.service.ts`), con la ayuda de `EpisodeParticipantsService` (§7.1), `EpisodeBudgetService` (§4) y `EpisodeStateService` (§4) como colaboradores.
+
 ### 7.1 Selección de participantes (al crear el episodio, transición `CREATED → RESEARCHING`)
 
 ```
 1. Elegir 2 de las 4 personas debatientes al azar → EpisodeParticipant (isJudge: false) x2
-2. Asignar un ModelProvider a cada una (al azar entre los configurados)
+2. Asignar un ModelProvider a cada una (al azar entre los configurados —
+   EpisodeParticipantsService.getAvailableProviders() chequea presencia de
+   env vars, sin tocar ModelProviderFactory)
 3. Agent "Judge" → EpisodeParticipant (isJudge: true), con un ModelProvider
-   distinto al de los dos debatientes (evita que el mismo modelo debata
-   y juzgue en el mismo episodio)
-4. Definir el orden de turnos: se sortea una vez por episodio quién abre
-   (participantA u participantB) — ese orden se mantiene consistente en
-   todas las rondas OPENING/REBUTTAL de ese episodio.
+   distinto al de los dos debatientes si hay alguno libre (evita que el
+   mismo modelo debata y juzgue en el mismo episodio); si no hay ninguno
+   libre (caso real hoy con pocos providers configurados), sortea entre
+   todos igual — fallback documentado, puede coincidir con un debatiente
 ```
+
+Nota sobre `OPENROUTER` como `ModelProvider`: da acceso a 2 modelos `:free` distintos (`nvidia/nemotron-3-super-120b-a12b`, `liquid/lfm-2.5-2.6b`), pero es un único valor de enum, no dos — comparten la misma cuenta/key y por lo tanto el mismo cupo real de RPM/RPD de OpenRouter. `ModelProviderFactory.resolve('OPENROUTER')` sortea entre ambos modelos en cada llamada, así que "el ModelProvider" de un `EpisodeParticipant` puede, en la práctica, ejecutar dos modelos distintos turno a turno — el paso 2/3 de arriba sigue sorteando sobre `ModelProvider`, no sobre modelos individuales (`LlmRateLimiterService` trackea el cupo por `ModelProvider`, no por modelo — ver `decision-log.md` entrada 13).
+
+**Orden de turnos — sin columna nueva en `EpisodeParticipant`** (a diferencia de una versión anterior de este documento, que lo describía como un sorteo explícito hecho al armar los participantes): se deriva de forma perezosa, la primera vez que `runDebatePhase` lo necesita, mirando el `createdAt` del primer `Argument` (cualquier status) de la ronda OPENING/round 1 — si todavía no existe ninguno, se sortea recién ahí y ese orden queda "fijado" por ser el primero en persistirse. Evita tocar el schema de `EpisodeParticipant` y es naturalmente resistente a resume/recovery (`decision-log.md` entrada 10, decisión D-4).
 
 ### 7.2 Loop de rondas (estado `DEBATING`)
 
 ```
 para cada round en 1..openingRounds:
   crear DebateRound(type=OPENING, round=N)
-  para cada agente en el orden de turnos definido en 7.1:
-    draft = agent.argue(context)                    // shared/contracts
-    resultado = procesarBorrador(draft)              // ver 7.3
-    context.officialArguments.push(resultado)         // el siguiente turno ya lo ve
+  para cada agente en el orden de turnos (7.1) que todavía no tenga
+  un Argument OFFICIAL en esta ronda (idempotencia de resume/recovery):
+    draft = agent.argue(context, 'OPENING')          // shared/contracts
+    resultado = procesarBorrador(draft)               // ver 7.3
+    context.officialArguments.push(resultado)          // el siguiente turno ya lo ve
 
 para cada round en 1..rebuttalRounds:
   crear DebateRound(type=REBUTTAL, round=N)
-  (mismo loop que OPENING — mismo orden de turnos)
+  (mismo loop que OPENING — mismo orden de turnos, agent.argue(context, 'REBUTTAL'))
 
 para cada round en 1..crossExaminationRounds:
   crear DebateRound(type=CROSS_EXAMINATION, round=N)
   para cada agente en el orden de turnos:
-    target = elegir al azar un Argument OFFICIAL del oponente
-              (que todavía no haya sido target en este episodio,
-              si hay más de uno disponible)
+    target = DebateModule.pickCrossExaminationTarget(debateId, opponentAgentId)
+              // Argument OFFICIAL del oponente, al azar, sin repetir si hay
+              // más de uno disponible — puede lanzar NoCrossExaminationTargetError
+              // (CheckpointReason.VALIDATION_INCONSISTENCY) si el oponente
+              // no tiene ningún Argument OFFICIAL todavía
     draft = agent.respond(context, target)
     resultado = procesarBorrador(draft)
     context.officialArguments.push(resultado)
 ```
 
-### 7.3 `procesarBorrador` — el loop de enmienda con paralelización acotada
+### 7.3 `procesarBorrador` — el loop de enmienda
 
 ```
-draft → claim extraction (AgentsModule → FactCheckModule.extractClaims)
+draft → claim extraction (FactCheckModule.extractClaims(argumentId, content, provider))
 claims = [...]
 
-// Paralelización: cada claim se despacha a su verificación en paralelo,
-// PERO nunca dos llamadas concurrentes al mismo ModelProvider — se
-// agrupan en una cola por proveedor para no pisar su rate limit.
-resultados = para cada claim, en paralelo agrupado por ModelProvider:
-  si claim.type == FACTUAL → FactCheckModule.check(claim)      // TRUE/FALSE/...
-  si no                     → FactCheckModule.editorialReview(claim, persona)
+// Sin agrupación manual por ModelProvider (a diferencia de una versión
+// anterior de este documento): LlmRateLimiterService (§5.2) ya serializa
+// correctamente las llamadas concurrentes por provider vía su mutex
+// interno — agrupar acá hubiera duplicado esa garantía sin necesidad
+// (decision-log.md entrada 10, decisión D-7). El orquestador simplemente
+// lanza Promise.all sobre todos los claims del argumento:
+resultados = Promise.all(claims.map(claim =>
+  claim.type == FACTUAL
+    ? FactCheckModule.check(claim, evidenceBase, provider)      // TRUE/FALSE/MISLEADING/...
+    : FactCheckModule.editorialReview(claim, persona, provider, argumentContent)
+    // argumentContent: el claim se evalúa CON el argumento completo
+    // alrededor, no aislado — bug real encontrado corriendo
+    // scripts/smoke-test-episode.ts (decision-log.md entradas 11-12):
+    // evaluar un claim OPINION/SUBJECTIVE sin su contexto rechazaba
+    // afirmaciones bien respaldadas por datos de una oración vecina
+))
 
 si algún resultado es FALSE / MISLEADING / editorial.passed=false:
   intentos += 1
   si intentos > episode.maxRevisionAttempts:
-    → Episode a REQUIRES_HUMAN_REVIEW (reason: MAX_REVISIONS_EXCEEDED,
-       debateRoundId: ronda actual)
+    DebateModule.rejectArgument(argumentId)
+    EpisodeStateService.requireHumanReview(reason: MAX_REVISIONS_EXCEEDED, debateRoundId)
   si no:
     feedback = AmendmentFeedback (shared/contracts)
-    draft = agent.amend(context, draft, feedback)
+    draft = agent.amend(context, draft, feedback, roundType)
     reintentar procesarBorrador(draft)
 si no:
-  Argument.status → OFFICIAL
+  DebateModule.promoteToOfficial(argumentId)
   devolver Argument
 ```
 
 ### 7.4 Veredicto (estado `JUDGING`)
 
-Al terminar la última ronda de `CROSS_EXAMINATION`, se arma el `DebateContext` completo (todos los `officialArguments`) y se llama al `EpisodeParticipant` con `isJudge: true`, usando `buildJudgeSystemPrompt` (`shared/personas/`) y `VerdictOutputSchema` (`shared/contracts/`).
+Al terminar la última ronda de `CROSS_EXAMINATION`, `EpisodeOrchestratorService.runJudgingPhase` arma el `DebateContext` completo (todos los `officialArguments`), busca el `EpisodeParticipant` con `isJudge: true`, y llama `AgentsService.judge(context, judgeParticipant.modelProvider)` (usa `buildJudgeSystemPrompt` de `shared/personas/` y `VerdictOutputSchema` de `shared/contracts/` internamente). El resultado se persiste vía `DebateService.createVerdict(debateId, judgeId, verdict)`.
 
 ## 8. Referencias
 
 - `features.md` — contrato de producto, máquina de estados de producto, criterios de aceptación por feature.
+- `api-contract.md` — superficie HTTP completa (endpoints, SSE, formato de error, tabla de transiciones válidas).
+- `coding-rules.md` — convenciones de código a seguir al implementar cada pieza.
+- `decision-log.md` — bitácora del *proceso* detrás de cada decisión no obvia (qué se consideró, qué se descartó, qué evidencia real la resolvió).
+- `tasks.md` — estado de implementación módulo por módulo.
 - `shared/contracts/agents.contracts.ts` — contratos Zod y interfaz `DebateAgent`.
-- `shared/personas/agent-personas.ts` — personas y reglas editoriales por agente.
+- `shared/personas/agents.personas.ts` — personas y reglas editoriales por agente.
 - `schema.prisma` — modelo de datos completo.
