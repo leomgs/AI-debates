@@ -293,6 +293,42 @@ describe("EpisodeOrchestratorService", () => {
       expect(result.status).toBe("OFFICIAL");
     });
 
+    it("editorialReview siempre usa GOOGLE, sin importar el provider real del debatiente (bug real, ver decision-log.md)", async () => {
+      const agentInstance = makeAgentStub();
+      factCheckService.extractClaims.mockResolvedValue([
+        { id: "claim-1", argumentId: "arg-1", statement: "una opinión", type: "OPINION" },
+      ]);
+      factCheckService.editorialReview.mockResolvedValue({ passed: true });
+
+      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [] };
+      const round = { id: "round-1", round: 1, type: "OPENING", debateId: DEBATE_ID };
+
+      await (service as unknown as { processDraft: (p: unknown) => Promise<unknown> }).processDraft({
+        episodeId: EPISODE_ID,
+        debateRound: round,
+        agentId: AGENT_A,
+        agentInstance,
+        provider: "OPENROUTER", // el debatiente real usa OPENROUTER
+        persona: { id: "ANALYST" },
+        roundType: "OPENING",
+        initialContent: "draft",
+        context,
+        maxRevisionAttempts: 3,
+      });
+
+      // EditorialReviewOutputSchema es el único schema con .refine()
+      // condicional — se fuerza GOOGLE para esta llamada puntual (provider
+      // real del proveedor, no "OPENROUTER"), mismo criterio que
+      // EXTRACTION_PROVIDER en research.service.ts.
+      expect(factCheckService.editorialReview).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "GOOGLE",
+        expect.anything()
+      );
+      expect(factCheckService.check).not.toHaveBeenCalled();
+    });
+
     it("agota maxRevisionAttempts -> rejectArgument + requireHumanReview(MAX_REVISIONS_EXCEEDED) + EpisodePipelineHaltedError", async () => {
       const agentInstance = makeAgentStub();
       factCheckService.extractClaims.mockResolvedValue([

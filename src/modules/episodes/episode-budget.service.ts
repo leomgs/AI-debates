@@ -20,30 +20,46 @@ export class EpisodeBudgetService {
     return this.withBudget(episodeId, "searchRequests", fn);
   }
 
+  // Bug real encontrado corriendo scripts/smoke-test-episode.ts contra APIs
+  // reales (2026-09-08, ver decision-log.md): processDraft verifica los
+  // claims de un argumento en paralelo (Promise.all sobre withLlmCall, D-7
+  // del plan de EpisodesModule) — el "leer contador -> chequear -> ejecutar
+  // -> incrementar" original tenía una condición de carrera clásica: N
+  // llamadas concurrentes leían el mismo contador desactualizado, todas
+  // pasaban el chequeo, y las N incrementaban después. EpisodeUsage.llmCalls
+  // llegó a 38 con maxLlmCalls: 25. Se reemplaza por un UPDATE atómico a
+  // nivel de DB (WHERE metric < limit) — ni siquiera necesita un mutex en
+  // memoria (a diferencia de LlmRateLimiterService, que sí lo necesita
+  // porque su chequeo de ventana deslizante no se puede expresar en un único
+  // UPDATE condicional).
   private async withBudget<T>(
     episodeId: string,
     metric: "llmCalls" | "searchRequests",
     fn: () => Promise<T>
   ): Promise<T> {
     const episode = await this.prisma.episode.findUniqueOrThrow({ where: { id: episodeId } });
-    const usage = await this.prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId } });
-
     const limit = metric === "llmCalls" ? episode.maxLlmCalls : episode.maxSearchQueries;
-    if (usage[metric] >= limit) {
+
+    const claimed = await this.prisma.episodeUsage.updateMany({
+      where: { episodeId, [metric]: { lt: limit } },
+      data: { [metric]: { increment: 1 } },
+    });
+    if (claimed.count === 0) {
       throw new BudgetExceededError("USAGE_LIMIT_EXCEEDED", metric, limit);
     }
 
-    // Si fn() lanza (incluida DailyQuotaExceededError del rate limiter, o
-    // cualquier excepción de dominio), el contador NO se incrementa — el
-    // error se deja propagar tal cual, no se captura acá. Solo un éxito real
-    // consume presupuesto.
-    const result = await fn();
-
-    await this.prisma.episodeUsage.update({
-      where: { episodeId },
-      data: { [metric]: { increment: 1 } },
-    });
-
-    return result;
+    // El incremento ya se aplicó (atómico, arriba) para que el chequeo en sí
+    // no tenga carrera — si fn() falla, hay que revertirlo a mano acá para
+    // preservar la semántica original: solo las llamadas exitosas consumen
+    // presupuesto real.
+    try {
+      return await fn();
+    } catch (err) {
+      await this.prisma.episodeUsage.update({
+        where: { episodeId },
+        data: { [metric]: { decrement: 1 } },
+      });
+      throw err;
+    }
   }
 }

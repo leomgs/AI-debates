@@ -65,6 +65,19 @@ interface ProcessDraftParams {
   maxRevisionAttempts: number;
 }
 
+// EditorialReviewOutputSchema es el único de los 7 schemas de generateObject
+// del proyecto con un .refine() condicional (si passed=false, violatedRule y
+// reason son obligatorios) — bug real encontrado corriendo
+// scripts/smoke-test-episode.ts contra APIs reales (2026-09-08): un modelo
+// :free de OpenRouter no logró cumplirlo tras agotar los reintentos de
+// Cockatiel (AI_NoObjectGeneratedError). Se fuerza GOOGLE para esta llamada
+// puntual, sea cual sea el provider real del debatiente — mismo criterio que
+// EXTRACTION_PROVIDER en research.service.ts (GOOGLE es el único provider
+// requerido/garantizado por env.schema.ts). El resto de las llamadas del
+// argumento (extractClaims/check/argue/amend) siguen usando el provider real
+// del debatiente sin cambios — no tienen refine, no mostraron este problema.
+const EDITORIAL_REVIEW_PROVIDER = "GOOGLE" as const;
+
 function isFactCheckFailure(result: FactCheckOutput): boolean {
   return result.veracity === "FALSE" || result.veracity === "MISLEADING";
 }
@@ -248,7 +261,7 @@ export class EpisodeOrchestratorService {
           this.budget.withLlmCall<FactCheckOutput | EditorialReviewOutput>(episodeId, () =>
             claim.type === "FACTUAL"
               ? this.factCheck.check(claim, context.evidenceBase, provider)
-              : this.factCheck.editorialReview(claim, persona, provider, currentContent)
+              : this.factCheck.editorialReview(claim, persona, EDITORIAL_REVIEW_PROVIDER, currentContent)
           )
         )
       );
