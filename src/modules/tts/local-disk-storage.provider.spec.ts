@@ -3,6 +3,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { LocalDiskStorageProvider } from './local-disk-storage.provider';
+import { verifyAudioUrlSignature } from './audio-url-signer';
+
+const SIGNING_SECRET = 'test-secret';
+const CONFIG_VALUES: Record<string, unknown> = {
+  AUDIO_STORAGE_DIR: '', // seteado en beforeEach con el baseDir real
+  AUDIO_SIGNING_SECRET: SIGNING_SECRET,
+  AUDIO_URL_TTL_SECONDS: 300,
+};
 
 // Operaciones de FS reales sobre un directorio temporal único por corrida —
 // más simple y confiable que mockear node:fs/promises a mano para un
@@ -14,7 +22,8 @@ describe('LocalDiskStorageProvider', () => {
   let provider: LocalDiskStorageProvider;
 
   beforeEach(() => {
-    const config = { get: jest.fn().mockReturnValue(baseDir) };
+    CONFIG_VALUES.AUDIO_STORAGE_DIR = baseDir;
+    const config = { get: jest.fn((key: string) => CONFIG_VALUES[key]) };
     provider = new LocalDiskStorageProvider(config as never);
   });
 
@@ -43,7 +52,36 @@ describe('LocalDiskStorageProvider', () => {
     await expect(provider.delete('nunca-existio/asset.wav')).resolves.toBeUndefined();
   });
 
-  it('getSignedUrl() todavía no está implementado (etapa 3 de TTS)', async () => {
-    await expect(provider.getSignedUrl('episode-1/asset-1.wav')).rejects.toThrow('todavía no implementado');
+  describe('getSignedUrl()', () => {
+    it('devuelve una URL bajo /audio-files con storageKey, expires y una firma que verifica correctamente', async () => {
+      const before = Date.now();
+      const url = await provider.getSignedUrl('episode-1/asset-1.wav');
+      const parsed = new URL(url, 'http://localhost');
+
+      expect(parsed.pathname).toBe('/audio-files/episode-1/asset-1.wav');
+      const expiresAt = Number(parsed.searchParams.get('expires'));
+      const sig = parsed.searchParams.get('sig')!;
+      expect(expiresAt).toBeGreaterThanOrEqual(before + 300_000);
+      expect(verifyAudioUrlSignature(SIGNING_SECRET, 'episode-1/asset-1.wav', expiresAt, sig)).toBe(true);
+    });
+
+    it('usa expiresInSeconds explícito en vez del default de AUDIO_URL_TTL_SECONDS', async () => {
+      const before = Date.now();
+      const url = await provider.getSignedUrl('episode-1/asset-1.wav', 10);
+      const parsed = new URL(url, 'http://localhost');
+      const expiresAt = Number(parsed.searchParams.get('expires'));
+
+      expect(expiresAt).toBeLessThan(before + 300_000);
+      expect(expiresAt).toBeGreaterThanOrEqual(before + 10_000);
+    });
+
+    it('una firma para OTRO storageKey no verifica (no se puede reusar la URL de un audio para otro)', async () => {
+      const url = await provider.getSignedUrl('episode-1/asset-1.wav');
+      const parsed = new URL(url, 'http://localhost');
+      const expiresAt = Number(parsed.searchParams.get('expires'));
+      const sig = parsed.searchParams.get('sig')!;
+
+      expect(verifyAudioUrlSignature(SIGNING_SECRET, 'episode-1/asset-OTRO.wav', expiresAt, sig)).toBe(false);
+    });
   });
 });

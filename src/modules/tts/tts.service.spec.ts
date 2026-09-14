@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { TtsService } from './tts.service';
 import { AUDIO_PROVIDER, AUDIO_STORAGE } from './tts.tokens';
+import { SequenceIndexOutOfRangeError } from './tts.errors';
 
 const EPISODE_ID = '11111111-1111-4111-8111-111111111111';
 const DEBATE_ID = '22222222-2222-4222-8222-222222222222';
@@ -22,8 +23,8 @@ describe('TtsService', () => {
   let service: TtsService;
   let prisma: {
     episode: { findUniqueOrThrow: jest.Mock };
-    argument: { findMany: jest.Mock; update: jest.Mock };
-    audioAsset: { create: jest.Mock };
+    argument: { findMany: jest.Mock; update: jest.Mock; findFirstOrThrow: jest.Mock };
+    audioAsset: { create: jest.Mock; findUnique: jest.Mock; delete: jest.Mock };
   };
   let config: { get: jest.Mock };
   let provider: { synthesize: jest.Mock };
@@ -32,8 +33,8 @@ describe('TtsService', () => {
   beforeEach(async () => {
     prisma = {
       episode: { findUniqueOrThrow: jest.fn() },
-      argument: { findMany: jest.fn(), update: jest.fn() },
-      audioAsset: { create: jest.fn() },
+      argument: { findMany: jest.fn(), update: jest.fn(), findFirstOrThrow: jest.fn() },
+      audioAsset: { create: jest.fn(), findUnique: jest.fn(), delete: jest.fn() },
     };
     config = { get: jest.fn().mockReturnValue('LOCAL') };
     provider = { synthesize: jest.fn() };
@@ -114,6 +115,91 @@ describe('TtsService', () => {
       await expect(service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never)).rejects.toThrow('boom');
       expect(prisma.audioAsset.create).not.toHaveBeenCalled();
       expect(prisma.argument.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('regenerateSegmentByIndex (AC 6.2)', () => {
+    it('sintetiza de nuevo, swapea el audioAssetId del Argument y limpia (best-effort) el AudioAsset/archivo previos', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      prisma.argument.findMany.mockResolvedValue([argumentWithAgent({ audioAssetId: 'old-audio-asset' })]);
+      provider.synthesize.mockResolvedValue({
+        audioBuffer: Buffer.from('nuevo-audio'),
+        durationMs: 999,
+        mimeType: 'audio/wav',
+      });
+      prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
+      prisma.audioAsset.findUnique.mockResolvedValue({ id: 'old-audio-asset', storageKey: 'ep/old-audio-asset.wav' });
+      prisma.audioAsset.delete.mockResolvedValue(undefined);
+
+      const result = await service.regenerateSegmentByIndex(EPISODE_ID, 1);
+
+      expect(storage.save).toHaveBeenCalledTimes(1);
+      const [newStorageKey] = storage.save.mock.calls[0];
+      expect(prisma.audioAsset.create).toHaveBeenCalledTimes(1);
+      const created = prisma.audioAsset.create.mock.calls[0][0].data;
+      expect(created.storageKey).toBe(newStorageKey);
+
+      // Swap de FK: el Argument apunta al AudioAsset NUEVO antes de que se
+      // toque el viejo — atomicidad de AC 6.2 (decision-log.md #20 punto 3).
+      expect(prisma.argument.update).toHaveBeenCalledWith({
+        where: { id: ARGUMENT_ID },
+        data: { audioAssetId: created.id },
+      });
+
+      expect(prisma.audioAsset.findUnique).toHaveBeenCalledWith({ where: { id: 'old-audio-asset' } });
+      expect(storage.delete).toHaveBeenCalledWith('ep/old-audio-asset.wav');
+      expect(prisma.audioAsset.delete).toHaveBeenCalledWith({ where: { id: 'old-audio-asset' } });
+      expect(result).toEqual(created);
+    });
+
+    it('sequenceIndex fuera de rango tira SequenceIndexOutOfRangeError sin sintetizar nada', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      prisma.argument.findMany.mockResolvedValue([argumentWithAgent()]);
+
+      await expect(service.regenerateSegmentByIndex(EPISODE_ID, 5)).rejects.toThrow(SequenceIndexOutOfRangeError);
+      expect(provider.synthesize).not.toHaveBeenCalled();
+    });
+
+    it('sin audioAssetId previo (segmento nunca sintetizado) no intenta limpiar nada', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      prisma.argument.findMany.mockResolvedValue([argumentWithAgent({ audioAssetId: null })]);
+      provider.synthesize.mockResolvedValue({ audioBuffer: Buffer.from('x'), durationMs: 1, mimeType: 'audio/wav' });
+      prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
+
+      await service.regenerateSegmentByIndex(EPISODE_ID, 1);
+
+      expect(prisma.audioAsset.findUnique).not.toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
+      expect(prisma.audioAsset.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getSignedAudioUrl (AC 6.1)', () => {
+    it('scopea el AudioAsset al episodio (debateId) y delega la firma en AudioStorageProvider', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      prisma.argument.findFirstOrThrow.mockResolvedValue({
+        id: ARGUMENT_ID,
+        audioAsset: { storageKey: 'ep/asset-1.wav' },
+      });
+      storage.getSignedUrl.mockResolvedValue('/audio-files/ep/asset-1.wav?expires=1&sig=abc');
+
+      const result = await service.getSignedAudioUrl(EPISODE_ID, 'asset-1');
+
+      expect(prisma.argument.findFirstOrThrow).toHaveBeenCalledWith({
+        where: { audioAssetId: 'asset-1', debateRound: { debateId: DEBATE_ID } },
+        include: { audioAsset: true },
+      });
+      expect(storage.getSignedUrl).toHaveBeenCalledWith('ep/asset-1.wav');
+      expect(result).toEqual({ url: '/audio-files/ep/asset-1.wav?expires=1&sig=abc' });
+    });
+
+    it('propaga el error de Prisma si el audioAssetId no pertenece a este episodio (HttpErrorFilter lo mapea a 404)', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      const notFound = new Error('P2025');
+      prisma.argument.findFirstOrThrow.mockRejectedValue(notFound);
+
+      await expect(service.getSignedAudioUrl(EPISODE_ID, 'de-otro-episodio')).rejects.toThrow(notFound);
+      expect(storage.getSignedUrl).not.toHaveBeenCalled();
     });
   });
 });

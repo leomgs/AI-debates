@@ -46,6 +46,13 @@ export const EnvSchema = z.object({
   // AC 6.1 (features.md Feature 6) — carpeta base de LocalDiskStorageProvider.
   // Gitignoreada (binarios generados, regenerables desde AudioAsset).
   AUDIO_STORAGE_DIR: z.string().min(1).default("./outputs/audios"),
+  // Etapa 3 de TTS (tasks.md sección 5, AC 6.1): secreto HMAC para firmar las
+  // URLs temporales de LocalDiskStorageProvider.getSignedUrl(). Bajo el
+  // criterio de seguridad ya documentado en api-contract.md §1 ("sin
+  // autenticación, herramienta de uso local/personal") alcanza con un
+  // default de desarrollo — cambiarlo si el backend se expone más allá de eso.
+  AUDIO_SIGNING_SECRET: z.string().min(1).default("dev-audio-signing-secret-change-me"),
+  AUDIO_URL_TTL_SECONDS: z.coerce.number().default(300),
 
   PORT: z.coerce.number().default(3000),
 });

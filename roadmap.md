@@ -12,11 +12,11 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 **Fases 0, 1 y 2 completas** (última verificada contra APIs reales el 2026-09-08 — ver `tasks.md` §0-4/7 y `decision-log.md` entradas 1-18 para el detalle y el proceso de cada decisión no obvia). El backend ya corre el pipeline completo de punta a punta: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW`, con SSE en vivo, notificaciones, resume/recovery y curaduría humana (`approve`/`edit`/`regenerate`/`reject`/`resume`) — todo verificado con `scripts/smoke-test-episode.ts` contra Tavily + Gemini reales, última corrida limpia (`PENDING_REVIEW`, 2 argumentos OFFICIAL, veredicto, cero claims fallidos).
 
-**Falta para cerrar el MVP P0** (Fase 3, ver abajo): el módulo `TTS` — único ítem P0 sin terminar. Diseño decidido y **camino crítico (Local/Piper) ya implementado y verificado contra el motor real** (2026-09-09, `decision-log.md` entradas 19-22, `tasks.md` §5): un episodio completo llega a `READY_FOR_RENDER` con audio real sintetizado localmente. **Falta la Etapa 3 (AC 6.1 URLs firmadas + AC 6.2 regeneración atómica) — es el único trabajo que queda para cerrar TTS P0 por completo.** `Render` es P1, no bloquea.
+**MVP P0 completo (2026-09-14)**: con la Etapa 3 de TTS terminada (AC 6.1 URLs firmadas + AC 6.2 regeneración atómica, `decision-log.md` entrada 25, `tasks.md` §5) — verificada contra el servidor real y un episodio `READY_FOR_RENDER` real, sin mocks — **todo lo marcado P0 en `features.md` está cubierto de punta a punta**. `Render` (P1) y el scaffolding de frontend son lo único que queda por delante para completar el producto.
 
-**Reordenamiento 2026-09-14** (`decision-log.md` entrada 24, `tasks.md` §5): el 4to proveedor TTS planeado, `CHATTERBOX` (GPU, para mejorar la calidad de audio sobre Piper), se aísla como mejora futura/backlog — no es un requisito P0 de `features.md` Feature 6, y estaba bloqueado por infraestructura local (Docker Desktop). Google/OpenRouter como proveedores alternativos (etapas 4-5 del plan original de `TtsModule`) también quedan detrás de la Etapa 3 en la cola, por el mismo motivo: no son requisito P0, la Etapa 3 sí.
+**Reordenamiento 2026-09-14** (`decision-log.md` entrada 24, `tasks.md` §5): el 4to proveedor TTS planeado, `CHATTERBOX` (GPU, para mejorar la calidad de audio sobre Piper), se aísla como mejora futura/backlog — no es un requisito P0 de `features.md` Feature 6, y estaba bloqueado por infraestructura local (Docker Desktop). Google/OpenRouter como proveedores alternativos (etapas 4-5 del plan original de `TtsModule`) también quedan en backlog, por el mismo motivo: Feature 6 solo exige la abstracción de storage, no múltiples proveedores de síntesis.
 
-Alternativa igual de razonable a seguir con la Etapa 3 de TTS: retomar el scaffolding de frontend, pausado a propósito hasta tener esta superficie HTTP real — ya está disponible.
+Con el MVP P0 cerrado, las alternativas razonables para seguir son equivalentes: arrancar el scaffolding de frontend (pausado a propósito hasta tener esta superficie HTTP real — ya está completa), avanzar `Render` (P1, produce el `.mp4` final), o cerrar el housekeeping menor que sigue pendiente (`README.md` real, `04-development/testing-strategy.md` — `tasks.md` §9).
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -48,7 +48,7 @@ Objetivo: integrar Fase 1 en el pipeline completo `CREATED → RESEARCHING → R
 - [x] `EpisodeCheckpoint` como historial al entrar a `REQUIRES_HUMAN_REVIEW`
 - [x] `Resume` + escalado a `FAILED` si se repite la causa
 - [x] Idempotencia post-caída del proceso (`EpisodeRecoveryService`)
-- [x] Controller: `POST /episodes`, `GET /episodes`, `GET /episodes/:id`, acciones `approve`/`edit`/`regenerate`/`reject`/`resume`, tabla de transiciones → `409 INVALID_STATE_TRANSITION`. `GET /episodes/:id/audio/:audioAssetId/url` y `GET /episodes/:id/manifest` quedan fuera a propósito (dependen de TTS/Render, Fase 3/4)
+- [x] Controller: `POST /episodes`, `GET /episodes`, `GET /episodes/:id`, acciones `approve`/`edit`/`regenerate`/`reject`/`resume`, tabla de transiciones → `409 INVALID_STATE_TRANSITION`. `GET /episodes/:id/manifest` queda fuera a propósito (depende de Render, P1, Fase 4) — `GET /episodes/:id/audio/:audioAssetId/url` y la acción `regenerate-audio` se agregaron en la Fase 3 (TTS Etapa 3)
 - [x] DTOs Zod separados de los contratos de agentes
 - [x] Tests de integración multi-módulo, todo mockeado en el borde externo
 - [x] Formato de error HTTP consistente `{ error: { code, message } }`
@@ -56,17 +56,17 @@ Objetivo: integrar Fase 1 en el pipeline completo `CREATED → RESEARCHING → R
 
 Cerrada esta fase, el backend completa un episodio de punta a punta hasta `PENDING_REVIEW`/`APPROVED`, aunque sin audio ni video todavía — verificado contra APIs reales (Tavily + Gemini), no solo con mocks.
 
-## Fase 3 — Real-time y cierre del MVP P0 (TTS)
+## Fase 3 — Real-time y cierre del MVP P0 (TTS) — COMPLETA
 
 Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0). El real-time (Feature 8, también P0) ya está resuelto.
 
 - [x] `GET /episodes/:id/events` (SSE) + los 6 eventos definidos (`tasks.md` §8) — COMPLETA
-- [~] TTS: `AudioProvider` seleccionables vía env var (`tasks.md` §5, `decision-log.md` entradas 19-24). **Local (`echogarden`+Piper) completo y verificado contra el motor real** — `AudioStorageProvider`/`LocalDiskStorageProvider`, migración `Agent.voiceId` a `Json`, wiring completo en `EpisodeBudgetService`/`EpisodeStateService`/`EpisodeOrchestratorService`/`EpisodeRecoveryService`, smoke test real (`npm run smoke:tts`) en verde. **Falta para cerrar P0**: regeneración atómica de `sequenceIndex` (AC 6.2) + URLs firmadas (AC 6.1) — Etapa 3, próximo paso activo. En backlog, no P0: Google (`google-tts-api`), OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por spike de validación), y un 4to proveedor GPU (`CHATTERBOX`, plan aprobado en decision-log #23, aislado a backlog en la entrada 24 — bloqueado por infraestructura local, Docker Desktop, ver `tasks.md` §5 "Backlog / mejoras futuras").
+- [x] TTS: `AudioProvider` seleccionables vía env var (`tasks.md` §5, `decision-log.md` entradas 19-25). **Local (`echogarden`+Piper) completo y verificado contra el motor real** — `AudioStorageProvider`/`LocalDiskStorageProvider`, migración `Agent.voiceId` a `Json`, wiring completo en `EpisodeBudgetService`/`EpisodeStateService`/`EpisodeOrchestratorService`/`EpisodeRecoveryService`, smoke test real (`npm run smoke:tts`) en verde. **AC 6.1 (URLs firmadas) y AC 6.2 (regeneración atómica de `sequenceIndex`) completos y verificados contra el servidor real** (decision-log #25) — `GET /episodes/:id/audio/:audioAssetId/url` + `POST /episodes/:id/actions/regenerate-audio`. En backlog, no P0: Google (`google-tts-api`), OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por spike de validación), y un 4to proveedor GPU (`CHATTERBOX`, plan aprobado en decision-log #23, aislado a backlog en la entrada 24 — bloqueado por infraestructura local, Docker Desktop, ver `tasks.md` §5 "Backlog / mejoras futuras").
 - [x] Transición `GENERATING_AUDIO → READY_FOR_RENDER` wireada en `EpisodeStateService`/orquestación (etapa 2 de TTS, decision-log #22)
-- [ ] `README.md` real (`tasks.md` §9)
+- [ ] `README.md` real (`tasks.md` §9) — housekeeping menor, no bloquea el MVP P0
 - [ ] `04-development/testing-strategy.md` (`tasks.md` §9) — ya hay módulos implementados para documentar el patrón real usado
 
-Al cerrar esta fase, todo lo marcado P0 en `features.md` está cubierto de punta a punta.
+**Todo lo marcado P0 en `features.md` está cubierto de punta a punta.**
 
 ## Fase 4 — P1: Render y preview
 

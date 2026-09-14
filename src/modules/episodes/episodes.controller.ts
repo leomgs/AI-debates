@@ -4,22 +4,25 @@ import { ZodValidationPipe } from "../../shared/http/zod-validation.pipe";
 import { EpisodesService } from "./episodes.service";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { EpisodeEventsService } from "./episode-events.service";
+import { TtsService } from "../tts/tts.service";
 import { CreateEpisodeSchema, type CreateEpisodeDto } from "./dto/create-episode.dto";
 import { ListEpisodesQuerySchema, type ListEpisodesQueryDto } from "./dto/list-episodes-query.dto";
 import { ActionNameSchema, type ActionName } from "./dto/episode-action-name.dto";
 import { EditActionSchema } from "./dto/edit-action.dto";
 import { RegenerateActionSchema } from "./dto/regenerate-action.dto";
+import { RegenerateAudioActionSchema } from "./dto/regenerate-audio-action.dto";
 import { ResumeActionBodySchema } from "./dto/resume-action.dto";
 
-// api-contract.md §2/§3/§4. /episodes/:id/manifest y
-// /episodes/:id/audio/:audioAssetId/url NO se implementan — dependen de
-// TTS/Render, que no existen (fuera de scope de EpisodesModule).
+// api-contract.md §2/§3/§4. /episodes/:id/manifest NO se implementa — depende
+// de RenderModule (P1, no existe). /episodes/:id/audio/:audioAssetId/url (AC
+// 6.1) y la acción regenerate-audio (AC 6.2) sí, desde la etapa 3 de TTS.
 @Controller("episodes")
 export class EpisodesController {
   constructor(
     private readonly episodes: EpisodesService,
     private readonly actions: EpisodeActionsService,
-    private readonly events: EpisodeEventsService
+    private readonly events: EpisodeEventsService,
+    private readonly tts: TtsService
   ) {}
 
   @Post()
@@ -37,8 +40,16 @@ export class EpisodesController {
     return this.episodes.getEpisodeDetail(id);
   }
 
-  // Un solo endpoint para las 5 acciones (api-contract.md §3) — cada rama
-  // valida su propio DTO; el path param `action` ya viene acotado a los 5
+  // AC 6.1 (features.md Feature 6) — URL firmada de corta duración para un
+  // AudioAsset puntual, scopeada al episodio (TtsService.getSignedAudioUrl
+  // tira 404 si el audioAssetId no pertenece a este episodio).
+  @Get(":id/audio/:audioAssetId/url")
+  getAudioUrl(@Param("id") id: string, @Param("audioAssetId") audioAssetId: string) {
+    return this.tts.getSignedAudioUrl(id, audioAssetId);
+  }
+
+  // Un solo endpoint para las acciones (api-contract.md §3) — cada rama
+  // valida su propio DTO; el path param `action` ya viene acotado a los
   // valores válidos por ActionNameSchema (cualquier otro valor es 400 antes
   // de llegar acá).
   @Post(":id/actions/:action")
@@ -58,6 +69,8 @@ export class EpisodesController {
         return this.actions.reject(id);
       case "resume":
         return this.actions.resume(id, ResumeActionBodySchema.parse(body));
+      case "regenerate-audio":
+        return this.actions.regenerateAudio(id, RegenerateAudioActionSchema.parse(body));
     }
   }
 

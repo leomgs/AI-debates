@@ -5,9 +5,12 @@ import { TtsService } from "./tts.service";
 import { AUDIO_PROVIDER, AUDIO_STORAGE } from "./tts.tokens";
 
 // Sin controller propio — mismo criterio que agents/research/debate/
-// fact-check (coding-rules.md §1): lo orquesta EpisodesModule (a partir de
-// la etapa 2 de TTS), y los 2 endpoints HTTP de la etapa 3 (AC 6.1/6.2) se
-// agregan a EpisodesController existente, no a uno nuevo acá.
+// fact-check (coding-rules.md §1): lo orquesta EpisodesModule. Los 2
+// endpoints HTTP de negocio de la etapa 3 (AC 6.1 GET .../audio/:id/url, AC
+// 6.2 POST .../actions/regenerate-audio) viven en EpisodesController — el
+// único endpoint que sí es de este módulo, la ruta /audio-files que sirve
+// los bytes firmados, no es un controller sino un middleware + static
+// assets registrado en main.ts (no tiene lógica de negocio, es infra pura).
 //
 // AUDIO_PROVIDER está atado directo a EchogardenAudioProvider (único motor
 // real implementado — etapa 2 de TTS) — el switch por TTS_PROVIDER entre

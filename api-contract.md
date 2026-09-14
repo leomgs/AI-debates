@@ -7,7 +7,7 @@ Alcance de este MVP: sin autenticación — es una herramienta de uso local/pers
 ## 1. Convenciones generales
 
 - Formato: JSON sobre HTTP, salvo el endpoint de eventos (SSE).
-- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite.
+- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), y `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1).
 - Una acción de curaduría llamada en un estado que no la admite (ver tabla de la sección 5) responde `409 Conflict`, nunca `400` — el request está bien formado, lo que falla es la transición.
 
 ## 2. Episodes
@@ -62,7 +62,14 @@ Nota: `arguments` en este endpoint solo devuelve `status: OFFICIAL` — los `DRA
 Devuelve el `RemotionManifest` (Feature 7) con URLs firmadas resueltas para cada `AudioAsset`, para consumo de `@remotion/player` en el frontend. Solo tiene contenido significativo desde `READY_FOR_RENDER` en adelante.
 
 ### `GET /episodes/:id/audio/:audioAssetId/url`
-Genera una presigned URL de corta duración para un `AudioAsset` puntual (AC 6.1) — el backend nunca devuelve `storageKey` crudo.
+Genera una presigned URL de corta duración para un `AudioAsset` puntual (AC 6.1) — el backend nunca devuelve `storageKey` crudo. El `audioAssetId` se scopea al episodio (`404 NOT_FOUND` si no le pertenece).
+
+```json
+// Response 200
+{ "url": "/audio-files/<episodeId>/<audioAssetId>.wav?expires=<epochMs>&sig=<hmac>" }
+```
+
+Implementación real (`LocalDiskStorageProvider`, etapa 3 de TTS — `tasks.md` sección 5): la URL vence a los `AUDIO_URL_TTL_SECONDS` (default 300s) y va firmada con HMAC-SHA256 (`AUDIO_SIGNING_SECRET`) — un middleware registrado en `main.ts` (no un controller, ver `TtsModule`) verifica la firma antes de servir el archivo bajo `/audio-files/`. Vencida o alterada, `403 FORBIDDEN`.
 
 ## 3. Acciones de curaduría
 
@@ -86,6 +93,19 @@ Válida solo desde `PENDING_REVIEW`. Pide al agente correspondiente que regenere
 // Request
 { "argumentId": "uuid" }
 ```
+
+### `POST /episodes/:id/actions/regenerate-audio`
+Válida solo desde `READY_FOR_RENDER` (AC 6.2) — a diferencia de `edit`/`regenerate`, opera sobre audio ya sintetizado, no sobre texto en revisión. Regenera el audio de un único `sequenceIndex` (1-based, mismo orden que `timeline` del manifest) sin tocar el resto del episodio: sintetiza de nuevo con el motor activo, swapea `Argument.audioAssetId` al `AudioAsset` nuevo, y borra (best-effort) el `AudioAsset`/archivo previos.
+
+```json
+// Request
+{ "sequenceIndex": 1 }
+
+// Response 200 — el AudioAsset nuevo
+{ "id": "uuid", "storageKey": "...", "provider": "LOCAL", "durationMs": 64812, "mimeType": "audio/wav" }
+```
+
+`sequenceIndex` fuera de rango → `400` con `code: INVALID_SEQUENCE_INDEX`.
 
 ### `POST /episodes/:id/actions/reject`
 Válida desde `PENDING_REVIEW` **o** `REQUIRES_HUMAN_REVIEW`. Sin body. Transiciona a `CANCELLED`.
@@ -131,5 +151,6 @@ El MVP transmite bloques de texto consolidado (no streaming palabra por palabra)
 | `regenerate` | `PENDING_REVIEW` |
 | `reject` | `PENDING_REVIEW`, `REQUIRES_HUMAN_REVIEW` |
 | `resume` | `REQUIRES_HUMAN_REVIEW` |
+| `regenerate-audio` | `READY_FOR_RENDER` |
 
 Cualquier llamada fuera de esta tabla → `409 Conflict` con `code: INVALID_STATE_TRANSITION`.

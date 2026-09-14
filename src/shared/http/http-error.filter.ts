@@ -3,6 +3,7 @@ import { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
+import { SequenceIndexOutOfRangeError } from "../../modules/tts/tts.errors";
 
 // Formato de error HTTP consistente en todo el backend (api-contract.md §1,
 // tasks.md §9): { error: { code, message } }. EpisodesModule es el primer
@@ -27,6 +28,13 @@ export class HttpErrorFilter implements ExceptionFilter {
   private resolve(exception: unknown): { status: number; code: string; message: string } {
     if (exception instanceof InvalidEpisodeTransitionError) {
       return { status: 409, code: "INVALID_STATE_TRANSITION", message: exception.message };
+    }
+
+    // AC 6.2 (etapa 3 de TTS) — sequenceIndex fuera de rango en
+    // POST /episodes/:id/actions/regenerate-audio es un payload mal formado
+    // para el episodio actual, no un conflicto de estado.
+    if (exception instanceof SequenceIndexOutOfRangeError) {
+      return { status: 400, code: "INVALID_SEQUENCE_INDEX", message: exception.message };
     }
 
     if (exception instanceof ZodError) {

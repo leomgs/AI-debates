@@ -6,6 +6,7 @@ import { AgentsService } from "../agents/agents.service";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
+import { TtsService } from "../tts/tts.service";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { InvalidEpisodeTransitionError } from "./episodes.errors";
 
@@ -40,8 +41,9 @@ describe("EpisodeActionsService", () => {
   };
   let agentsService: { createDebateAgent: jest.Mock };
   let stateService: { markApproved: jest.Mock; markCancelled: jest.Mock; resumeFromCheckpoint: jest.Mock };
-  let budgetService: { withLlmCall: jest.Mock };
+  let budgetService: { withLlmCall: jest.Mock; withTtsCall: jest.Mock };
   let orchestrator: { runPipeline: jest.Mock; runAudioPipeline: jest.Mock };
+  let ttsService: { regenerateSegmentByIndex: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -70,11 +72,15 @@ describe("EpisodeActionsService", () => {
       markCancelled: jest.fn().mockResolvedValue({ id: EPISODE_ID, status: "CANCELLED" }),
       resumeFromCheckpoint: jest.fn().mockResolvedValue({ id: EPISODE_ID, status: "RESEARCHING" }),
     };
-    budgetService = { withLlmCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()) };
+    budgetService = {
+      withLlmCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
+      withTtsCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
+    };
     orchestrator = {
       runPipeline: jest.fn().mockResolvedValue(undefined),
       runAudioPipeline: jest.fn().mockResolvedValue(undefined),
     };
+    ttsService = { regenerateSegmentByIndex: jest.fn().mockResolvedValue({ id: "new-audio-asset", storageKey: "x" }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -85,6 +91,7 @@ describe("EpisodeActionsService", () => {
         { provide: EpisodeStateService, useValue: stateService },
         { provide: EpisodeBudgetService, useValue: budgetService },
         { provide: EpisodeOrchestratorService, useValue: orchestrator },
+        { provide: TtsService, useValue: ttsService },
       ],
     }).compile();
 
@@ -184,6 +191,25 @@ describe("EpisodeActionsService", () => {
       prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("APPROVED"));
       await expect(service.regenerate(EPISODE_ID, { argumentId: ARG_ID })).rejects.toThrow(InvalidEpisodeTransitionError);
       expect(agentsService.createDebateAgent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("regenerateAudio", () => {
+    it("en READY_FOR_RENDER delega en TtsService.regenerateSegmentByIndex dentro de withTtsCall (AC 2.1)", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("READY_FOR_RENDER"));
+
+      const result = await service.regenerateAudio(EPISODE_ID, { sequenceIndex: 2 });
+
+      expect(budgetService.withTtsCall).toHaveBeenCalledWith(EPISODE_ID, expect.any(Function));
+      expect(ttsService.regenerateSegmentByIndex).toHaveBeenCalledWith(EPISODE_ID, 2);
+      expect(result).toEqual({ id: "new-audio-asset", storageKey: "x" });
+    });
+
+    it("fuera de READY_FOR_RENDER tira InvalidEpisodeTransitionError sin llamar a TtsService", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("PENDING_REVIEW"));
+
+      await expect(service.regenerateAudio(EPISODE_ID, { sequenceIndex: 1 })).rejects.toThrow(InvalidEpisodeTransitionError);
+      expect(ttsService.regenerateSegmentByIndex).not.toHaveBeenCalled();
     });
   });
 

@@ -1,8 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Argument, CheckpointReason, Episode, EpisodeStatus } from "@prisma/client";
+import { Argument, AudioAsset, CheckpointReason, Episode, EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { DebateService } from "../debate/debate.service";
 import { AgentsService } from "../agents/agents.service";
+import { TtsService } from "../tts/tts.service";
 import { DebateContext } from "../../shared/contracts/agents.contracts";
 import { DEBATER_PERSONAS, DebaterPersona } from "../../shared/personas/agents.personas";
 import { EpisodeStateService } from "./episode-state.service";
@@ -11,6 +12,7 @@ import { EpisodeOrchestratorService, ManualSource } from "./episode-orchestrator
 import { InvalidEpisodeTransitionError } from "./episodes.errors";
 import { EditActionDto } from "./dto/edit-action.dto";
 import { RegenerateActionDto } from "./dto/regenerate-action.dto";
+import { RegenerateAudioActionDto } from "./dto/regenerate-audio-action.dto";
 import {
   EmptyResumeSchema,
   InsufficientEvidenceResumeSchema,
@@ -33,7 +35,8 @@ export class EpisodeActionsService {
     private readonly agents: AgentsService,
     private readonly state: EpisodeStateService,
     private readonly budget: EpisodeBudgetService,
-    private readonly orchestrator: EpisodeOrchestratorService
+    private readonly orchestrator: EpisodeOrchestratorService,
+    private readonly tts: TtsService
   ) {}
 
   // Dispara la etapa 2 de TTS fire-and-forget, mismo criterio que
@@ -115,6 +118,17 @@ export class EpisodeActionsService {
 
   async reject(episodeId: string): Promise<Episode> {
     return this.state.markCancelled(episodeId);
+  }
+
+  // AC 6.2 (features.md Feature 6, etapa 3 de TTS) — a diferencia de
+  // edit/regenerate (solo válidas en PENDING_REVIEW, antes de que exista
+  // ningún audio), esta acción opera sobre audio ya sintetizado: solo tiene
+  // sentido desde READY_FOR_RENDER, que es adonde llega un episodio recién
+  // que EpisodeOrchestratorService.runAudioPhase termina de sintetizar todos
+  // los segmentos (episode-state.service.ts, markReadyForRender).
+  async regenerateAudio(episodeId: string, dto: RegenerateAudioActionDto): Promise<AudioAsset> {
+    await this.assertStatus(episodeId, ["READY_FOR_RENDER"], "regenerate-audio");
+    return this.budget.withTtsCall(episodeId, () => this.tts.regenerateSegmentByIndex(episodeId, dto.sequenceIndex));
   }
 
   // El body esperado depende de checkpoint.reason (api-contract.md §3) — el
