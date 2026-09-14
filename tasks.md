@@ -4,15 +4,15 @@ Tracking del estado de implementación. No repite el diseño (eso vive en `archi
 
 Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-14.
 
-## Dónde retomar (última sesión: 2026-09-14 — Etapa 3 de TTS completa: MVP P0 cerrado de punta a punta)
+## Dónde retomar (última sesión: 2026-09-14 — TTS completo; corregida la prioridad de Render, el MVP P0 sigue abierto)
 
 **Completo y verificado** (sesiones previas): secciones 0-4 (Fundacional, Research, Agents, Debate, Fact-check), 0.1 (rate limiter), 7 (Episodes), 8 (SSE), formato de error (9).
 
-**Esta sesión: Chatterbox (4to proveedor TTS, GPU) se aisló a backlog** (`decision-log.md` entrada 24 — no era requisito P0, seguía bloqueado por Docker Desktop) **y se implementó la Etapa 3 de TTS (AC 6.1/6.2, `decision-log.md` entrada 25)** — URLs firmadas + regeneración atómica de un segmento de audio, el último ítem P0 pendiente de todo el proyecto (`features.md` Feature 6). Verificado con el servidor real corriendo y un episodio `READY_FOR_RENDER` real de una sesión anterior (no un mock): URL firmada descargada con éxito (WAV real, `Content-Type: audio/wav`), 3 casos de rechazo (sin firma/alterada/vencida → `403`), regeneración real de un segmento con el motor Echogarden (swap de FK confirmado en `dev.db`, `AudioAsset`/archivo viejos borrados, archivo nuevo válido en disco), y los 3 casos de error (`sequenceIndex` fuera de rango → `400`, estado inválido → `409`, `audioAssetId` de otro episodio → `404`).
+**Esta sesión, primera mitad: Chatterbox (4to proveedor TTS, GPU) se aisló a backlog** (`decision-log.md` entrada 24 — no era requisito P0, seguía bloqueado por Docker Desktop) **y se implementó la Etapa 3 de TTS (AC 6.1/6.2, `decision-log.md` entrada 25)** — URLs firmadas + regeneración atómica de un segmento de audio. Verificado con el servidor real corriendo y un episodio `READY_FOR_RENDER` real de una sesión anterior (no un mock): URL firmada descargada con éxito (WAV real, `Content-Type: audio/wav`), 3 casos de rechazo (sin firma/alterada/vencida → `403`), regeneración real de un segmento con el motor Echogarden (swap de FK confirmado en `dev.db`, `AudioAsset`/archivo viejos borrados, archivo nuevo válido en disco), y los 3 casos de error (`sequenceIndex` fuera de rango → `400`, estado inválido → `409`, `audioAssetId` de otro episodio → `404`). **Con esto, TTS (sección 5) queda completo para P0** — Google/OpenRouter como proveedores adicionales quedan en backlog (no son requisito de Feature 6, que solo pide la abstracción de storage).
 
-**Con esto, TTS (sección 5) queda completo para P0** — Google/OpenRouter como proveedores adicionales quedan en backlog (no son requisito de Feature 6, que solo pide la abstracción de storage). **Todo lo marcado P0 en `features.md` está cubierto de punta a punta.**
+**Esta sesión, segunda mitad — corrección real encontrada** (`decision-log.md` entrada 26): al preguntar "qué falta de Render", revisar `features.md` a fondo mostró que ese módulo agrupa **dos features con prioridad distinta**, tratadas hasta ahora como una sola (sección 6, "P1 según features.md"). En realidad **Feature 7 (Remotion Manifest — generar el JSON + `GET /episodes/:id/manifest`) es P0**; solo **Feature 9 (worker que ejecuta Remotion → `.mp4`, más el `@remotion/player` del frontend) es P1**. Consecuencia: la afirmación de que "todo lo P0 está cubierto" (dicha al cerrar TTS más arriba en esta misma sesión) era prematura — **el MVP P0 sigue abierto**, con Feature 7 como el ítem real pendiente. Gap adicional encontrado en la misma revisión: nada en el código produce el `subtitles` (timing por palabra) que pide el contrato de Feature 7 — `EchogardenAudioProvider.synthesize()` descarta un campo `timeline: Timeline` que `echogarden` sí devuelve en `SynthesisResult`, solo se usa `result.audio`. Detalle completo en la sección 6 de abajo.
 
-**Próximos pasos posibles, en orden de recomendación**: (1) `README.md` real + `04-development/testing-strategy.md` (sección 9, housekeeping menor, no bloquea nada), (2) arrancar el scaffolding de frontend (pausado a propósito hasta tener la superficie HTTP real — ya está completa), (3) retomar el backlog de TTS (Google/OpenRouter, Chatterbox) o Render (P1) si se prefiere seguir profundizando el backend antes del frontend.
+**Próximo paso real: implementar Feature 7 (Remotion Manifest, P0)** — ver sección 6. El worker de Feature 9 y el resto del backlog de TTS siguen siendo razonables de posponer.
 
 **Fricción real encontrada en sesiones previas, no relacionada a TTS, sigue vigente**: el cupo diario gratuito de OpenRouter para chat (`:free`) se agotó en este entorno — si vuelve a pasar, correr el smoke test puntual con `OPENROUTER_API_KEY=` vacío alcanza para que `EpisodeParticipantsService` no lo sortee como candidato. Un episodio stuck en una fase activa por un smoke test fallido se retoma solo en el siguiente boot (`EpisodeRecoveryService`) — limpiarlo a mano de `dev.db` si eso reabre el circuit breaker compartido de `AgentsService`.
 
@@ -170,12 +170,21 @@ Entidad: `AudioAsset`. **Diseño completo decidido 2026-09-09** (`decision-log.m
 
 ## 6. Render (`modules/render/`)
 
-Entidad: `Asset`. P1 según features.md — no bloquea el MVP core.
+Entidad: `Asset`. **Corrección 2026-09-14** (`decision-log.md` entrada 26): esta sección venía marcada entera "P1", pero agrupa dos features de `features.md` con prioridad distinta. Módulo no existe todavía, ninguna de las dos mitades.
 
-- [ ] Módulo no existe
-- [ ] Generación de `RemotionManifest` (contrato JSON ya definido en Feature 7 de `features.md`)
-- [ ] Worker desacoplado que ejecuta el binario de Remotion (Feature 9, P1)
-- [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas (api-contract.md §2, marcado P1)
+### Feature 7 — Remotion Manifest (P0, bloquea el cierre del MVP)
+
+- [ ] Generación de `RemotionManifest` (contrato JSON de Feature 7 — `episodeId`, `meta.topic`/`durationEstimatedSec`, `agents[]`, `timeline[]`, `verdict`). La mayoría de los campos ya existen como datos: `officialArguments` (Debate), `AudioAsset.durationMs`/`audioAssetId` (Tts), `Verdict` — es en gran parte glue code sobre lo que ya está.
+- [ ] `timeline[].subtitles` (timing por palabra) — **gap real, no hay ningún productor de este dato en el código hoy**. `EchogardenAudioProvider.synthesize()` (`src/modules/tts/local-echogarden.provider.ts`) llama a `echogarden.synthesize()`, que devuelve `SynthesisResult.timeline: Timeline` (confirmado en `node_modules/echogarden/dist/api/Synthesis.d.ts`) — hoy se descarta por completo, `synthesize()` solo extrae `result.audio`. Falta: extender `AudioSynthesisResult`/`AudioProvider.synthesize()` para exponerlo, decidir dónde se persiste (`AudioAsset` no tiene columna para esto), y qué hacer para los proveedores TTS que no son Local (Google/OpenRouter, hoy en backlog, probablemente no devuelvan timing por palabra nativo — no bloquea esto mientras sigan sin implementarse).
+- [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas (api-contract.md §2) — puede reusar `TtsService.getSignedAudioUrl` (etapa 3 de TTS, sección 5 de este archivo) en vez de reimplementar la resolución de URL.
+- [ ] Decidir: ¿el manifest se persiste en `Episode.remotionManifest` (campo `Json?` que ya existe en `schema.prisma`, sin usar todavía) o se genera al vuelo en cada `GET`? Ninguna de las dos está decidida.
+
+### Feature 9 — Video Rendering & Preview (P1, no bloquea el MVP core)
+
+- [ ] Worker desacoplado que ejecuta el binario de Remotion
+- [ ] Persistencia en `Asset` del `.mp4` resultante
+- [ ] Wirear transición `RENDERING → COMPLETED`
+- [ ] Frontend: consumo del manifest vía `@remotion/player`, resolviendo las URLs firmadas de los audios
 
 ## 7. Episodes — el orquestador (`modules/episodes/`) — COMPLETA (código + tests + integración, 2026-09-08)
 

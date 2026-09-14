@@ -2,7 +2,7 @@
 
 Documento de secuenciación. No repite el detalle de cada ítem (eso vive en `tasks.md`) — organiza y prioriza lo que `tasks.md` ya trackea, en el orden en que técnicamente conviene implementarlo, respetando las dependencias de `architecture.md` (sección 3, dirección de dependencias) y las prioridades P0/P1 de `features.md`. No agrega alcance nuevo: cada tarea referencia su ítem equivalente en `tasks.md`.
 
-Última revisión: 2026-09-14.
+Última revisión: 2026-09-14 (corrección de prioridades — ver "Próximo paso inmediato").
 
 ## Objetivo
 
@@ -12,11 +12,11 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 **Fases 0, 1 y 2 completas** (última verificada contra APIs reales el 2026-09-08 — ver `tasks.md` §0-4/7 y `decision-log.md` entradas 1-18 para el detalle y el proceso de cada decisión no obvia). El backend ya corre el pipeline completo de punta a punta: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW`, con SSE en vivo, notificaciones, resume/recovery y curaduría humana (`approve`/`edit`/`regenerate`/`reject`/`resume`) — todo verificado con `scripts/smoke-test-episode.ts` contra Tavily + Gemini reales, última corrida limpia (`PENDING_REVIEW`, 2 argumentos OFFICIAL, veredicto, cero claims fallidos).
 
-**MVP P0 completo (2026-09-14)**: con la Etapa 3 de TTS terminada (AC 6.1 URLs firmadas + AC 6.2 regeneración atómica, `decision-log.md` entrada 25, `tasks.md` §5) — verificada contra el servidor real y un episodio `READY_FOR_RENDER` real, sin mocks — **todo lo marcado P0 en `features.md` está cubierto de punta a punta**. `Render` (P1) y el scaffolding de frontend son lo único que queda por delante para completar el producto.
+**TTS (Feature 6) completo (2026-09-14)**: con la Etapa 3 terminada (AC 6.1 URLs firmadas + AC 6.2 regeneración atómica, `decision-log.md` entrada 25, `tasks.md` §5) — verificada contra el servidor real y un episodio `READY_FOR_RENDER` real, sin mocks.
 
-**Reordenamiento 2026-09-14** (`decision-log.md` entrada 24, `tasks.md` §5): el 4to proveedor TTS planeado, `CHATTERBOX` (GPU, para mejorar la calidad de audio sobre Piper), se aísla como mejora futura/backlog — no es un requisito P0 de `features.md` Feature 6, y estaba bloqueado por infraestructura local (Docker Desktop). Google/OpenRouter como proveedores alternativos (etapas 4-5 del plan original de `TtsModule`) también quedan en backlog, por el mismo motivo: Feature 6 solo exige la abstracción de storage, no múltiples proveedores de síntesis.
+**Corrección de prioridades (2026-09-14, `decision-log.md` entrada 26)**: al revisar qué faltaba de `Render` se encontró que ese módulo agrupa **dos features con prioridad distinta**, algo que este roadmap y `tasks.md` §6 venían tratando como una sola cosa (todo P1). `features.md` marca **Feature 7 (Remotion Manifest — generar el JSON y `GET /episodes/:id/manifest`) como P0**; solo **Feature 9 (el worker que ejecuta Remotion y produce el `.mp4`, más el `@remotion/player` del frontend) es P1**. Con esto, **el MVP P0 NO está cerrado todavía** — Feature 7 es el ítem P0 real que queda pendiente, no TTS (que sí cerró esta sesión). Ver Fase 4 más abajo, ahora dividida en su mitad P0 y su mitad P1.
 
-Con el MVP P0 cerrado, las alternativas razonables para seguir son equivalentes: arrancar el scaffolding de frontend (pausado a propósito hasta tener esta superficie HTTP real — ya está completa), avanzar `Render` (P1, produce el `.mp4` final), o cerrar el housekeeping menor que sigue pendiente (`README.md` real, `04-development/testing-strategy.md` — `tasks.md` §9).
+**Próximo paso real**: implementar la mitad P0 de `RenderModule` (generación del manifest + endpoint). El resto (worker, `.mp4`, frontend) sigue siendo razonable de posponer.
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -56,9 +56,9 @@ Objetivo: integrar Fase 1 en el pipeline completo `CREATED → RESEARCHING → R
 
 Cerrada esta fase, el backend completa un episodio de punta a punta hasta `PENDING_REVIEW`/`APPROVED`, aunque sin audio ni video todavía — verificado contra APIs reales (Tavily + Gemini), no solo con mocks.
 
-## Fase 3 — Real-time y cierre del MVP P0 (TTS) — COMPLETA
+## Fase 3 — Real-time y TTS (Features 6 y 8) — COMPLETA
 
-Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0). El real-time (Feature 8, también P0) ya está resuelto.
+Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0). El real-time (Feature 8, también P0) ya está resuelto. **No cierra el MVP P0 por sí sola** — Feature 7 (Fase 4) también es P0, ver corrección de prioridades arriba.
 
 - [x] `GET /episodes/:id/events` (SSE) + los 6 eventos definidos (`tasks.md` §8) — COMPLETA
 - [x] TTS: `AudioProvider` seleccionables vía env var (`tasks.md` §5, `decision-log.md` entradas 19-25). **Local (`echogarden`+Piper) completo y verificado contra el motor real** — `AudioStorageProvider`/`LocalDiskStorageProvider`, migración `Agent.voiceId` a `Json`, wiring completo en `EpisodeBudgetService`/`EpisodeStateService`/`EpisodeOrchestratorService`/`EpisodeRecoveryService`, smoke test real (`npm run smoke:tts`) en verde. **AC 6.1 (URLs firmadas) y AC 6.2 (regeneración atómica de `sequenceIndex`) completos y verificados contra el servidor real** (decision-log #25) — `GET /episodes/:id/audio/:audioAssetId/url` + `POST /episodes/:id/actions/regenerate-audio`. En backlog, no P0: Google (`google-tts-api`), OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por spike de validación), y un 4to proveedor GPU (`CHATTERBOX`, plan aprobado en decision-log #23, aislado a backlog en la entrada 24 — bloqueado por infraestructura local, Docker Desktop, ver `tasks.md` §5 "Backlog / mejoras futuras").
@@ -66,16 +66,23 @@ Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a 
 - [ ] `README.md` real (`tasks.md` §9) — housekeeping menor, no bloquea el MVP P0
 - [ ] `04-development/testing-strategy.md` (`tasks.md` §9) — ya hay módulos implementados para documentar el patrón real usado
 
-**Todo lo marcado P0 en `features.md` está cubierto de punta a punta.**
+## Fase 4 — Render: Manifest (P0) + Rendering (P1)
 
-## Fase 4 — P1: Render y preview
+Objetivo: `RenderModule` cubre dos features con prioridad distinta (`features.md`, corrección 2026-09-14 — `decision-log.md` entrada 26). No tratar el módulo como un bloque único: la mitad P0 cierra el MVP, la mitad P1 no bloquea nada.
 
-Objetivo: producir el `.mp4` final. No bloquea el MVP core (`features.md` marca Feature 9 como P1; `tasks.md` §6 lo confirma).
+**Feature 7 — Remotion Manifest (P0)**: sin esto, el MVP P0 no está cerrado.
+- [ ] Generación de `RemotionManifest` (contrato de Feature 7 — `episodeId`, `meta`, `agents`, `timeline`, `verdict`), a partir de datos que ya existen (`officialArguments`, `AudioAsset.durationMs`, `Verdict`)
+- [ ] `subtitles` por segmento (timing por palabra) — gap real encontrado 2026-09-14: no existe en ningún lado del código hoy. `EchogardenAudioProvider.synthesize()` (`src/modules/tts/local-echogarden.provider.ts`) descarta el campo `timeline: Timeline` que `echogarden` sí devuelve en `SynthesisResult` — solo se usa `result.audio`. Hay que extender `AudioSynthesisResult`/`AudioProvider` para exponerlo y persistirlo en algún lado (`AudioAsset` no tiene columna para esto hoy)
+- [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas — puede reusar `TtsService.getSignedAudioUrl` (ya construido en la Etapa 3 de TTS, `tasks.md` §5)
+- [ ] Decidir si el manifest se persiste en `Episode.remotionManifest` (campo `Json?` ya existe en `schema.prisma`, sin usar) o se genera al vuelo en cada `GET`
 
-- [ ] Módulo Render: generación de `RemotionManifest` (contrato de Feature 7)
+**Feature 9 — Video Rendering & Preview (P1)**: no bloquea el MVP core.
 - [ ] Worker desacoplado que ejecuta el binario de Remotion
-- [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas
+- [ ] Persistencia en `Asset` del `.mp4` resultante
 - [ ] Wirear transición `RENDERING → COMPLETED`
+- [ ] Frontend: consumo del manifest vía `@remotion/player`
+
+Cerrada la mitad P0 de esta fase, recién ahí **todo lo marcado P0 en `features.md` queda cubierto de punta a punta**.
 
 ## Decisiones abiertas (el usuario debe resolverlas, no se infieren)
 

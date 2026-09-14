@@ -13,9 +13,12 @@ import { RegenerateActionSchema } from "./dto/regenerate-action.dto";
 import { RegenerateAudioActionSchema } from "./dto/regenerate-audio-action.dto";
 import { ResumeActionBodySchema } from "./dto/resume-action.dto";
 
-// api-contract.md §2/§3/§4. /episodes/:id/manifest NO se implementa — depende
-// de RenderModule (P1, no existe). /episodes/:id/audio/:audioAssetId/url (AC
-// 6.1) y la acción regenerate-audio (AC 6.2) sí, desde la etapa 3 de TTS.
+// api-contract.md §2/§3/§4. /episodes/:id/manifest NO se implementa —
+// depende de RenderModule, que no existe (Feature 7 del manifest es P0,
+// corregido 2026-09-14/decision-log.md #26 — RenderModule agrupa esa feature
+// P0 junto con el worker de Feature 9, que sí es P1; ninguna de las dos está
+// implementada). /episodes/:id/audio/:audioAssetId/url (AC 6.1) y la acción
+// regenerate-audio (AC 6.2) sí, desde la etapa 3 de TTS.
 @Controller("episodes")
 export class EpisodesController {
   constructor(
