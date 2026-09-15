@@ -1,10 +1,10 @@
 {
   "name": "ai-trend-debates-back",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "Automated pipeline that turns a trending topic into a fact-checked debate video between AI agents.",
+  "author": "Leonardo Magariños",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

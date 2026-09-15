@@ -14,6 +14,83 @@ The project is built around three constraints that shape most of the architectur
 
 `Episode.status` is the single source of truth for where a given run is in this lifecycle — see `features.md` for the full state machine.
 
+## Engineering highlights
+
+Things in this codebase that go beyond wiring an LLM to an API endpoint:
+
+- **Recoverable state machine, not just a status enum.** Failures are split into recoverable (`REQUIRES_HUMAN_REVIEW`, with a persisted `Checkpoint` — `fromState`, reason, and a snapshot of usage/round) and terminal (`FAILED`). A curator can resume an episode from exactly where it froze; the same resume path also doubles as crash recovery after a process restart, with no separate code path for either case.
+- **Two layers of resilience, deliberately not merged into one.** Cockatiel gives each external integration its own reactive retry/circuit-breaker. A separate proactive gate (`LlmRateLimiterService`) tracks RPM/RPD per `ModelProvider` against free-tier quotas shared across modules, persisted in `LlmRequestLog` so it survives restarts — it sits *inside* each Cockatiel-wrapped call so internal retries respect the rate limit instead of quietly bypassing it.
+- **Enforced module boundaries.** `EpisodesModule` is the only module that knows the full pipeline; the six domain modules (research, agents, debate, fact-check, tts, render) never import each other — dependencies only point downward. That's what makes it possible to unit-test fact-checking or TTS without booting the orchestrator.
+- **Validated contracts at every boundary**, not just at the HTTP edge: LLM structured output is Zod-validated before it's trusted (`shared/contracts/`), kept as a separate schema layer from HTTP DTOs even where the shapes coincide, because they change for different reasons.
+- **A real fact-checking loop, not a rubber stamp.** Claims are classified (factual vs. opinion/prediction) and routed differently; a failing claim triggers a bounded amendment loop with the originating agent (max 3 attempts) before escalating to a human — no infinite retries, no silent pass-through.
+- **Multi-provider LLM abstraction** (Vercel AI SDK) across 5 providers behind one `ModelProviderFactory`, including a free-tier OpenRouter path whose models were validated by hand against the live API rather than assumed from docs.
+
+The reasoning behind each of these — what was tried, what was ruled out, and what evidence settled it — is written up as it happened in `decision-log.md`.
+
+## Architecture at a glance
+
+`EpisodesModule` is the only module that knows the full pipeline. The six domain modules never import each other — dependencies only point downward (`architecture.md` §3):
+
+```mermaid
+flowchart TD
+    EP["EpisodesModule<br/>(orchestrator — owns Episode,<br/>EpisodeUsage, EpisodeCheckpoint)"]
+    EP --> RES[ResearchModule]
+    EP --> AGT[AgentsModule]
+    EP --> DEB[DebateModule]
+    EP --> FC[FactCheckModule]
+    EP --> TTS[TtsModule]
+    EP --> REN[RenderModule]
+    EP --> NOT[NotificationsModule]
+
+    AI(("AiModule<br/>global infra")):::infra
+    AI -.-> RES
+    AI -.-> AGT
+    AI -.-> FC
+
+    classDef infra fill:#eee,stroke:#999,stroke-dasharray: 3 3;
+```
+
+`Episode.status` is the single state machine in the system (`features.md` Feature 4). `REQUIRES_HUMAN_REVIEW` is a recoverable, transversal state — reachable from any active phase — that resumes back into the exact phase it froze from once a curator resolves the cause, and only escalates to the terminal `FAILED` if the same cause happens again after a resume:
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> RESEARCHING
+    RESEARCHING --> READY_FOR_DEBATE
+    READY_FOR_DEBATE --> DEBATING
+    DEBATING --> JUDGING
+    JUDGING --> PENDING_REVIEW
+    PENDING_REVIEW --> APPROVED
+    PENDING_REVIEW --> CANCELLED: reject
+    APPROVED --> GENERATING_AUDIO
+    GENERATING_AUDIO --> READY_FOR_RENDER
+    READY_FOR_RENDER --> RENDERING
+    RENDERING --> COMPLETED
+
+    RESEARCHING --> REQUIRES_HUMAN_REVIEW
+    DEBATING --> REQUIRES_HUMAN_REVIEW
+    JUDGING --> REQUIRES_HUMAN_REVIEW
+    REQUIRES_HUMAN_REVIEW --> RESEARCHING: resume
+    REQUIRES_HUMAN_REVIEW --> DEBATING: resume
+    REQUIRES_HUMAN_REVIEW --> JUDGING: resume
+    REQUIRES_HUMAN_REVIEW --> CANCELLED: reject
+    REQUIRES_HUMAN_REVIEW --> FAILED: cause persists after resume
+
+    COMPLETED --> [*]
+    CANCELLED --> [*]
+    FAILED --> [*]
+```
+
+## Testing
+
+- **Unit tests** (Jest) per module, with the LLM and search provider mocked — fast, deterministic, no network.
+- **End-to-end tests** boot the full `AppModule` against an isolated test database.
+- **Smoke scripts** (`npm run smoke:*`) run the real pipeline against live Gemini/Tavily APIs. They're intentionally not part of the automated suite — they cost real API credits — and they're what actually caught the non-obvious bugs (a claim evaluated without its surrounding argument context, a rate limiter undercounting a shared-quota provider) documented in `decision-log.md`.
+
+## Status
+
+The P0 scope (research → debate → fact-checking → judging → human review, end-to-end, with live SSE updates) is implemented and has been run against real Gemini/Tavily/TTS traffic — see `roadmap.md` for the current next step and `tasks.md` for module-by-module state. Video rendering (P1) is designed (`features.md` Feature 9) but not yet implemented.
+
 ## Stack
 
 - **NestJS 11** — API framework and module/dependency-injection backbone for the orchestration pipeline.
@@ -26,25 +103,16 @@ The project is built around three constraints that shape most of the architectur
 
 See `architecture.md` for the full module map, dependency rules, and the orchestration algorithm.
 
-## Getting started
+## Quick start
 
 ```bash
 npm install
-npx prisma generate
-npx prisma migrate deploy
-npm run db:seed          # loads the 4 debater agents + judge
+npx prisma generate && npx prisma migrate deploy && npm run db:seed
+cp .env.example .env   # then set GOOGLE_API_KEY and TAVILY_API_KEY (both free tier)
+npm run start:dev
 ```
 
-Copy `.env.example` to `.env` and set `GOOGLE_API_KEY` and `TAVILY_API_KEY` (both free tier, no card required) — the app won't start without them. Full variable reference, where to get each key, and rate-limit details are in `setup.md`.
-
-```bash
-npm run start:dev   # dev server with watch
-npm run test        # unit tests
-npm run test:e2e    # end-to-end tests
-npx tsc --noEmit    # type-check
-```
-
-Tests don't need any real API key — they run against mocks/dummies.
+Full setup checklist, every env var explained, and how to run tests/smoke scripts: **`setup.md`**.
 
 ## Project documentation
 
@@ -60,6 +128,10 @@ This repo is documentation-heavy on purpose: the pipeline has non-obvious state 
 | `decision-log.md` | Why non-obvious decisions were made — what was considered, what was ruled out, what evidence settled it |
 | `roadmap.md` / `tasks.md` | Delivery priority and module-by-module implementation status |
 
+## Author
+
+Leonardo Magariños — [GitHub](https://github.com/leomgs) · [LinkedIn](https://linkedin.com/in/leomgs)
+
 ## License
 
-UNLICENSED — private project, not published for reuse.
+MIT — see `LICENSE`.
