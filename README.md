@@ -1,98 +1,65 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# AI Trend Debates — Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend for an automated pipeline that turns a trending topic into a short, fact-checked debate video between AI agents.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## What this is
 
-## Description
+Given a topic, the system researches it with real web sources, has two AI "debater" personas argue opposing views across structured rounds (opening, rebuttal, cross-examination), fact-checks every factual claim against the collected evidence before it's allowed into the debate, has a third AI act as judge, and synthesizes the final script into spoken audio. A human curator reviews and approves the result before it's handed off for video rendering.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+The project is built around three constraints that shape most of the architecture:
 
-## Project setup
+- **Verifiability** — every factual claim in a debate must trace back to a source in an evidence base gathered before the debate starts. Claims that fail fact-checking go through an amendment loop with the agent instead of being silently allowed through.
+- **Cost control** — every episode runs under a hard budget (LLM calls, search queries, TTS segments). Hitting a limit freezes the pipeline into a recoverable review state instead of failing silently or spending without bound.
+- **Human-in-the-loop** — the pipeline is designed to pause and hand control to a human curator whenever something needs judgment: insufficient evidence, budget exceeded, a claim that keeps failing review, or the final episode before it ships. Nothing renders without explicit approval.
 
-```bash
-$ npm install
-```
+`Episode.status` is the single source of truth for where a given run is in this lifecycle — see `features.md` for the full state machine.
 
-## Compile and run the project
+## Stack
+
+- **NestJS 11** — API framework and module/dependency-injection backbone for the orchestration pipeline.
+- **Prisma 7** — persistence (SQLite locally).
+- **Vercel AI SDK** — multi-provider LLM abstraction with Zod-validated structured output; supports Google, OpenAI, Anthropic, xAI, and OpenRouter (free-tier models) as interchangeable `ModelProvider`s.
+- **Zod 4** — contracts for agent I/O and HTTP DTOs.
+- **Cockatiel** — retry / circuit-breaker around every external integration.
+- **Tavily** — web search provider for the research stage.
+- **echogarden + Piper** — local, free text-to-speech (Google TTS and OpenRouter audio providers are supported by the same abstraction, pluggable via `TTS_PROVIDER`).
+
+See `architecture.md` for the full module map, dependency rules, and the orchestration algorithm.
+
+## Getting started
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
+npx prisma generate
+npx prisma migrate deploy
+npm run db:seed          # loads the 4 debater agents + judge
 ```
 
-## Run tests
+Copy `.env.example` to `.env` and set `GOOGLE_API_KEY` and `TAVILY_API_KEY` (both free tier, no card required) — the app won't start without them. Full variable reference, where to get each key, and rate-limit details are in `setup.md`.
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run start:dev   # dev server with watch
+npm run test        # unit tests
+npm run test:e2e    # end-to-end tests
+npx tsc --noEmit    # type-check
 ```
 
-## Deployment
+Tests don't need any real API key — they run against mocks/dummies.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Project documentation
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+This repo is documentation-heavy on purpose: the pipeline has non-obvious state machine and recovery behavior that's easier to get wrong than to write down once.
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+| Doc | Contents |
+|---|---|
+| `features.md` | Product spec: objectives, acceptance criteria, and the full `Episode` state machine per feature |
+| `architecture.md` | Module map, dependency direction, orchestration algorithm, resilience patterns |
+| `api-contract.md` | HTTP surface: endpoints, SSE events, error format, valid state transitions |
+| `setup.md` | Full local setup checklist, env vars, and manual validation scripts |
+| `coding-rules.md` | Conventions to follow when implementing a piece of the pipeline |
+| `decision-log.md` | Why non-obvious decisions were made — what was considered, what was ruled out, what evidence settled it |
+| `roadmap.md` / `tasks.md` | Delivery priority and module-by-module implementation status |
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+UNLICENSED — private project, not published for reuse.

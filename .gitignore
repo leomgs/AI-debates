@@ -57,6 +57,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
 
+# DB local de desarrollo (SQLite) — se regenera con prisma migrate deploy +
+# db:seed, nunca se versiona (setup.md §2).
+/dev.db
+
 # DBs de test temporales (aisladas de dev.db — ver test/jest-e2e.setup.ts y
 # src/modules/episodes/episodes.integration.spec.ts)
 test/tmp-e2e.db*
