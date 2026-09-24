@@ -31,7 +31,8 @@ src/
                            complementario al SSE de episodes/ (no lo reemplaza)
     tts/                ← Feature 6: AudioAsset, 3 AudioProvider seleccionables + AudioStorageProvider
                            (Local implementado y verificado; Google/OpenRouter pendientes — tasks.md sección 5)
-    render/             ← Feature 7/9: RemotionManifest, Asset (P1, todavía no existe)
+    render/             ← Feature 7 (P0, completa): RemotionManifest, RenderService puro.
+                           Feature 9 (P1, Asset/worker de Remotion): todavía no existe
     episodes/            ← Feature 2/4/5: Episode, EpisodeParticipant, EpisodeUsage,
                            EpisodeCheckpoint — el orquestador
   shared/
@@ -128,7 +129,7 @@ El modelo de datos completo vive en `schema.prisma` (comentado inline). Resumen 
 - **ai**: `LlmRequestLog` (estado persistido del rate limiter, §5.2) — no es un módulo de dominio de producto, es infraestructura
 - **notifications**: `Notification` (acoplada 1:1 a `Episode` — no hay otro emisor de notificaciones en el sistema, se descartó un modelo genérico/polimórfico por generalización prematura)
 - **tts**: `AudioAsset` — `AudioProvider` ganó el valor `OPENROUTER` y `Agent.voiceId` pasó a `Json` (migración aplicada). Proveedor Local implementado y verificado; Google/OpenRouter pendientes (`decision-log.md` entradas 19-22)
-- **render**: `Asset` (modelado en el schema, módulo todavía no implementado, P1)
+- **render**: `Asset` (Feature 9, P1, módulo todavía no implementado). `RenderService` (Feature 7, P0, completa) es puro — no persiste nada propio, arma `RemotionManifest` a partir de datos de `Episode`/`Debate`/`Argument`/`AudioAsset`/`Verdict` que le pasa `EpisodesService`
 - **episodes**: `Episode`, `EpisodeParticipant` (qué `Agent` + qué `ModelProvider` participa, y quién es el Judge), `EpisodeUsage`, `EpisodeCheckpoint` (historial, no 1:1 — ver Feature 10 de `features.md`)
 
 `Topic` y `Debate` no tienen `status` propio — se derivan consultando el `Episode` asociado (ver sección 4).

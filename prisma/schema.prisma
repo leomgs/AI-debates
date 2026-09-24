@@ -385,8 +385,16 @@ model AudioAsset {
   provider   AudioProvider
   durationMs Int
   mimeType   String // audio/mpeg
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+
+  // Feature 7: timing por palabra para los subtítulos del RemotionManifest
+  // (timeline[].subtitles). Array<{ text, startMs, endMs }>, Json porque no
+  // todo AudioProvider lo produce nativamente (Google/OpenRouter, en
+  // backlog) — null cuando el proveedor activo no lo expone. Solo LOCAL
+  // (echogarden) lo llena hoy (decision-log.md 2026-09-14/2026-09-24, #26/#27).
+  subtitles Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   arguments Argument[]
 }

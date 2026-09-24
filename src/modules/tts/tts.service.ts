@@ -10,7 +10,10 @@ import { AUDIO_PROVIDER, AUDIO_STORAGE } from "./tts.tokens";
 import { VoiceIdMap } from "./voice-id.types";
 import { SequenceIndexOutOfRangeError } from "./tts.errors";
 
-const ARGUMENT_WITH_AGENT_INCLUDE = { agent: true } satisfies Prisma.ArgumentInclude;
+// audioAsset incluido para Feature 7 (RenderModule reusa este método vía
+// EpisodesService para leer durationMs/subtitles ya persistidos, sin query
+// propia — mismo orden/set que sequenceIndex de AC 6.2).
+const ARGUMENT_WITH_AGENT_INCLUDE = { agent: true, audioAsset: true } satisfies Prisma.ArgumentInclude;
 type ArgumentWithAgent = Prisma.ArgumentGetPayload<{ include: typeof ARGUMENT_WITH_AGENT_INCLUDE }>;
 
 // mimeType -> extensión de archivo, para nombrar storageKey. "bin" de
@@ -112,19 +115,35 @@ export class TtsService {
     return { url };
   }
 
+  // Feature 7 — RenderModule (vía EpisodesService) necesita el mismo voiceId
+  // "real" que se usó para sintetizar, para completar manifest.agents[].
+  // Pública para no duplicar esta resolución (activeProvider + indexar
+  // VoiceIdMap) fuera de TtsService.
+  resolveVoiceId(agentVoiceId: unknown): string {
+    const activeProvider = this.config.get("TTS_PROVIDER", { infer: true });
+    const voiceMap = agentVoiceId as unknown as VoiceIdMap;
+    return voiceMap[activeProvider];
+  }
+
   private async synthesizeAndSave(episodeId: string, argument: ArgumentWithAgent): Promise<AudioAsset> {
     const activeProvider = this.config.get("TTS_PROVIDER", { infer: true });
-    const voiceMap = argument.agent.voiceId as unknown as VoiceIdMap;
-    const voiceId = voiceMap[activeProvider];
+    const voiceId = this.resolveVoiceId(argument.agent.voiceId);
 
-    const { audioBuffer, durationMs, mimeType } = await this.provider.synthesize(argument.content, voiceId);
+    const { audioBuffer, durationMs, mimeType, subtitles } = await this.provider.synthesize(argument.content, voiceId);
     const extension = MIME_EXTENSIONS[mimeType] ?? "bin";
     const audioAssetId = randomUUID();
     const storageKey = `${episodeId}/${audioAssetId}.${extension}`;
 
     await this.storage.save(storageKey, audioBuffer);
     return this.prisma.audioAsset.create({
-      data: { id: audioAssetId, storageKey, provider: activeProvider, durationMs, mimeType },
+      data: {
+        id: audioAssetId,
+        storageKey,
+        provider: activeProvider,
+        durationMs,
+        mimeType,
+        subtitles: (subtitles as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+      },
     });
   }
 }

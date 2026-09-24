@@ -43,6 +43,51 @@ describe('EchogardenAudioProvider', () => {
     expect(result.audioBuffer.subarray(8, 12).toString('ascii')).toBe('WAVE');
     // 44 bytes de header WAV + 5 muestras mono de 16 bits (2 bytes c/u).
     expect(result.audioBuffer.length).toBe(44 + samples.length * 2);
+    expect(result.subtitles).toEqual([]);
+  });
+
+  it('extrae subtitles a partir del timeline jerárquico real (segment > sentence > word > token > phone), Feature 7', async () => {
+    mockSynthesize.mockResolvedValue({
+      audio: { audioChannels: [new Float32Array([0, 0])], sampleRate: 22050 },
+      // Shape real confirmado corriendo echogarden.synthesize() a mano
+      // (ver comentario de extractWordSubtitles) — tiempos en segundos,
+      // anidado, con niveles intermedios (token/phone) que no son 'word'.
+      timeline: [
+        {
+          type: 'segment',
+          text: 'Hola mundo',
+          startTime: 0,
+          endTime: 1,
+          timeline: [
+            {
+              type: 'sentence',
+              text: 'Hola mundo',
+              startTime: 0,
+              endTime: 1,
+              timeline: [
+                {
+                  type: 'word',
+                  text: 'Hola',
+                  startTime: 0,
+                  endTime: 0.4,
+                  timeline: [{ type: 'token', text: 'ola', startTime: 0, endTime: 0.4 }],
+                },
+                { type: 'word', text: 'mundo', startTime: 0.45, endTime: 1 },
+              ],
+            },
+          ],
+        },
+      ],
+      language: 'es-ES',
+      voice: 'es_ES-davefx-medium',
+    });
+
+    const result = await provider.synthesize('Hola mundo', 'es_ES-davefx-medium');
+
+    expect(result.subtitles).toEqual([
+      { text: 'Hola', startMs: 0, endMs: 400 },
+      { text: 'mundo', startMs: 450, endMs: 1000 },
+    ]);
   });
 
   it('envuelve cualquier falla del motor en TtsProviderUnavailableError (coding-rules.md §5)', async () => {

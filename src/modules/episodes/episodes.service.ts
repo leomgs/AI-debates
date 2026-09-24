@@ -3,6 +3,10 @@ import { Episode, EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { DebateService } from "../debate/debate.service";
+import { TtsService } from "../tts/tts.service";
+import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
+import { RenderService } from "../render/render.service";
+import type { RemotionManifest } from "../render/remotion-manifest.types";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EPISODE_DETAIL_INCLUDE, mapEpisodeDetail, EpisodeDetailResponse } from "./episode-detail.mapper";
 
@@ -23,7 +27,9 @@ export class EpisodesService {
     private readonly prisma: PrismaService,
     private readonly research: ResearchService,
     private readonly debateService: DebateService,
-    private readonly orchestrator: EpisodeOrchestratorService
+    private readonly orchestrator: EpisodeOrchestratorService,
+    private readonly tts: TtsService,
+    private readonly render: RenderService
   ) {}
 
   // Orden: Topic (le pertenece a ResearchModule) -> Debate (requiere
@@ -65,6 +71,56 @@ export class EpisodesService {
       include: EPISODE_DETAIL_INCLUDE,
     });
     return mapEpisodeDetail(episode);
+  }
+
+  // Feature 7 (features.md, P0) — GET /episodes/:id/manifest. Orquesta 3
+  // fuentes (architecture.md §3, "ningún módulo de dominio importa a
+  // otro"): Prisma directo para title/participants/verdict,
+  // TtsService.getOrderedOfficialArguments (ya trae audioAsset,
+  // decision-log.md #27) para el timeline, y RenderService.buildManifest
+  // (puro) para armar el contrato. Las URLs firmadas se resuelven acá
+  // después, reusando TtsService.getSignedAudioUrl (AC 6.1) — RenderService
+  // no conoce TtsService.
+  async getManifest(episodeId: string): Promise<RemotionManifest> {
+    const episode = await this.prisma.episode.findUniqueOrThrow({
+      where: { id: episodeId },
+      select: { title: true, debate: { select: { verdict: true } } },
+    });
+    const participants = await this.prisma.episodeParticipant.findMany({
+      where: { episodeId },
+      include: { agent: true },
+    });
+    const officialArguments = await this.tts.getOrderedOfficialArguments(episodeId);
+
+    const manifest = this.render.buildManifest({
+      episodeId,
+      topic: episode.title,
+      participants: participants.map((p) => ({
+        agentId: p.agent.id,
+        name: p.agent.name,
+        avatarUrl: p.agent.avatarUrl,
+        voiceId: this.tts.resolveVoiceId(p.agent.voiceId),
+      })),
+      officialArguments: officialArguments.map((a) => ({
+        agentId: a.agentId,
+        content: a.content,
+        audioAssetId: a.audioAssetId,
+        durationMs: a.audioAsset?.durationMs ?? null,
+        subtitles: (a.audioAsset?.subtitles as unknown as AudioSubtitleCue[] | null) ?? null,
+      })),
+      verdict: episode.debate.verdict
+        ? { winnerId: episode.debate.verdict.winnerId, content: episode.debate.verdict.content }
+        : null,
+    });
+
+    const timeline = await Promise.all(
+      manifest.timeline.map(async (entry) => ({
+        ...entry,
+        audioUrl: (await this.tts.getSignedAudioUrl(episodeId, entry.audioAssetId)).url,
+      }))
+    );
+
+    return { ...manifest, timeline };
   }
 
   // api-contract.md §2: "GET /episodes?status=PENDING_REVIEW,REQUIRES_HUMAN_REVIEW"

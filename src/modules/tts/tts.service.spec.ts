@@ -66,7 +66,7 @@ describe('TtsService', () => {
       });
       expect(prisma.argument.findMany).toHaveBeenCalledWith({
         where: { debateRound: { debateId: DEBATE_ID }, status: 'OFFICIAL' },
-        include: { agent: true },
+        include: { agent: true, audioAsset: true },
         orderBy: { createdAt: 'asc' },
       });
       expect(result).toHaveLength(1);
@@ -79,6 +79,7 @@ describe('TtsService', () => {
         audioBuffer: Buffer.from('fake-wav-bytes'),
         durationMs: 1234,
         mimeType: 'audio/wav',
+        subtitles: [{ text: 'contenido', startMs: 0, endMs: 500 }],
       });
       prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
 
@@ -100,6 +101,8 @@ describe('TtsService', () => {
       expect(createArgs.provider).toBe('LOCAL');
       expect(createArgs.durationMs).toBe(1234);
       expect(createArgs.mimeType).toBe('audio/wav');
+      // Feature 7 — subtitles del provider se persisten tal cual en AudioAsset.
+      expect(createArgs.subtitles).toEqual([{ text: 'contenido', startMs: 0, endMs: 500 }]);
 
       expect(prisma.argument.update).toHaveBeenCalledWith({
         where: { id: ARGUMENT_ID },
@@ -171,6 +174,13 @@ describe('TtsService', () => {
       expect(prisma.audioAsset.findUnique).not.toHaveBeenCalled();
       expect(storage.delete).not.toHaveBeenCalled();
       expect(prisma.audioAsset.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveVoiceId (Feature 7)', () => {
+    it('indexa el VoiceIdMap con el provider activo (TTS_PROVIDER)', () => {
+      const voiceId = service.resolveVoiceId({ LOCAL: 'es_ES-davefx-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' });
+      expect(voiceId).toBe('es_ES-davefx-medium');
     });
   });
 

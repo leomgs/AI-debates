@@ -2,9 +2,13 @@
 
 Tracking del estado de implementación. No repite el diseño (eso vive en `architecture.md` / `features.md` / `api-contract.md` / `coding-rules.md`) — solo lista qué está hecho y qué falta, módulo por módulo, para saber en qué seguir sin releer todo el proyecto.
 
-Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-14.
+Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-24.
 
-## Dónde retomar (última sesión: 2026-09-14 — TTS completo; corregida la prioridad de Render, el MVP P0 sigue abierto)
+## Dónde retomar (última sesión: 2026-09-24 — Feature 7 (Remotion Manifest) implementada, MVP P0 completo)
+
+**Esta sesión**: implementada y verificada contra el servidor y el motor reales la Feature 7 (`decision-log.md` #27) — `RenderModule` nuevo (`RenderService.buildManifest()`, puro, sin Prisma ni imports cruzados de dominio), `GET /episodes/:id/manifest` en `EpisodesController` vía `EpisodesService.getManifest()` (orquesta Prisma + `TtsService` + `RenderService`), y el gap de `subtitles` cerrado: `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`), `EchogardenAudioProvider.synthesize()` ahora extrae timing por palabra real del `timeline` jerárquico de `echogarden` (antes descartado por completo). Con esto, **todo lo P0 de `features.md` queda cubierto de punta a punta** — release ver `roadmap.md`. Ver sección 6 más abajo para el detalle.
+
+## Dónde retomar (sesión previa: 2026-09-14 — TTS completo; corregida la prioridad de Render, el MVP P0 sigue abierto)
 
 **Completo y verificado** (sesiones previas): secciones 0-4 (Fundacional, Research, Agents, Debate, Fact-check), 0.1 (rate limiter), 7 (Episodes), 8 (SSE), formato de error (9).
 
@@ -16,7 +20,7 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 
 **Fricción real encontrada en sesiones previas, no relacionada a TTS, sigue vigente**: el cupo diario gratuito de OpenRouter para chat (`:free`) se agotó en este entorno — si vuelve a pasar, correr el smoke test puntual con `OPENROUTER_API_KEY=` vacío alcanza para que `EpisodeParticipantsService` no lo sortee como candidato. Un episodio stuck en una fase activa por un smoke test fallido se retoma solo en el siguiente boot (`EpisodeRecoveryService`) — limpiarlo a mano de `dev.db` si eso reabre el circuit breaker compartido de `AgentsService`.
 
-**Pendientes reales carried over de sesiones previas, no bloqueantes**: `sourceId` interno crudo citado por el modelo en el texto de un argumento (`decision-log.md` entrada 12, sección 2 de este archivo); el fix de `UNSUPPORTED` (entrada 17) solo se validó una vez contra API real. `Render` (sección 6, P1) y el scaffolding de frontend siguen sin arrancar.
+**Pendientes reales carried over de sesiones previas, no bloqueantes**: `sourceId` interno crudo citado por el modelo en el texto de un argumento (`decision-log.md` entrada 12, sección 2 de este archivo); el fix de `UNSUPPORTED` (entrada 17) solo se validó una vez contra API real. Feature 9 (worker de Remotion, P1, sección 6) y el scaffolding de frontend siguen sin arrancar.
 
 ## 0. Fundacional (bloquea todo lo demás) — COMPLETA
 
@@ -170,14 +174,17 @@ Entidad: `AudioAsset`. **Diseño completo decidido 2026-09-09** (`decision-log.m
 
 ## 6. Render (`modules/render/`)
 
-Entidad: `Asset`. **Corrección 2026-09-14** (`decision-log.md` entrada 26): esta sección venía marcada entera "P1", pero agrupa dos features de `features.md` con prioridad distinta. Módulo no existe todavía, ninguna de las dos mitades.
+Entidad: `Asset`. **Corrección 2026-09-14** (`decision-log.md` entrada 26): esta sección venía marcada entera "P1", pero agrupa dos features de `features.md` con prioridad distinta.
 
-### Feature 7 — Remotion Manifest (P0, bloquea el cierre del MVP)
+### Feature 7 — Remotion Manifest (P0) — COMPLETA (2026-09-24, `decision-log.md` entrada 27)
 
-- [ ] Generación de `RemotionManifest` (contrato JSON de Feature 7 — `episodeId`, `meta.topic`/`durationEstimatedSec`, `agents[]`, `timeline[]`, `verdict`). La mayoría de los campos ya existen como datos: `officialArguments` (Debate), `AudioAsset.durationMs`/`audioAssetId` (Tts), `Verdict` — es en gran parte glue code sobre lo que ya está.
-- [ ] `timeline[].subtitles` (timing por palabra) — **gap real, no hay ningún productor de este dato en el código hoy**. `EchogardenAudioProvider.synthesize()` (`src/modules/tts/local-echogarden.provider.ts`) llama a `echogarden.synthesize()`, que devuelve `SynthesisResult.timeline: Timeline` (confirmado en `node_modules/echogarden/dist/api/Synthesis.d.ts`) — hoy se descarta por completo, `synthesize()` solo extrae `result.audio`. Falta: extender `AudioSynthesisResult`/`AudioProvider.synthesize()` para exponerlo, decidir dónde se persiste (`AudioAsset` no tiene columna para esto), y qué hacer para los proveedores TTS que no son Local (Google/OpenRouter, hoy en backlog, probablemente no devuelvan timing por palabra nativo — no bloquea esto mientras sigan sin implementarse).
-- [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas (api-contract.md §2) — puede reusar `TtsService.getSignedAudioUrl` (etapa 3 de TTS, sección 5 de este archivo) en vez de reimplementar la resolución de URL.
-- [ ] Decidir: ¿el manifest se persiste en `Episode.remotionManifest` (campo `Json?` que ya existe en `schema.prisma`, sin usar todavía) o se genera al vuelo en cada `GET`? Ninguna de las dos está decidida.
+- [x] `RenderModule` nuevo (`render.module.ts`, `render.service.ts`, `render.errors.ts`, `remotion-manifest.types.ts`, sin controller propio — coding-rules.md §1). `RenderService.buildManifest()` es **puro**: sin Prisma, sin ningún otro módulo de dominio inyectado (architecture.md §3, "ningún módulo de dominio importa a otro") — recibe datos ya resueltos y arma el contrato (`episodeId`, `meta.topic`/`durationEstimatedSec`, `agents[]`, `timeline[]`, `verdict`).
+- [x] `timeline[].subtitles` (timing por palabra) — gap cerrado. `AudioProvider`/`AudioSynthesisResult` (`src/modules/tts/audio-provider.interface.ts`) ganan `subtitles?: AudioSubtitleCue[]`. `EchogardenAudioProvider.synthesize()` ahora extrae el timing real: `echogarden.synthesize().timeline` resultó ser **jerárquico** (`segment > sentence > word > token > phone`, tiempos en segundos — confirmado corriendo el motor a mano, no asumido del `.d.ts`), así que se escribió `extractWordSubtitles()` (recursión propia, busca nodos `type: "word"` — `extractEntries()` de `echogarden` no está reexportada desde el entrypoint público, mismo motivo que ya documentaba `encodeRawAudioToWave`). Persistido en `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`, `ALTER TABLE ADD COLUMN` simple).
+- [x] `GET /episodes/:id/manifest` (`EpisodesController.getManifest`, delega a `EpisodesService.getManifest()`) con URLs firmadas resueltas (api-contract.md §2) — reusa `TtsService.getSignedAudioUrl` (AC 6.1), agregando `audioUrl` como campo adicional en cada `timeline[]` entry (no reemplaza `audioAssetId`, que es lo único que pide el contrato congelado de `features.md`).
+- [x] Decidido: el manifest se genera **al vuelo en cada `GET`**, no se persiste en `Episode.remotionManifest` — las URLs firmadas tienen TTL corto (`AUDIO_URL_TTL_SECONDS`, default 300s), cachear el manifest completo las dejaría vencidas. El campo `Json?` sigue sin usar (documentado, no un olvido).
+- [x] `ManifestNotReadyError` (`render.errors.ts`) — chequeo de completitud de datos (falta `Verdict` y/o algún `Argument` OFFICIAL sin `AudioAsset`), **no** conoce `EpisodeStatus` (coding-rules.md §5). Mapeada a `409 MANIFEST_NOT_READY` en `HttpErrorFilter`.
+- [x] Tests: `render.service.spec.ts` (5 tests, sin mocks — `RenderService` es puro), `episodes.service.spec.ts` (`getManifest`, 2 tests nuevos), `local-echogarden.provider.spec.ts` (extracción de subtitles del timeline jerárquico real), `tts.service.spec.ts` (persistencia de subtitles + `resolveVoiceId` nuevo). 170 tests totales (22 suites, `render.service.spec.ts` nuevo), `npx tsc --noEmit` limpio, `npm run test:e2e` verde (`AppModule` bootstrapea con `RenderModule`).
+- [x] **Verificado contra el servidor y el motor reales** (sin mocks, `npm run start` + episodio `READY_FOR_RENDER` real de la entrada 25 de `decision-log.md`): `GET .../manifest` devolvió el manifest completo con `audioUrl` firmada real (confirmada sirviendo el WAV, `200 OK`); un episodio real en `PENDING_REVIEW` devolvió `409 MANIFEST_NOT_READY`; `POST .../actions/regenerate-audio` disparó una síntesis real con Echogarden que produjo 144 `subtitles` reales, reflejados de inmediato en el manifest.
 
 ### Feature 9 — Video Rendering & Preview (P1, no bloquea el MVP core)
 
@@ -216,7 +223,7 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
   - [x] `POST /episodes/:id/actions/regenerate-audio` — implementado en la Etapa 3 de TTS (AC 6.2, ver sección 5), válida solo desde `READY_FOR_RENDER`
   - [x] Validar tabla de estados válidos por acción (api-contract.md §5) → `409 Conflict` con `code: INVALID_STATE_TRANSITION` (vía `HttpErrorFilter` global — resuelve de paso el pendiente de formato de error de la sección 9)
   - [x] `GET /episodes/:id/events` (SSE) — ver sección 8
-  - [ ] `GET /episodes/:id/manifest` — **fuera de scope a propósito**, depende de `RenderModule` (P1, no existe)
+  - [x] `GET /episodes/:id/manifest` — implementado en Feature 7 (2026-09-24, ver sección 6)
 - [x] DTOs Zod separados de los contratos de agentes (`modules/episodes/dto/`, coding-rules.md §3) + `ZodValidationPipe` genérico (`shared/http/`)
 - [x] Tests de integración orquestando varios módulos con todo mockeado en el borde externo (coding-rules.md §9 — `episodes.integration.spec.ts`, contra sqlite de test real aislada de `dev.db`, con `ResearchService`/`AgentsService`/`FactCheckService` mockeados). Cubre pipeline feliz completo, `InsufficientEvidenceError`, `MAX_REVISIONS_EXCEEDED`, resume exitoso, escalada a `FAILED` tras repetir la misma causa, y recovery post-caída — este último ejerce el bug real descrito abajo.
 

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { AudioProvider, AudioSynthesisResult } from "./audio-provider.interface";
+import type { Timeline } from "echogarden";
+import { AudioProvider, AudioSubtitleCue, AudioSynthesisResult } from "./audio-provider.interface";
 import { TtsProviderUnavailableError } from "./tts.errors";
 
 // Shape real de SynthesisResult.audio para el engine "vits" (confirmado
@@ -52,13 +53,41 @@ export class EchogardenAudioProvider implements AudioProvider {
 
       const durationMs = Math.round((raw.audioChannels[0].length / raw.sampleRate) * 1000);
       const audioBuffer = encodePcmToWav(raw.audioChannels, raw.sampleRate);
+      const subtitles = extractWordSubtitles(result.timeline);
 
-      return { audioBuffer, durationMs, mimeType: "audio/wav" };
+      return { audioBuffer, durationMs, mimeType: "audio/wav", subtitles };
     } catch (err) {
       this.logger.error(`EchogardenAudioProvider falló para voiceId=${voiceId}`, err instanceof Error ? err.stack : err);
       throw new TtsProviderUnavailableError("LOCAL", err);
     }
   }
+}
+
+// Feature 7 (Remotion Manifest) — decision-log.md 2026-09-14/2026-09-24
+// (#26/#27). result.timeline es jerárquico (segment > sentence > word >
+// token > phone, confirmado corriendo echogarden.synthesize() a mano — no
+// una lista plana como sugeriría el tipo `Timeline = TimelineEntry[]` sin
+// mirar el dato real), con tiempos en SEGUNDOS (float). echogarden expone
+// `extractEntries()` para aplanar por tipo, pero es un símbolo interno
+// (`utilities/Timeline.js`) no reexportado desde el entrypoint público
+// (confirmado listando `Object.keys(require("echogarden"))`, mismo motivo
+// por el que este archivo ya evita `encodeRawAudioToWave`/
+// `getRawAudioDuration` más abajo) — se camina el árbol a mano en vez de
+// depender de esa ruta interna.
+function extractWordSubtitles(timeline: Timeline): AudioSubtitleCue[] {
+  const words: AudioSubtitleCue[] = [];
+  for (const entry of timeline) {
+    if (entry.type === "word") {
+      words.push({
+        text: entry.text,
+        startMs: Math.round(entry.startTime * 1000),
+        endMs: Math.round(entry.endTime * 1000),
+      });
+    } else if (entry.timeline) {
+      words.push(...extractWordSubtitles(entry.timeline));
+    }
+  }
+  return words;
 }
 
 // WAV PCM de 16 bits, sin dependencia nueva — el shape de RawAudio

@@ -5,6 +5,7 @@ import { DebateModule } from "../debate/debate.module";
 import { AgentsModule } from "../agents/agents.module";
 import { FactCheckModule } from "../fact-check/fact-check.module";
 import { TtsModule } from "../tts/tts.module";
+import { RenderModule } from "../render/render.module";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeParticipantsService } from "./episode-participants.service";
@@ -21,7 +22,7 @@ import { EpisodesController } from "./episodes.controller";
 // declarado en el árbol de módulos, no hace falta exportarlo ni instanciarlo
 // a mano en ningún lado.
 @Module({
-  imports: [NotificationsModule, ResearchModule, DebateModule, AgentsModule, FactCheckModule, TtsModule],
+  imports: [NotificationsModule, ResearchModule, DebateModule, AgentsModule, FactCheckModule, TtsModule, RenderModule],
   controllers: [EpisodesController],
   providers: [
     EpisodeStateService,

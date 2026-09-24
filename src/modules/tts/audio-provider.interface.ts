@@ -1,7 +1,17 @@
+// Feature 7 (Remotion Manifest) — timing por palabra para subtítulos.
+// Opcional: no todo AudioProvider lo expone nativamente (Google/OpenRouter,
+// en backlog, decision-log.md #26/#27) — solo LOCAL (echogarden) lo llena hoy.
+export interface AudioSubtitleCue {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface AudioSynthesisResult {
   audioBuffer: Buffer;
   durationMs: number;
   mimeType: string;
+  subtitles?: AudioSubtitleCue[];
 }
 
 // Cada AudioProvider (Local/Google/OpenRouter) implementa esto — una sola

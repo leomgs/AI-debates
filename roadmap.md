@@ -2,7 +2,7 @@
 
 Documento de secuenciación. No repite el detalle de cada ítem (eso vive en `tasks.md`) — organiza y prioriza lo que `tasks.md` ya trackea, en el orden en que técnicamente conviene implementarlo, respetando las dependencias de `architecture.md` (sección 3, dirección de dependencias) y las prioridades P0/P1 de `features.md`. No agrega alcance nuevo: cada tarea referencia su ítem equivalente en `tasks.md`.
 
-Última revisión: 2026-09-14 (corrección de prioridades — ver "Próximo paso inmediato").
+Última revisión: 2026-09-24 (Feature 7 completa — MVP P0 cerrado de punta a punta).
 
 ## Objetivo
 
@@ -10,13 +10,15 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 ## Próximo paso inmediato
 
-**Fases 0, 1 y 2 completas** (última verificada contra APIs reales el 2026-09-08 — ver `tasks.md` §0-4/7 y `decision-log.md` entradas 1-18 para el detalle y el proceso de cada decisión no obvia). El backend ya corre el pipeline completo de punta a punta: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW`, con SSE en vivo, notificaciones, resume/recovery y curaduría humana (`approve`/`edit`/`regenerate`/`reject`/`resume`) — todo verificado con `scripts/smoke-test-episode.ts` contra Tavily + Gemini reales, última corrida limpia (`PENDING_REVIEW`, 2 argumentos OFFICIAL, veredicto, cero claims fallidos).
+**MVP P0 completo (2026-09-24, `decision-log.md` entrada 27)**: con Feature 7 (Remotion Manifest) implementada y verificada contra el servidor y el motor reales, **todo lo marcado P0 en `features.md` queda cubierto de punta a punta**: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW` → curaduría humana → TTS (URLs firmadas + regeneración atómica) → `GET /episodes/:id/manifest` con subtítulos reales y audio firmado, listo para que un worker de Remotion lo consuma. Ver `tasks.md` §0-4/6/7 y `decision-log.md` entradas 1-27 para el detalle y el proceso de cada decisión no obvia.
 
-**TTS (Feature 6) completo (2026-09-14)**: con la Etapa 3 terminada (AC 6.1 URLs firmadas + AC 6.2 regeneración atómica, `decision-log.md` entrada 25, `tasks.md` §5) — verificada contra el servidor real y un episodio `READY_FOR_RENDER` real, sin mocks.
+**Próximo paso real**: no queda ningún ítem P0 pendiente. Lo que sigue es todo P1/backlog, sin bloquear el producto core:
+- **Feature 9 (Fase 4 más abajo)** — worker que ejecuta Remotion sobre el manifest y produce el `.mp4`, más el consumo del manifest vía `@remotion/player` en el frontend.
+- **Frontend** — no arrancado todavía (`frontend-notes.md` tiene notas sueltas de decisiones que lo afectan, pero no hay scaffolding).
+- **Backlog de TTS** (`tasks.md` §5) — Google/OpenRouter como proveedores adicionales, Chatterbox (motor GPU) para mejorar la calidad de voz de Piper.
+- **Housekeeping menor** (`tasks.md` §9) — `04-development/testing-strategy.md`, estrategia de fixtures de Research para dev.
 
-**Corrección de prioridades (2026-09-14, `decision-log.md` entrada 26)**: al revisar qué faltaba de `Render` se encontró que ese módulo agrupa **dos features con prioridad distinta**, algo que este roadmap y `tasks.md` §6 venían tratando como una sola cosa (todo P1). `features.md` marca **Feature 7 (Remotion Manifest — generar el JSON y `GET /episodes/:id/manifest`) como P0**; solo **Feature 9 (el worker que ejecuta Remotion y produce el `.mp4`, más el `@remotion/player` del frontend) es P1**. Con esto, **el MVP P0 NO está cerrado todavía** — Feature 7 es el ítem P0 real que queda pendiente, no TTS (que sí cerró esta sesión). Ver Fase 4 más abajo, ahora dividida en su mitad P0 y su mitad P1.
-
-**Próximo paso real**: implementar la mitad P0 de `RenderModule` (generación del manifest + endpoint). El resto (worker, `.mp4`, frontend) sigue siendo razonable de posponer.
+De estos, **Feature 9 es el que más directamente conecta con lo ya construido** (el manifest ya existe y está verificado) — es la continuación natural si el objetivo es llegar al producto audiovisual completo. El frontend es la otra opción real, en paralelo o en vez de Feature 9, dependiendo de qué priorice el usuario.
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -70,19 +72,19 @@ Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a 
 
 Objetivo: `RenderModule` cubre dos features con prioridad distinta (`features.md`, corrección 2026-09-14 — `decision-log.md` entrada 26). No tratar el módulo como un bloque único: la mitad P0 cierra el MVP, la mitad P1 no bloquea nada.
 
-**Feature 7 — Remotion Manifest (P0)**: sin esto, el MVP P0 no está cerrado.
-- [ ] Generación de `RemotionManifest` (contrato de Feature 7 — `episodeId`, `meta`, `agents`, `timeline`, `verdict`), a partir de datos que ya existen (`officialArguments`, `AudioAsset.durationMs`, `Verdict`)
-- [ ] `subtitles` por segmento (timing por palabra) — gap real encontrado 2026-09-14: no existe en ningún lado del código hoy. `EchogardenAudioProvider.synthesize()` (`src/modules/tts/local-echogarden.provider.ts`) descarta el campo `timeline: Timeline` que `echogarden` sí devuelve en `SynthesisResult` — solo se usa `result.audio`. Hay que extender `AudioSynthesisResult`/`AudioProvider` para exponerlo y persistirlo en algún lado (`AudioAsset` no tiene columna para esto hoy)
-- [ ] `GET /episodes/:id/manifest` con URLs firmadas resueltas — puede reusar `TtsService.getSignedAudioUrl` (ya construido en la Etapa 3 de TTS, `tasks.md` §5)
-- [ ] Decidir si el manifest se persiste en `Episode.remotionManifest` (campo `Json?` ya existe en `schema.prisma`, sin usar) o se genera al vuelo en cada `GET`
+**Feature 7 — Remotion Manifest (P0) — COMPLETA (2026-09-24, `decision-log.md` entrada 27)**: con esto, el MVP P0 quedó cerrado.
+- [x] Generación de `RemotionManifest` (`RenderService.buildManifest()`, puro — `episodeId`, `meta`, `agents`, `timeline`, `verdict`), a partir de `officialArguments`/`AudioAsset`/`Verdict` ya resueltos por `EpisodesService.getManifest()`
+- [x] `subtitles` por segmento (timing por palabra) — gap cerrado. `EchogardenAudioProvider.synthesize()` extrae el timing real (jerárquico, en segundos) del `timeline` que `echogarden` devuelve, vía `extractWordSubtitles()`. Persistido en `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`)
+- [x] `GET /episodes/:id/manifest` con URLs firmadas resueltas — reusa `TtsService.getSignedAudioUrl` (AC 6.1), agregado como `audioUrl` en cada `timeline[]` entry
+- [x] Decidido: el manifest se genera **al vuelo en cada `GET`** (no se persiste en `Episode.remotionManifest`) — las URLs firmadas tienen TTL corto, cachear el manifest completo las dejaría vencidas
 
-**Feature 9 — Video Rendering & Preview (P1)**: no bloquea el MVP core.
+**Feature 9 — Video Rendering & Preview (P1)**: no bloquea el MVP core. Es la continuación natural del trabajo ya hecho (el manifest que este worker necesita ya existe y está verificado).
 - [ ] Worker desacoplado que ejecuta el binario de Remotion
 - [ ] Persistencia en `Asset` del `.mp4` resultante
 - [ ] Wirear transición `RENDERING → COMPLETED`
 - [ ] Frontend: consumo del manifest vía `@remotion/player`
 
-Cerrada la mitad P0 de esta fase, recién ahí **todo lo marcado P0 en `features.md` queda cubierto de punta a punta**.
+**Con Feature 7 cerrada, todo lo marcado P0 en `features.md` queda cubierto de punta a punta.**
 
 ## Decisiones abiertas (el usuario debe resolverlas, no se infieren)
 

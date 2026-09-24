@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
 import { SequenceIndexOutOfRangeError } from "../../modules/tts/tts.errors";
+import { ManifestNotReadyError } from "../../modules/render/render.errors";
 
 // Formato de error HTTP consistente en todo el backend (api-contract.md §1,
 // tasks.md §9): { error: { code, message } }. EpisodesModule es el primer
@@ -35,6 +36,13 @@ export class HttpErrorFilter implements ExceptionFilter {
     // para el episodio actual, no un conflicto de estado.
     if (exception instanceof SequenceIndexOutOfRangeError) {
       return { status: 400, code: "INVALID_SEQUENCE_INDEX", message: exception.message };
+    }
+
+    // Feature 7 — GET /episodes/:id/manifest antes de que exista audio/veredicto
+    // para todos los Argument OFFICIAL: conflicto con el estado actual de los
+    // datos, no un payload inválido (mismo status class que INVALID_STATE_TRANSITION).
+    if (exception instanceof ManifestNotReadyError) {
+      return { status: 409, code: "MANIFEST_NOT_READY", message: exception.message };
     }
 
     if (exception instanceof ZodError) {
