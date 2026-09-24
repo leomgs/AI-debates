@@ -1,23 +1,17 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
-import { Episode, EpisodeStatus } from "@prisma/client";
+import { EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { DebateService } from "../debate/debate.service";
 import { TtsService } from "../tts/tts.service";
 import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { RenderService } from "../render/render.service";
-import type { RemotionManifest } from "../render/remotion-manifest.types";
+import type { RemotionManifest } from "../render/remotion-manifest.schema";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EPISODE_DETAIL_INCLUDE, mapEpisodeDetail, EpisodeDetailResponse } from "./episode-detail.mapper";
+import type { SerializedEpisode, SerializedEpisodeListItem } from "./dto/episode.schema";
 
 const VALID_STATUSES = new Set<string>(Object.values(EpisodeStatus));
-
-export interface EpisodeListItem {
-  id: string;
-  status: EpisodeStatus;
-  title: string;
-  createdAt: Date;
-}
 
 @Injectable()
 export class EpisodesService {
@@ -43,7 +37,7 @@ export class EpisodesService {
   // decisión D-11 del plan): POST /episodes responde apenas el Episode existe
   // en CREATED, el pipeline corre en background. Si el proceso cae a mitad de
   // camino, EpisodeRecoveryService (Fase E) lo retoma al reiniciar.
-  async createEpisode(topic: string): Promise<Episode> {
+  async createEpisode(topic: string): Promise<SerializedEpisode> {
     const topicRow = await this.research.createTopic(topic, topic);
     const debate = await this.debateService.createDebate(topicRow.id);
     const episode = await this.prisma.episode.create({ data: { debateId: debate.id, title: topic } });
@@ -53,16 +47,20 @@ export class EpisodesService {
       .runPipeline(episode.id)
       .catch((err) => this.logger.error(`runPipeline falló para el episodio ${episode.id}`, err instanceof Error ? err.stack : err));
 
-    return episode;
+    // z.date() no es representable en JSON Schema bajo Zod 4 (spec 001,
+    // EpisodeSchema usa z.iso.datetime()) — se serializa acá, en el borde
+    // HTTP, no en Prisma.
+    return { ...episode, createdAt: episode.createdAt.toISOString(), updatedAt: episode.updatedAt.toISOString() };
   }
 
-  async listEpisodes(statusCsv?: string): Promise<EpisodeListItem[]> {
+  async listEpisodes(statusCsv?: string): Promise<SerializedEpisodeListItem[]> {
     const statuses = this.parseStatusFilter(statusCsv);
-    return this.prisma.episode.findMany({
+    const episodes = await this.prisma.episode.findMany({
       where: statuses ? { status: { in: statuses } } : undefined,
       select: { id: true, status: true, title: true, createdAt: true },
       orderBy: { createdAt: "desc" },
     });
+    return episodes.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
   }
 
   async getEpisodeDetail(id: string): Promise<EpisodeDetailResponse> {

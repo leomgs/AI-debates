@@ -1,6 +1,6 @@
 # 001 — Contrato OpenAPI generado desde Zod
 
-Estado: especificada, no implementada. Ajustada el 2026-09-24 tras revisión contra el estado real del repo (ver `decision-log.md` #28 para el proceso completo) — el texto original lo trajo el usuario ya escrito; lo que sigue conserva su estructura y sus decisiones, con las correcciones marcadas donde el repo real no coincidía con lo asumido.
+Estado: **implementada y verificada contra el servidor real** (2026-09-24 — ver `decision-log.md` #29 para el proceso completo, incluidos los hallazgos reales que ni la spec ni el plan de implementación podían anticipar sin correr el código). Ajustada el 2026-09-24 tras revisión contra el estado real del repo antes de implementar (`decision-log.md` #28) — el texto original lo trajo el usuario ya escrito; lo que sigue conserva su estructura y sus decisiones, con las correcciones marcadas donde el repo real no coincidía con lo asumido.
 
 ## Contexto
 
@@ -61,6 +61,8 @@ Comandos que tienen que correr y pasar. No se considera terminada la tarea hasta
 
 ## Bitácora
 
-Al terminar de implementar, agregar una entrada en `decision-log.md` con: la decisión de `nestjs-zod` y su razón, la separación entre schemas de API y schemas de agentes, la decisión de commitear `openapi.json`, y el reemplazo del `ZodValidationPipe`/DTOs propios por el patrón de `nestjs-zod`.
+Implementada y documentada en `decision-log.md` #29 — incluye la decisión de `nestjs-zod` y su razón, la separación entre schemas de API y schemas de agentes, la decisión de commitear `openapi.json`, el reemplazo completo del `ZodValidationPipe` propio por el de `nestjs-zod` (posible 1:1, no una coexistencia — corrige la nota de la revisión previa), y los hallazgos reales encontrados implementando: `z.date()`/`z.undefined()` no representables en JSON Schema bajo Zod 4, `createZodDto` no envuelve `z.union`/`z.discriminatedUnion`, un bug propio de `import type` que dejaba el pipe global sin validar nada, y el alcance real de `@ZodResponse` en `POST /episodes/:id/actions/:action` (no se pudo documentar, comparte handler entre 3 shapes de respuesta distintos).
 
-La revisión previa a esta spec (por qué el texto original se ajustó) ya quedó documentada en `decision-log.md` #28 — no repetirla, solo referenciarla.
+La revisión previa a esta spec (por qué el texto original se ajustó, antes de implementar) quedó documentada en `decision-log.md` #28.
+
+**Pendiente real, no bloqueante**: `@ZodResponse` en `edit`/`regenerate`/`regenerate-audio`/`audio/url` (fuera del alcance explícito de esta primera pasada) y en `POST /episodes/:id/actions/:action` en general (bloqueado por compartir handler entre `Episode`/`Argument`/`AudioAsset` — requeriría partir el endpoint, fuera de alcance). `ResumeActionBodySchema` no tiene DTO por la misma limitación de `createZodDto` con uniones.

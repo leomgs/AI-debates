@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { ManifestNotReadyError } from "./render.errors";
-import type { RemotionManifest } from "./remotion-manifest.types";
+import type { RemotionManifest } from "./remotion-manifest.schema";
 
 export interface RenderManifestParticipant {
   agentId: string;

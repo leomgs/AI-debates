@@ -2,9 +2,21 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from "@n
 import { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
+import { ZodValidationException } from "nestjs-zod";
 import { InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
 import { SequenceIndexOutOfRangeError } from "../../modules/tts/tts.errors";
 import { ManifestNotReadyError } from "../../modules/render/render.errors";
+
+// Reusado por los dos branches que terminan en 400 VALIDATION_ERROR: el
+// ZodError "crudo" del pipe propio (path param `action`) y el que envuelve
+// ZodValidationException (nestjs-zod, spec 001 — su pipe global lanza esta
+// excepción, no un ZodError directo, así que sin este branch el error caería
+// al genérico de HttpException más abajo con code "ZODVALIDATION" en vez de
+// "VALIDATION_ERROR").
+function formatZodIssue(error: ZodError): string {
+  const first = error.issues[0];
+  return first ? `${first.path.join(".")}: ${first.message}` : "Payload inválido.";
+}
 
 // Formato de error HTTP consistente en todo el backend (api-contract.md §1,
 // tasks.md §9): { error: { code, message } }. EpisodesModule es el primer
@@ -46,8 +58,12 @@ export class HttpErrorFilter implements ExceptionFilter {
     }
 
     if (exception instanceof ZodError) {
-      const first = exception.issues[0];
-      const message = first ? `${first.path.join(".")}: ${first.message}` : "Payload inválido.";
+      return { status: 400, code: "VALIDATION_ERROR", message: formatZodIssue(exception) };
+    }
+
+    if (exception instanceof ZodValidationException) {
+      const zodError = exception.getZodError();
+      const message = zodError instanceof ZodError ? formatZodIssue(zodError) : exception.message;
       return { status: 400, code: "VALIDATION_ERROR", message };
     }
 

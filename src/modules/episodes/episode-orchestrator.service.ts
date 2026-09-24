@@ -25,6 +25,8 @@ import {
   FactCheckOutput,
 } from "../../shared/contracts/agents.contracts";
 import { DEBATER_PERSONAS, DebaterPersona } from "../../shared/personas/agents.personas";
+import { EpisodeSseEventTypeSchema } from "./dto/episode-sse-event.schema";
+import type { z } from "zod";
 
 export interface ManualSource {
   url: string;
@@ -32,14 +34,11 @@ export interface ManualSource {
   snippet: string;
 }
 
-// Eventos SSE definidos en api-contract.md §4, emitidos vía EpisodeEventsService.
-type EpisodeSseEvent =
-  | "research.started"
-  | "agent.thinking"
-  | "fact_check.completed"
-  | "argument.approved"
-  | "episode.pending_review"
-  | "episode.requires_review";
+// Eventos SSE definidos en api-contract.md §4, emitidos vía
+// EpisodeEventsService. Tipo derivado de EpisodeSseEventTypeSchema (spec
+// 001, dto/episode-sse-event.schema.ts) — única fuente de verdad, no se
+// repite el enum a mano acá.
+type EpisodeSseEvent = z.infer<typeof EpisodeSseEventTypeSchema>;
 
 // participants.agent (role -> persona/JUDGE) y debate.topic (título para el
 // DebateContext) se agregaron en Fase C — Fase B solo necesitaba

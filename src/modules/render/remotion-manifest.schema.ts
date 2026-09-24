@@ -1,0 +1,66 @@
+import { z } from "zod";
+import { createZodDto } from "nestjs-zod";
+
+// features.md Feature 7 (P0) — "Contrato Estricto (RemotionManifest)",
+// congelado en v1.0. `audioUrl` NO está en el contrato original de
+// features.md (solo `audioAssetId`), pero api-contract.md §2 promete
+// "URLs firmadas resueltas para cada AudioAsset" en la respuesta del
+// endpoint — se agrega como campo adicional (no reemplaza `audioAssetId`,
+// que sigue siendo obligatorio) para cumplir esa promesa sin romper el
+// contrato congelado. RenderService.buildManifest() no lo completa (es
+// puro, sin TtsService) — lo agrega EpisodesService después, reusando
+// TtsService.getSignedAudioUrl (AC 6.1). decision-log.md 2026-09-24, #27.
+//
+// Migrado de interfaces TS planas a Zod (spec 001, docs/product/
+// 001-openapi-contract-zod.md) para que GET /episodes/:id/manifest tenga
+// un @ZodResponse real en el OpenAPI generado — antes de esto, ninguna
+// respuesta GET del proyecto se validaba con Zod en runtime (precedente
+// documentado en decision-log.md #27). El shape de `subtitles` se define
+// acá mismo, no se importa AudioSubtitleCue de tts/ (arquitectura §3,
+// límite de módulo: render no depende de tts).
+const AudioSubtitleCueSchema = z.object({
+  text: z.string(),
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().nonnegative(),
+});
+
+export const RemotionManifestAgentSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  avatarUrl: z.string().nullable(),
+  voiceId: z.string(),
+});
+
+export const RemotionManifestTimelineEntrySchema = z.object({
+  sequenceIndex: z.number().int().positive(),
+  agentId: z.string().uuid(),
+  text: z.string(),
+  audioAssetId: z.string().uuid(),
+  audioUrl: z.string().optional(),
+  durationMs: z.number().int().nonnegative(),
+  subtitles: z.array(AudioSubtitleCueSchema),
+});
+
+export const RemotionManifestVerdictSchema = z.object({
+  winnerAgentId: z.string().uuid().nullable(),
+  summary: z.string(),
+});
+
+export const RemotionManifestSchema = z.object({
+  episodeId: z.string().uuid(),
+  meta: z.object({
+    topic: z.string(),
+    durationEstimatedSec: z.number().nonnegative(),
+  }),
+  agents: z.array(RemotionManifestAgentSchema),
+  timeline: z.array(RemotionManifestTimelineEntrySchema),
+  verdict: RemotionManifestVerdictSchema,
+});
+
+export type RemotionManifestAgent = z.infer<typeof RemotionManifestAgentSchema>;
+export type RemotionManifestTimelineEntry = z.infer<typeof RemotionManifestTimelineEntrySchema>;
+export type RemotionManifestVerdict = z.infer<typeof RemotionManifestVerdictSchema>;
+export type RemotionManifest = z.infer<typeof RemotionManifestSchema>;
+
+// spec 001 (@ZodResponse) — GET /episodes/:id/manifest.
+export class RemotionManifestDto extends createZodDto(RemotionManifestSchema) {}

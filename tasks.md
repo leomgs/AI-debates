@@ -4,9 +4,11 @@ Tracking del estado de implementación. No repite el diseño (eso vive en `archi
 
 Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-24.
 
-## Dónde retomar (última sesión: 2026-09-24 — dos specs post-MVP documentadas: OpenAPI/Zod y workspace/monorepo)
+## Dónde retomar (última sesión: 2026-09-24 — spec 001 (OpenAPI/Zod) implementada; spec 002 (workspace) sigue solo documentada)
 
-**Esta sesión (segunda mitad)**: el usuario trajo dos specs nuevas ya escritas (contrato OpenAPI generado desde Zod, y reestructuración a monorepo con `apps/api`+`packages/contracts`+`packages/video`+`apps/dashboard`). Se revisaron contra el estado real del proyecto antes de documentarlas — encontró varios desajustes reales (npm vs. pnpm, `RemotionManifest` no es Zod, eventos SSE sin tipar, no hay código de Remotion que "mover", contradicción sobre si el dashboard va en repo aparte) y se resolvieron por chat. Quedaron escritas como `docs/product/001-openapi-contract-zod.md` y `docs/product/002-workspace-restructure.md` (secciones 10-11 más abajo), con el tracking dividido en 3 por dueño (back puro acá, lo que toca al front en `frontend-notes.md`, lo puramente front en `apps/dashboard/docs/`, nuevo). Proceso completo en `decision-log.md` entrada 28. **Nada de esto se implementó** — es trabajo de documentación únicamente.
+**Esta sesión**: implementada y verificada contra el servidor real la spec 001 — sección 10 más abajo, proceso completo y hallazgos reales (varios que ni la spec ni el plan podían anticipar sin correr el código: `z.date()` no representable en JSON Schema, `createZodDto` no envuelve uniones, un bug propio de `import type` que dejaba el pipe global sin validar nada) en `decision-log.md` entrada 29. **Próximo paso real: implementar la spec 002** (`docs/product/002-workspace-restructure.md`, sección 11 — requiere 001 mergeada, ya lo está).
+
+**Sesión previa**: el usuario trajo dos specs nuevas ya escritas (contrato OpenAPI generado desde Zod, y reestructuración a monorepo con `apps/api`+`packages/contracts`+`packages/video`+`apps/dashboard`). Se revisaron contra el estado real del proyecto antes de documentarlas — encontró varios desajustes reales (npm vs. pnpm, `RemotionManifest` no era Zod, eventos SSE sin tipar, no hay código de Remotion que "mover", contradicción sobre si el dashboard va en repo aparte) y se resolvieron por chat. Quedaron escritas como `docs/product/001-openapi-contract-zod.md` y `docs/product/002-workspace-restructure.md` (secciones 10-11 más abajo), con el tracking dividido en 3 por dueño (back puro acá, lo que toca al front en `frontend-notes.md`, lo puramente front en `apps/dashboard/docs/`). Proceso completo en `decision-log.md` entrada 28.
 
 **Sesión previa**: implementada y verificada contra el servidor y el motor reales la Feature 7 (`decision-log.md` #27) — `RenderModule` nuevo (`RenderService.buildManifest()`, puro, sin Prisma ni imports cruzados de dominio), `GET /episodes/:id/manifest` en `EpisodesController` vía `EpisodesService.getManifest()` (orquesta Prisma + `TtsService` + `RenderService`), y el gap de `subtitles` cerrado: `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`), `EchogardenAudioProvider.synthesize()` ahora extrae timing por palabra real del `timeline` jerárquico de `echogarden` (antes descartado por completo). Con esto, **todo lo P0 de `features.md` queda cubierto de punta a punta** — ver `roadmap.md`. Ver sección 6 más abajo para el detalle.
 
@@ -246,18 +248,19 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
 - [ ] `04-development/testing-strategy.md` — mencionado como pendiente en `coding-rules.md` §9, escribir cuando haya al menos un módulo implementado
 - [ ] Decidir estrategia de seed/fixtures de `Evidence Base` para desarrollo local (research contra APIs reales cuesta $ — ver límites de Feature 2)
 
-## 10. OpenAPI Contract (`docs/product/001-openapi-contract-zod.md`) — sin empezar
+## 10. OpenAPI Contract (`docs/product/001-openapi-contract-zod.md`) — COMPLETA (2026-09-24, `decision-log.md` entrada 29)
 
-Post-MVP, fuera de `features.md` (congelado). Especificada y ajustada contra el proyecto real el 2026-09-24 (`decision-log.md` entrada 28) — no implementada todavía.
+Post-MVP, fuera de `features.md` (congelado). Especificada y ajustada contra el proyecto real el 2026-09-24 (`decision-log.md` entrada 28), implementada y verificada contra el servidor real el mismo día (entrada 29).
 
-- [ ] Instalar `@nestjs/swagger` + `nestjs-zod`
-- [ ] Migrar `RemotionManifest` (`src/modules/render/remotion-manifest.types.ts`) y `EpisodeDetailResponse` (`episode-detail.mapper.ts`) de interfaces TS planas a schemas Zod
-- [ ] Escribir los 6 schemas Zod de eventos SSE (Feature 8) — no existen hoy, `EpisodeEventsService.emit()` está destipado
-- [ ] Reemplazar el `ZodValidationPipe` propio (`shared/http/zod-validation.pipe.ts`) y los 6 DTOs de `modules/episodes/dto/` por `createZodDto` + el pipe global de `nestjs-zod`
-- [ ] `operationId` explícito + `@ZodResponse` en cada handler de `EpisodesController`/`NotificationsController`
-- [ ] `DocumentBuilder` + `SwaggerModule.setup` (vía `cleanupOpenApiDoc`, no `patchNestJsSwagger`)
-- [ ] `scripts/generate-openapi.ts` + script `openapi:generate`
-- [ ] `openapi.json` generado y commiteado
+- [x] `@nestjs/swagger@^11.1.0` + `nestjs-zod@^5.5.0` (no `@latest` de swagger — `12.x` rompe con Nest 11/peer de `nestjs-zod`)
+- [x] `RemotionManifest` (`src/modules/render/remotion-manifest.schema.ts`, renombrado desde `.types.ts`) y `EpisodeDetailResponse`/`EpisodeSchema`/`EpisodeListItemSchema` (`episode-detail.mapper.ts`, `dto/episode.schema.ts`, nuevo) migrados a Zod — fechas como `z.iso.datetime()`, no `z.date()` (no representable en JSON Schema bajo Zod 4, hallazgo real)
+- [x] 6 schemas Zod de eventos SSE (`dto/episode-sse-event.schema.ts`, nuevo) contra los payloads reales que emite el código (no la prosa desactualizada de `features.md` — `fact_check.completed` usa `PASSED`/`FAILED`, `argument.approved` no tiene `sequenceIndex`)
+- [x] `ZodValidationPipe` propio (`shared/http/zod-validation.pipe.ts`) **borrado**, reemplazado 1:1 por el de `nestjs-zod` (global vía `APP_PIPE` para `@Body()`/`@Query()`, instanciado a mano para el path param `action`) — resultó ser reemplazo completo, no coexistencia (corrige lo que decía la spec ajustada)
+- [x] `operationId` explícito en los 11 endpoints del documento (incluido `AppController`, boilerplate default) + `@ZodResponse` en `create`/`list`/`detail`/`manifest` de `EpisodesController` (alcance acordado — `edit`/`regenerate`/`regenerate-audio`/`audio/url`/`runAction` quedan fuera, ver spec §Bitácora)
+- [x] `DocumentBuilder` + `SwaggerModule.setup` vía `cleanupOpenApiDoc` (`shared/http/openapi-document.ts`, compartido con el script de abajo)
+- [x] `scripts/generate-openapi.ts` + script `openapi:generate`
+- [x] `openapi.json` generado, idempotente (`openapi:generate` dos veces seguidas → `git diff --exit-code` limpio) y commiteado
+- [x] Verificado contra servidor real: `/docs` renderiza, validación 400/409 intacta tras el reemplazo del pipe (bug real de `import type` encontrado y corregido en el camino), `openapi-typescript` compila contra el documento generado
 
 ## 11. Workspace Restructure (`docs/product/002-workspace-restructure.md`) — sin empezar
 

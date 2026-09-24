@@ -1,12 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { join, resolve } from 'path';
 import type { Request, Response } from 'express';
 import { HttpErrorFilter } from './shared/http/http-error.filter';
 import type { Env } from './shared/config/env.schema';
 import { verifyAudioUrlSignature } from './modules/tts/audio-url-signer';
+import { buildOpenApiDocument } from './shared/http/openapi-document';
 
 async function bootstrap() {
   // Cambiamos a NestExpressApplication para acceder a usar Static Assets
@@ -44,6 +46,10 @@ async function bootstrap() {
     next();
   });
   app.useStaticAssets(audioStorageDir, { prefix: '/audio-files/' });
+
+  // spec 001 (docs/product/001-openapi-contract-zod.md) — /docs navegable,
+  // mismo documento que escribe scripts/generate-openapi.ts a openapi.json.
+  SwaggerModule.setup('docs', app, buildOpenApiDocument(app));
 
   await app.listen(3000);
 }

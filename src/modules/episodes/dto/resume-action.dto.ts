@@ -39,3 +39,14 @@ export const ResumeActionBodySchema = z.union([
   EmptyResumeSchema,
 ]);
 export type ResumeActionBody = z.infer<typeof ResumeActionBodySchema>;
+
+// Sin ResumeActionBodyDto (createZodDto): TS no permite `extends` sobre un
+// schema cuyo tipo de salida es una unión (error TS2509, "constructor
+// return type... is not an object type") — createZodDto solo envuelve
+// shapes de un único tipo objeto. No hace falta igual: el body real de
+// POST /episodes/:id/actions/resume se sigue validando a mano con
+// ResumeActionBodySchema.parse() en EpisodesController.runAction (el shape
+// esperado depende del `reason` del checkpoint activo, no del endpoint en
+// sí — el pipe global de nestjs-zod no podría resolver esa polimorfia por
+// action de todos modos). Spec 001 documenta esto como fuera del alcance de
+// @ZodResponse de esta primera pasada.

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_PIPE } from '@nestjs/core';
+import { ZodValidationPipe } from 'nestjs-zod';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './shared/config/env.schema';
@@ -26,6 +28,12 @@ import { EpisodesModule } from './modules/episodes/episodes.module';
     EpisodesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  // spec 001 (docs/product/001-openapi-contract-zod.md) — reemplaza el pipe
+  // propio del proyecto (shared/http/zod-validation.pipe.ts, borrado): valida
+  // automáticamente cualquier @Body()/@Query() tipado con una clase
+  // createZodDto. Path params sueltos (no DTOs de objeto) siguen
+  // instanciándolo a mano donde hace falta (mismo pipe, ver
+  // EpisodesController.runAction).
+  providers: [AppService, { provide: APP_PIPE, useClass: ZodValidationPipe }],
 })
 export class AppModule {}

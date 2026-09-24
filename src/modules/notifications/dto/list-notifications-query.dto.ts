@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createZodDto } from "nestjs-zod";
 
 // api-contract.md / decision-log.md 2026-09-08 #9 — GET /notifications?unreadOnly=true
 // (default true). Query params HTTP llegan como string, no boolean — se
@@ -9,4 +10,4 @@ export const ListNotificationsQuerySchema = z.object({
     .optional()
     .transform((v) => v !== "false"),
 });
-export type ListNotificationsQueryDto = z.infer<typeof ListNotificationsQuerySchema>;
+export class ListNotificationsQueryDto extends createZodDto(ListNotificationsQuerySchema) {}

@@ -54,9 +54,17 @@ describe("EpisodesService", () => {
 
   describe("createEpisode", () => {
     it("crea Topic -> Debate -> Episode -> EpisodeUsage en orden, reusando el mismo string en title/context, y dispara runPipeline sin esperarlo", async () => {
+      const now = new Date("2026-09-24T12:00:00.000Z");
       research.createTopic.mockResolvedValue({ id: TOPIC_ID, title: "Un trend", context: "Un trend" });
       debateService.createDebate.mockResolvedValue({ id: DEBATE_ID, topicId: TOPIC_ID });
-      prisma.episode.create.mockResolvedValue({ id: EPISODE_ID, debateId: DEBATE_ID, title: "Un trend", status: "CREATED" });
+      prisma.episode.create.mockResolvedValue({
+        id: EPISODE_ID,
+        debateId: DEBATE_ID,
+        title: "Un trend",
+        status: "CREATED",
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const episode = await service.createEpisode("Un trend");
 
@@ -65,6 +73,10 @@ describe("EpisodesService", () => {
       expect(prisma.episode.create).toHaveBeenCalledWith({ data: { debateId: DEBATE_ID, title: "Un trend" } });
       expect(prisma.episodeUsage.create).toHaveBeenCalledWith({ data: { episodeId: EPISODE_ID } });
       expect(episode.id).toBe(EPISODE_ID);
+      // spec 001 — z.date() no es representable en JSON Schema, EpisodeSchema
+      // usa z.iso.datetime(): createEpisode serializa el Date real a ISO.
+      expect(episode.createdAt).toBe("2026-09-24T12:00:00.000Z");
+      expect(episode.updatedAt).toBe("2026-09-24T12:00:00.000Z");
       // Fire-and-forget (decisión D-11): createEpisode ya resolvió arriba sin
       // haber esperado runPipeline — alcanza con que se haya disparado.
       expect(orchestrator.runPipeline).toHaveBeenCalledWith(EPISODE_ID);
@@ -73,7 +85,14 @@ describe("EpisodesService", () => {
     it("un runPipeline rechazado no rompe createEpisode (el catch interno lo absorbe)", async () => {
       research.createTopic.mockResolvedValue({ id: TOPIC_ID, title: "Un trend", context: "Un trend" });
       debateService.createDebate.mockResolvedValue({ id: DEBATE_ID, topicId: TOPIC_ID });
-      prisma.episode.create.mockResolvedValue({ id: EPISODE_ID, debateId: DEBATE_ID, title: "Un trend", status: "CREATED" });
+      prisma.episode.create.mockResolvedValue({
+        id: EPISODE_ID,
+        debateId: DEBATE_ID,
+        title: "Un trend",
+        status: "CREATED",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
       orchestrator.runPipeline.mockRejectedValue(new Error("boom"));
 
       await expect(service.createEpisode("Un trend")).resolves.toMatchObject({ id: EPISODE_ID });
