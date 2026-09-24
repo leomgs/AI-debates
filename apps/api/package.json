@@ -1,5 +1,5 @@
 {
-  "name": "ai-trend-debates-back",
+  "name": "@ai-trend-debates/api",
   "version": "0.0.1",
   "description": "Automated pipeline that turns a trending topic into a fact-checked debate video between AI agents.",
   "author": "Leonardo Magariños",
@@ -25,6 +25,7 @@
     "openapi:generate": "ts-node scripts/generate-openapi.ts"
   },
   "dependencies": {
+    "@ai-trend-debates/contracts": "workspace:*",
     "@ai-sdk/anthropic": "^3.0.116",
     "@ai-sdk/google": "^3.0.121",
     "@ai-sdk/openai": "^3.0.109",
@@ -85,7 +86,7 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!(@nestjs/config|dotenv-expand|es-toolkit|cockatiel)/)"
+      "node_modules/(?!.*(@nestjs\\+config|@nestjs/config|dotenv-expand|es-toolkit|cockatiel)(@|/))"
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"

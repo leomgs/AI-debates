@@ -1,0 +1,23 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# pnpm bloquea scripts de instalación por default (gate de seguridad contra
+# supply-chain attacks) — aprobados explícitos, las 8 son dependencias ya
+# usadas y confiadas por el proyecto antes de esta migración (better-sqlite3
+# y onnxruntime-node necesitan compilar/descargar su binario nativo — sin
+# esto, el driver de SQLite y el motor TTS de echogarden no funcionan en
+# absoluto; @prisma/engines y prisma descargan los binarios del motor de
+# Prisma, ya imprescindibles; @parcel/watcher/unrs-resolver/wtf_wikipedia son
+# dependencias transitivas de tooling ya en uso; @scarf/scarf es solo
+# telemetría de instalación de un paquete ya confiado).
+allowBuilds:
+  '@parcel/watcher': true
+  '@prisma/engines': true
+  '@scarf/scarf': true
+  better-sqlite3: true
+  onnxruntime-node: true
+  prisma: true
+  unrs-resolver: true
+  wtf_wikipedia: true
+minimumReleaseAgeExclude:
+  - undici@8.11.2

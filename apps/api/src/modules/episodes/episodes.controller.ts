@@ -15,7 +15,7 @@ import { RegenerateAudioActionSchema } from "./dto/regenerate-audio-action.dto";
 import { ResumeActionBodySchema } from "./dto/resume-action.dto";
 import { EpisodeDto, EpisodeListItemDto } from "./dto/episode.schema";
 import { EpisodeDetailDto } from "./episode-detail.mapper";
-import { RemotionManifestDto } from "../render/remotion-manifest.schema";
+import { RemotionManifestDto } from "../render/remotion-manifest.dto";
 import {
   ResearchStartedEventDto,
   AgentThinkingEventDto,

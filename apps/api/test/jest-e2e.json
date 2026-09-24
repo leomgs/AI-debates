@@ -7,5 +7,5 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
-  "transformIgnorePatterns": ["node_modules/(?!(@nestjs/config|dotenv-expand|es-toolkit|cockatiel)/)"]
+  "transformIgnorePatterns": ["node_modules/(?!.*(@nestjs\\+config|@nestjs/config|dotenv-expand|es-toolkit|cockatiel)(@|/))"]
 }

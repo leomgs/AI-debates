@@ -6,7 +6,7 @@ import { DebateService } from "../debate/debate.service";
 import { TtsService } from "../tts/tts.service";
 import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { RenderService } from "../render/render.service";
-import type { RemotionManifest } from "../render/remotion-manifest.schema";
+import type { RemotionManifest } from "@ai-trend-debates/contracts";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EPISODE_DETAIL_INCLUDE, mapEpisodeDetail, EpisodeDetailResponse } from "./episode-detail.mapper";
 import type { SerializedEpisode, SerializedEpisodeListItem } from "./dto/episode.schema";

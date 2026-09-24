@@ -1,6 +1,12 @@
 import { z } from "zod";
-import { createZodDto } from "nestjs-zod";
 
+// spec 002 (docs/product/002-workspace-restructure.md) — vive en
+// packages/contracts porque es el contrato entre apps/api y packages/video,
+// y no pertenece a ninguno de los dos. Solo Zod como dependencia — ninguna
+// clase createZodDto/nestjs-zod acá: eso es un detalle de la capa HTTP de
+// apps/api (ver src/modules/render/remotion-manifest.dto.ts), y
+// packages/video no tiene ninguna razón para depender de @nestjs/swagger.
+//
 // features.md Feature 7 (P0) — "Contrato Estricto (RemotionManifest)",
 // congelado en v1.0. `audioUrl` NO está en el contrato original de
 // features.md (solo `audioAssetId`), pero api-contract.md §2 promete
@@ -61,6 +67,3 @@ export type RemotionManifestAgent = z.infer<typeof RemotionManifestAgentSchema>;
 export type RemotionManifestTimelineEntry = z.infer<typeof RemotionManifestTimelineEntrySchema>;
 export type RemotionManifestVerdict = z.infer<typeof RemotionManifestVerdictSchema>;
 export type RemotionManifest = z.infer<typeof RemotionManifestSchema>;
-
-// spec 001 (@ZodResponse) — GET /episodes/:id/manifest.
-export class RemotionManifestDto extends createZodDto(RemotionManifestSchema) {}

@@ -1,0 +1,17 @@
+{
+  "name": "@ai-trend-debates/contracts",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Contratos Zod compartidos entre apps/api y packages/video (spec 002).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

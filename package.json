@@ -1,0 +1,18 @@
+{
+  "name": "ai-trend-debates",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Monorepo: pipeline automatizado que convierte un trend en un debate verificado entre agentes de IA, con el video renderizado vía Remotion.",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "dev": "turbo run dev",
+    "openapi:generate": "pnpm --filter @ai-trend-debates/api run openapi:generate",
+    "video:studio": "pnpm --filter @ai-trend-debates/video run studio",
+    "check:boundaries": "node scripts/check-boundaries.mjs"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.3"
+  }
+}
