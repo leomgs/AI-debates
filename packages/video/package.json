@@ -1,0 +1,26 @@
+{
+  "name": "@ai-trend-debates/video",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Composiciones de Remotion para el video del debate (spec 002) - independiente de apps/api, solo consume un RemotionManifest + URLs de audio.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "studio": "remotion studio src/index.ts"
+  },
+  "dependencies": {
+    "@ai-trend-debates/contracts": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.528",
+    "@remotion/cli": "^4.0.528",
+    "@remotion/player": "^4.0.528",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3"
+  }
+}

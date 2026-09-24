@@ -1,0 +1,58 @@
+{
+  "episodeId": "00000000-0000-4000-8000-000000000001",
+  "meta": {
+    "topic": "¿Debería la IA reemplazar a los desarrolladores de software?",
+    "durationEstimatedSec": 9
+  },
+  "agents": [
+    {
+      "id": "00000000-0000-4000-8000-0000000000a1",
+      "name": "Analyst",
+      "avatarUrl": null,
+      "voiceId": "es_ES-davefx-medium"
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000a2",
+      "name": "Contrarian",
+      "avatarUrl": null,
+      "voiceId": "es_ES-sharvard-medium"
+    }
+  ],
+  "timeline": [
+    {
+      "sequenceIndex": 1,
+      "agentId": "00000000-0000-4000-8000-0000000000a1",
+      "text": "Los datos muestran una adopción real de IA en el desarrollo de software.",
+      "audioAssetId": "00000000-0000-4000-8000-0000000000b1",
+      "durationMs": 4500,
+      "subtitles": [
+        { "text": "Los", "startMs": 0, "endMs": 300 },
+        { "text": "datos", "startMs": 300, "endMs": 700 },
+        { "text": "muestran", "startMs": 700, "endMs": 1300 },
+        { "text": "una", "startMs": 1300, "endMs": 1500 },
+        { "text": "adopción", "startMs": 1500, "endMs": 2200 },
+        { "text": "real", "startMs": 2200, "endMs": 2500 },
+        { "text": "de", "startMs": 2500, "endMs": 2650 },
+        { "text": "IA", "startMs": 2650, "endMs": 3000 }
+      ]
+    },
+    {
+      "sequenceIndex": 2,
+      "agentId": "00000000-0000-4000-8000-0000000000a2",
+      "text": "Pero la evidencia no distingue entre asistencia y reemplazo real.",
+      "audioAssetId": "00000000-0000-4000-8000-0000000000b2",
+      "durationMs": 4000,
+      "subtitles": [
+        { "text": "Pero", "startMs": 0, "endMs": 350 },
+        { "text": "la", "startMs": 350, "endMs": 500 },
+        { "text": "evidencia", "startMs": 500, "endMs": 1200 },
+        { "text": "no", "startMs": 1200, "endMs": 1400 },
+        { "text": "distingue", "startMs": 1400, "endMs": 2100 }
+      ]
+    }
+  ],
+  "verdict": {
+    "winnerAgentId": "00000000-0000-4000-8000-0000000000a1",
+    "summary": "Analyst presentó evidencia más sólida sobre adopción real."
+  }
+}

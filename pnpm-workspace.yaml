@@ -9,15 +9,45 @@ packages:
 # absoluto; @prisma/engines y prisma descargan los binarios del motor de
 # Prisma, ya imprescindibles; @parcel/watcher/unrs-resolver/wtf_wikipedia son
 # dependencias transitivas de tooling ya en uso; @scarf/scarf es solo
-# telemetría de instalación de un paquete ya confiado).
+# telemetría de instalación de un paquete ya confiado; esbuild es el
+# bundler que Remotion usa internamente para Studio/render, packages/video).
 allowBuilds:
   '@parcel/watcher': true
   '@prisma/engines': true
   '@scarf/scarf': true
   better-sqlite3: true
+  esbuild: true
   onnxruntime-node: true
   prisma: true
   unrs-resolver: true
   wtf_wikipedia: true
 minimumReleaseAgeExclude:
   - undici@8.11.2
+  - '@remotion/bundler@4.0.528'
+  - '@remotion/canvas@4.0.528'
+  - '@remotion/captions@4.0.528'
+  - '@remotion/cli@4.0.528'
+  - '@remotion/codemods@4.0.528'
+  - '@remotion/compositor-darwin-arm64@4.0.528'
+  - '@remotion/compositor-darwin-x64@4.0.528'
+  - '@remotion/compositor-linux-arm64-gnu@4.0.528'
+  - '@remotion/compositor-linux-arm64-musl@4.0.528'
+  - '@remotion/compositor-linux-x64-gnu@4.0.528'
+  - '@remotion/compositor-linux-x64-musl@4.0.528'
+  - '@remotion/compositor-win32-x64-msvc@4.0.528'
+  - '@remotion/licensing@4.0.528'
+  - '@remotion/media-parser@4.0.528'
+  - '@remotion/media-utils@4.0.528'
+  - '@remotion/media@4.0.528'
+  - '@remotion/paths@4.0.528'
+  - '@remotion/player@4.0.528'
+  - '@remotion/renderer@4.0.528'
+  - '@remotion/streaming@4.0.528'
+  - '@remotion/studio-protocol@4.0.528'
+  - '@remotion/studio-server@4.0.528'
+  - '@remotion/studio-shared@4.0.528'
+  - '@remotion/studio@4.0.528'
+  - '@remotion/timeline-utils@4.0.528'
+  - '@remotion/web-renderer@4.0.528'
+  - '@remotion/zod-types@4.0.528'
+  - remotion@4.0.528
