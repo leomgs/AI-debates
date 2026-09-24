@@ -2,7 +2,7 @@
 
 Documento de secuenciación. No repite el detalle de cada ítem (eso vive en `tasks.md`) — organiza y prioriza lo que `tasks.md` ya trackea, en el orden en que técnicamente conviene implementarlo, respetando las dependencias de `architecture.md` (sección 3, dirección de dependencias) y las prioridades P0/P1 de `features.md`. No agrega alcance nuevo: cada tarea referencia su ítem equivalente en `tasks.md`.
 
-Última revisión: 2026-09-24 (Feature 7 completa — MVP P0 cerrado de punta a punta).
+Última revisión: 2026-09-24 (Feature 7 completa — MVP P0 cerrado de punta a punta; agregadas dos specs post-MVP en Fase 5 — ver `decision-log.md` entrada 28).
 
 ## Objetivo
 
@@ -12,13 +12,14 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 
 **MVP P0 completo (2026-09-24, `decision-log.md` entrada 27)**: con Feature 7 (Remotion Manifest) implementada y verificada contra el servidor y el motor reales, **todo lo marcado P0 en `features.md` queda cubierto de punta a punta**: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW` → curaduría humana → TTS (URLs firmadas + regeneración atómica) → `GET /episodes/:id/manifest` con subtítulos reales y audio firmado, listo para que un worker de Remotion lo consuma. Ver `tasks.md` §0-4/6/7 y `decision-log.md` entradas 1-27 para el detalle y el proceso de cada decisión no obvia.
 
-**Próximo paso real**: no queda ningún ítem P0 pendiente. Lo que sigue es todo P1/backlog, sin bloquear el producto core:
-- **Feature 9 (Fase 4 más abajo)** — worker que ejecuta Remotion sobre el manifest y produce el `.mp4`, más el consumo del manifest vía `@remotion/player` en el frontend.
-- **Frontend** — no arrancado todavía (`frontend-notes.md` tiene notas sueltas de decisiones que lo afectan, pero no hay scaffolding).
+**Próximo paso real**: no queda ningún ítem P0 pendiente. Lo que sigue es todo P1/backlog/post-MVP, sin bloquear el producto core:
+- **Fase 5 más abajo (specs 001/002, `docs/product/`)** — contrato OpenAPI tipado + reestructuración a monorepo (con el dashboard incluido como scaffold vacío). Es el prerrequisito real para que el frontend pueda arrancar con un contrato tipado en vez de duplicar tipos a mano.
+- **Feature 9 (Fase 4 más arriba)** — worker que ejecuta Remotion sobre el manifest y produce el `.mp4`.
+- **Frontend real (UI)** — bloqueado por la Fase 5 (necesita el scaffold de `apps/dashboard` que crea la spec 002). Su propio tracking vive en `apps/dashboard/docs/roadmap.md`, no acá.
 - **Backlog de TTS** (`tasks.md` §5) — Google/OpenRouter como proveedores adicionales, Chatterbox (motor GPU) para mejorar la calidad de voz de Piper.
 - **Housekeeping menor** (`tasks.md` §9) — `04-development/testing-strategy.md`, estrategia de fixtures de Research para dev.
 
-De estos, **Feature 9 es el que más directamente conecta con lo ya construido** (el manifest ya existe y está verificado) — es la continuación natural si el objetivo es llegar al producto audiovisual completo. El frontend es la otra opción real, en paralelo o en vez de Feature 9, dependiendo de qué priorice el usuario.
+De estos, **la Fase 5 es la continuación más directa** si el objetivo es que el frontend arranque sobre bases sólidas (contrato tipado, límites de paquete claros) en vez de improvisar contra la API sin tipos. Feature 9 puede avanzar en paralelo — no depende de la Fase 5 ni viceversa.
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -86,6 +87,15 @@ Objetivo: `RenderModule` cubre dos features con prioridad distinta (`features.md
 
 **Con Feature 7 cerrada, todo lo marcado P0 en `features.md` queda cubierto de punta a punta.**
 
+## Fase 5 — Post-MVP: contrato de API y monorepo
+
+Objetivo: preparar el terreno para que exista un frontend, sin construirlo todavía. `features.md` sigue congelado v1.0 (Features 1-10) — esto es trabajo nuevo, fuera de ese contrato, especificado en `docs/product/`. Detalle completo, decisiones y por qué se ajustaron respecto del texto original en `decision-log.md` entrada 28.
+
+- [ ] **`docs/product/001-openapi-contract-zod.md`** — `openapi.json` generado desde los contratos Zod ya existentes (`@nestjs/swagger` + `nestjs-zod`), `/docs` navegable. Incluye migrar `RemotionManifest`/`EpisodeDetailResponse` a schemas Zod y escribir los 6 schemas de eventos SSE (Feature 8) que hoy no existen.
+- [ ] **`docs/product/002-workspace-restructure.md`** (requiere 001 mergeada) — monorepo `pnpm` + Turborepo: `apps/api` (este backend), `packages/contracts` (`RemotionManifest`), `packages/video` (Remotion, creado desde cero — no hay nada que migrar hoy), `apps/dashboard` (scaffold vacío, Next.js). Los docs de raíz de este repo (`roadmap.md` incluido) suben a la raíz del monorepo en este paso.
+
+El tracking del dashboard en sí (framework, UI, autenticación) **no vive acá** — es `apps/dashboard/docs/roadmap.md`, creado como placeholder aunque `apps/dashboard/` todavía no exista como app real (ver decisión de dividir el tracking por dueño, entrada 28 del decision log).
+
 ## Decisiones abiertas (el usuario debe resolverlas, no se infieren)
 
 - **Estrategia de seed/fixtures de la Evidence Base para desarrollo local** (`tasks.md` §9) — research contra APIs reales tiene costo; hay que decidir si se graban fixtures de respuestas reales, se usa un proveedor de bajo costo en dev, o se mockea por completo mientras no se apunte a producción.
@@ -97,6 +107,8 @@ Objetivo: `RenderModule` cubre dos features con prioridad distinta (`features.md
 
 - `tasks.md` — estado detallado ítem por ítem (fuente de verdad de qué está hecho).
 - `architecture.md` — cómo se implementa cada pieza, algoritmo de orquestación (§7).
-- `features.md` — qué hace cada feature, criterios de aceptación, prioridad P0/P1.
+- `features.md` — qué hace cada feature, criterios de aceptación, prioridad P0/P1 (MVP v1.0, congelado).
 - `api-contract.md` — superficie HTTP completa.
 - `coding-rules.md` — convenciones a respetar en cada tarea de este roadmap.
+- `docs/product/` — specs post-MVP (Fase 5 en adelante), un archivo por spec, numeradas.
+- `apps/dashboard/docs/` — tracking propio del frontend (placeholder hasta que exista `apps/dashboard` como app real).

@@ -4,9 +4,11 @@ Tracking del estado de implementación. No repite el diseño (eso vive en `archi
 
 Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-24.
 
-## Dónde retomar (última sesión: 2026-09-24 — Feature 7 (Remotion Manifest) implementada, MVP P0 completo)
+## Dónde retomar (última sesión: 2026-09-24 — dos specs post-MVP documentadas: OpenAPI/Zod y workspace/monorepo)
 
-**Esta sesión**: implementada y verificada contra el servidor y el motor reales la Feature 7 (`decision-log.md` #27) — `RenderModule` nuevo (`RenderService.buildManifest()`, puro, sin Prisma ni imports cruzados de dominio), `GET /episodes/:id/manifest` en `EpisodesController` vía `EpisodesService.getManifest()` (orquesta Prisma + `TtsService` + `RenderService`), y el gap de `subtitles` cerrado: `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`), `EchogardenAudioProvider.synthesize()` ahora extrae timing por palabra real del `timeline` jerárquico de `echogarden` (antes descartado por completo). Con esto, **todo lo P0 de `features.md` queda cubierto de punta a punta** — release ver `roadmap.md`. Ver sección 6 más abajo para el detalle.
+**Esta sesión (segunda mitad)**: el usuario trajo dos specs nuevas ya escritas (contrato OpenAPI generado desde Zod, y reestructuración a monorepo con `apps/api`+`packages/contracts`+`packages/video`+`apps/dashboard`). Se revisaron contra el estado real del proyecto antes de documentarlas — encontró varios desajustes reales (npm vs. pnpm, `RemotionManifest` no es Zod, eventos SSE sin tipar, no hay código de Remotion que "mover", contradicción sobre si el dashboard va en repo aparte) y se resolvieron por chat. Quedaron escritas como `docs/product/001-openapi-contract-zod.md` y `docs/product/002-workspace-restructure.md` (secciones 10-11 más abajo), con el tracking dividido en 3 por dueño (back puro acá, lo que toca al front en `frontend-notes.md`, lo puramente front en `apps/dashboard/docs/`, nuevo). Proceso completo en `decision-log.md` entrada 28. **Nada de esto se implementó** — es trabajo de documentación únicamente.
+
+**Sesión previa**: implementada y verificada contra el servidor y el motor reales la Feature 7 (`decision-log.md` #27) — `RenderModule` nuevo (`RenderService.buildManifest()`, puro, sin Prisma ni imports cruzados de dominio), `GET /episodes/:id/manifest` en `EpisodesController` vía `EpisodesService.getManifest()` (orquesta Prisma + `TtsService` + `RenderService`), y el gap de `subtitles` cerrado: `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`), `EchogardenAudioProvider.synthesize()` ahora extrae timing por palabra real del `timeline` jerárquico de `echogarden` (antes descartado por completo). Con esto, **todo lo P0 de `features.md` queda cubierto de punta a punta** — ver `roadmap.md`. Ver sección 6 más abajo para el detalle.
 
 ## Dónde retomar (sesión previa: 2026-09-14 — TTS completo; corregida la prioridad de Render, el MVP P0 sigue abierto)
 
@@ -244,9 +246,38 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
 - [ ] `04-development/testing-strategy.md` — mencionado como pendiente en `coding-rules.md` §9, escribir cuando haya al menos un módulo implementado
 - [ ] Decidir estrategia de seed/fixtures de `Evidence Base` para desarrollo local (research contra APIs reales cuesta $ — ver límites de Feature 2)
 
+## 10. OpenAPI Contract (`docs/product/001-openapi-contract-zod.md`) — sin empezar
+
+Post-MVP, fuera de `features.md` (congelado). Especificada y ajustada contra el proyecto real el 2026-09-24 (`decision-log.md` entrada 28) — no implementada todavía.
+
+- [ ] Instalar `@nestjs/swagger` + `nestjs-zod`
+- [ ] Migrar `RemotionManifest` (`src/modules/render/remotion-manifest.types.ts`) y `EpisodeDetailResponse` (`episode-detail.mapper.ts`) de interfaces TS planas a schemas Zod
+- [ ] Escribir los 6 schemas Zod de eventos SSE (Feature 8) — no existen hoy, `EpisodeEventsService.emit()` está destipado
+- [ ] Reemplazar el `ZodValidationPipe` propio (`shared/http/zod-validation.pipe.ts`) y los 6 DTOs de `modules/episodes/dto/` por `createZodDto` + el pipe global de `nestjs-zod`
+- [ ] `operationId` explícito + `@ZodResponse` en cada handler de `EpisodesController`/`NotificationsController`
+- [ ] `DocumentBuilder` + `SwaggerModule.setup` (vía `cleanupOpenApiDoc`, no `patchNestJsSwagger`)
+- [ ] `scripts/generate-openapi.ts` + script `openapi:generate`
+- [ ] `openapi.json` generado y commiteado
+
+## 11. Workspace Restructure (`docs/product/002-workspace-restructure.md`) — sin empezar
+
+Post-MVP, fuera de `features.md` (congelado). Requiere la sección 10 (001) mergeada. Especificada y ajustada contra el proyecto real el 2026-09-24 (`decision-log.md` entrada 28) — no implementada todavía.
+
+- [ ] Migración de npm a pnpm (`pnpm-workspace.yaml`, `pnpm import`, borrar `package-lock.json`)
+- [ ] Mover la app NestJS actual a `apps/api/` (commit de solo movimiento, sin cambios de contenido)
+- [ ] Mover los docs de raíz (`roadmap.md`/`tasks.md`/`decision-log.md`/`architecture.md`/`features.md`/`api-contract.md`/`coding-rules.md`/`frontend-notes.md`/`setup.md`/`README.md`/`docs/`) a la raíz del monorepo
+- [ ] Crear `packages/contracts` con `RemotionManifest` (movido desde `apps/api`, ya en Zod por la sección 10) + tipos inferidos
+- [ ] Crear `packages/video` **desde cero** (no hay código de Remotion que migrar — `core`/`themes`/`personas`/`fixtures`, esqueleto mínimo)
+- [ ] Crear `apps/dashboard` como scaffold Next.js vacío (sin páginas — el tracking de lo que va adentro vive en `apps/dashboard/docs/`, no acá)
+- [ ] Script `video:studio` (Remotion Studio contra el fixture, sin DB ni env vars)
+- [ ] `turbo.json` con pipeline de tareas
+- [ ] Chequeo automatizado de límites (`packages/*` no importa de `apps/*`)
+
 ## Referencias
 
 - `architecture.md` — cómo se implementa cada pieza.
-- `features.md` — qué hace cada feature y sus criterios de aceptación.
+- `features.md` — qué hace cada feature y sus criterios de aceptación (MVP v1.0, congelado).
 - `api-contract.md` — superficie HTTP completa.
 - `coding-rules.md` — convenciones de código a seguir al implementar cada ítem de arriba.
+- `docs/product/` — specs post-MVP (secciones 10-11 de este archivo).
+- `apps/dashboard/docs/` — tracking propio del frontend, no se duplica acá.

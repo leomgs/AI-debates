@@ -6,6 +6,15 @@ Convención: cada entrada tiene fecha, de qué módulo/decisión del backend vie
 
 ## Entradas
 
+### 2026-09-24 — Contrato tipado (`openapi.json`) y el dashboard entran al mismo repo
+
+Contexto: se revisaron dos specs nuevas (`docs/product/001-openapi-contract-zod.md`, `docs/product/002-workspace-restructure.md`, detalle del proceso en `decision-log.md` #28). Dos cosas relevantes para cuando arranque el proyecto de frontend, ninguna de las dos es una decisión del front en sí:
+
+- **Una vez implementada 001**, va a existir `openapi.json` commiteado en la raíz del repo — generar tipos con `openapi-typescript` contra ese archivo en vez de duplicarlos a mano. `operationId` explícitos en cada endpoint (no el default de Nest, que da nombres inutilizables en el cliente generado).
+- **Una vez implementada 002**, el dashboard **no va en un repo aparte** — cambió el plan original. Vive en este mismo repo como `apps/dashboard` (monorepo pnpm + Turborepo), lo que le permite importar `@contracts` (tipos de `RemotionManifest`) y `@video` (composiciones de Remotion, para preview en vivo con `@remotion/player`) directo vía el workspace, sin publicar ningún paquete. La carpeta hermana `ai-trend-debates-front/` (reservada desde antes de que arrancara el backend) queda superada por esta decisión.
+
+El detalle completo de las decisiones puramente del front (framework elegido, gap de autenticación pendiente, roadmap/tasks) vive en `apps/dashboard/docs/` — no acá, para no mezclar bitácoras de dueños distintos.
+
 ### 2026-09-08 — `REQUIRES_HUMAN_REVIEW` por `VALIDATION_INCONSISTENCY`: falta target de cross-examination
 
 Contexto (`tasks.md` sección 3, `DebateModule`, `pickCrossExaminationTarget`): si un agente llega a la ronda `CROSS_EXAMINATION` sin ningún `Argument` propio en estado `OFFICIAL`, el episodio pasa a `REQUIRES_HUMAN_REVIEW` con `reason: VALIDATION_INCONSISTENCY` (evento SSE `episode.requires_review`, `features.md` Feature 8). Ejemplo concreto de cómo se llega ahí: un curador usó la acción `reject` sobre un draft que agotó `max_revision_attempts` en una ronda anterior, en vez de arreglarlo — el agente queda sin ningún argumento OFFICIAL para esa ronda.
