@@ -1,6 +1,6 @@
 # 002 — Workspace: separar API, video y contratos
 
-Estado: especificada, no implementada. Requiere que `001-openapi-contract-zod.md` esté mergeada. Ajustada el 2026-09-24 tras revisión contra el estado real del repo (ver `decision-log.md` #28 para el proceso completo) — el texto original lo trajo el usuario ya escrito; lo que sigue conserva su estructura y sus decisiones, con las correcciones marcadas donde el repo real no coincidía con lo asumido.
+Estado: **implementada y verificada** (2026-09-24 — ver `decision-log.md` #30 para el proceso completo, incluido el bloqueante real de `better-sqlite3` sin binarios precompilados y la verificación con un render real de Remotion). Ajustada el 2026-09-24 tras revisión contra el estado real del repo antes de implementar (`decision-log.md` #28) — el texto original lo trajo el usuario ya escrito; lo que sigue conserva su estructura y sus decisiones, con las correcciones marcadas donde el repo real no coincidía con lo asumido.
 
 Esta tarea mueve archivos y toca paths de import; hacerla en paralelo con otra cosa produce un diff imposible de revisar.
 
@@ -91,6 +91,8 @@ ai-trend-debates/
 
 ## Bitácora
 
-Al terminar de implementar, agregar una entrada en `decision-log.md` con: la estructura de workspace adoptada, la regla de que el video no depende de la API y por qué, y la decisión de traer el dashboard a este mismo repo (y por qué se revirtió la idea original de repo aparte).
+Implementada y documentada en `decision-log.md` #30 — incluye la estructura de workspace adoptada, la regla de que el video no depende de la API y por qué, la decisión de traer el dashboard a este mismo repo, y los hallazgos reales encontrados implementando: `corepack` no funciona en la máquina de desarrollo (resuelto con `npm install -g pnpm`), `better-sqlite3@13.x` no publica binarios precompilados (bajado a `^12.11.1`, bloqueante real que impedía reinstalar dependencias), el gate de seguridad de pnpm para scripts de instalación, `transformIgnorePatterns` de Jest roto bajo la estructura anidada de pnpm, `RemotionManifestDto` (la clase `createZodDto`) se queda en `apps/api` en vez de `packages/contracts` (refinamiento sobre la redacción literal), y el pin exacto de `zod` que pide Remotion para su sistema de props tipadas.
 
-La revisión previa a esta spec (por qué el texto original se ajustó) ya quedó documentada en `decision-log.md` #28 — no repetirla, solo referenciarla.
+La revisión previa a esta spec (por qué el texto original se ajustó, antes de implementar) quedó documentada en `decision-log.md` #28.
+
+**Pendiente real, no bloqueante**: `packages/video` tiene un solo theme placeholder sin audio (reproducir audio real es trabajo de la spec 003 de UI, todavía sin escribir); `apps/dashboard` es un scaffold vacío sin ninguna página propia (mismo motivo).

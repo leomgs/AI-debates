@@ -4,11 +4,13 @@ Tracking del estado de implementación. No repite el diseño (eso vive en `archi
 
 Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-24.
 
-## Dónde retomar (última sesión: 2026-09-24 — spec 001 (OpenAPI/Zod) implementada; spec 002 (workspace) sigue solo documentada)
+## Dónde retomar (última sesión: 2026-09-24 — spec 002 (workspace) implementada, monorepo real. Fase 5 completa)
 
-**Esta sesión**: implementada y verificada contra el servidor real la spec 001 — sección 10 más abajo, proceso completo y hallazgos reales (varios que ni la spec ni el plan podían anticipar sin correr el código: `z.date()` no representable en JSON Schema, `createZodDto` no envuelve uniones, un bug propio de `import type` que dejaba el pipe global sin validar nada) en `decision-log.md` entrada 29. **Próximo paso real: implementar la spec 002** (`docs/product/002-workspace-restructure.md`, sección 11 — requiere 001 mergeada, ya lo está).
+**Esta sesión**: implementado y verificado el monorepo completo (`pnpm` + Turborepo) — sección 11 más abajo, proceso completo y hallazgos reales en `decision-log.md` entrada 30. El repo pasó de una sola app NestJS a `apps/api` + `packages/contracts` + `packages/video` (con un render real de Remotion probado) + `apps/dashboard` (scaffold). Bloqueante real no anticipado: `better-sqlite3@13.x` no publica binarios precompilados, bajado a `^12.11.1`. **Con esto, la Fase 5 del roadmap queda completa** — no queda ningún ítem P0/post-MVP planeado pendiente. Próximo paso real: la spec 003 (UI real del dashboard), todavía sin escribir, o Feature 9 (worker de Remotion).
 
-**Sesión previa**: el usuario trajo dos specs nuevas ya escritas (contrato OpenAPI generado desde Zod, y reestructuración a monorepo con `apps/api`+`packages/contracts`+`packages/video`+`apps/dashboard`). Se revisaron contra el estado real del proyecto antes de documentarlas — encontró varios desajustes reales (npm vs. pnpm, `RemotionManifest` no era Zod, eventos SSE sin tipar, no hay código de Remotion que "mover", contradicción sobre si el dashboard va en repo aparte) y se resolvieron por chat. Quedaron escritas como `docs/product/001-openapi-contract-zod.md` y `docs/product/002-workspace-restructure.md` (secciones 10-11 más abajo), con el tracking dividido en 3 por dueño (back puro acá, lo que toca al front en `frontend-notes.md`, lo puramente front en `apps/dashboard/docs/`). Proceso completo en `decision-log.md` entrada 28.
+**Sesión previa**: implementada y verificada contra el servidor real la spec 001 — proceso completo en `decision-log.md` entrada 29 (`z.date()` no representable en JSON Schema, `createZodDto` no envuelve uniones, un bug propio de `import type` que dejaba el pipe global sin validar nada).
+
+**Sesión anterior a esa**: el usuario trajo las dos specs nuevas ya escritas (OpenAPI/Zod y workspace). Se revisaron contra el estado real del proyecto antes de documentarlas — proceso completo en `decision-log.md` entrada 28.
 
 **Sesión previa**: implementada y verificada contra el servidor y el motor reales la Feature 7 (`decision-log.md` #27) — `RenderModule` nuevo (`RenderService.buildManifest()`, puro, sin Prisma ni imports cruzados de dominio), `GET /episodes/:id/manifest` en `EpisodesController` vía `EpisodesService.getManifest()` (orquesta Prisma + `TtsService` + `RenderService`), y el gap de `subtitles` cerrado: `AudioAsset.subtitles Json?` nuevo (migración `20260924105615_audio_asset_subtitles`), `EchogardenAudioProvider.synthesize()` ahora extrae timing por palabra real del `timeline` jerárquico de `echogarden` (antes descartado por completo). Con esto, **todo lo P0 de `features.md` queda cubierto de punta a punta** — ver `roadmap.md`. Ver sección 6 más abajo para el detalle.
 
@@ -262,19 +264,19 @@ Post-MVP, fuera de `features.md` (congelado). Especificada y ajustada contra el 
 - [x] `openapi.json` generado, idempotente (`openapi:generate` dos veces seguidas → `git diff --exit-code` limpio) y commiteado
 - [x] Verificado contra servidor real: `/docs` renderiza, validación 400/409 intacta tras el reemplazo del pipe (bug real de `import type` encontrado y corregido en el camino), `openapi-typescript` compila contra el documento generado
 
-## 11. Workspace Restructure (`docs/product/002-workspace-restructure.md`) — sin empezar
+## 11. Workspace Restructure (`docs/product/002-workspace-restructure.md`) — COMPLETA (2026-09-24, `decision-log.md` entrada 30)
 
-Post-MVP, fuera de `features.md` (congelado). Requiere la sección 10 (001) mergeada. Especificada y ajustada contra el proyecto real el 2026-09-24 (`decision-log.md` entrada 28) — no implementada todavía.
+Post-MVP, fuera de `features.md` (congelado). Requería la sección 10 (001) mergeada — ya lo estaba. Especificada y ajustada contra el proyecto real el 2026-09-24 (`decision-log.md` entrada 28), implementada y verificada el mismo día (entrada 30).
 
-- [ ] Migración de npm a pnpm (`pnpm-workspace.yaml`, `pnpm import`, borrar `package-lock.json`)
-- [ ] Mover la app NestJS actual a `apps/api/` (commit de solo movimiento, sin cambios de contenido)
-- [ ] Mover los docs de raíz (`roadmap.md`/`tasks.md`/`decision-log.md`/`architecture.md`/`features.md`/`api-contract.md`/`coding-rules.md`/`frontend-notes.md`/`setup.md`/`README.md`/`docs/`) a la raíz del monorepo
-- [ ] Crear `packages/contracts` con `RemotionManifest` (movido desde `apps/api`, ya en Zod por la sección 10) + tipos inferidos
-- [ ] Crear `packages/video` **desde cero** (no hay código de Remotion que migrar — `core`/`themes`/`personas`/`fixtures`, esqueleto mínimo)
-- [ ] Crear `apps/dashboard` como scaffold Next.js vacío (sin páginas — el tracking de lo que va adentro vive en `apps/dashboard/docs/`, no acá)
-- [ ] Script `video:studio` (Remotion Studio contra el fixture, sin DB ni env vars)
-- [ ] `turbo.json` con pipeline de tareas
-- [ ] Chequeo automatizado de límites (`packages/*` no importa de `apps/*`)
+- [x] Migración de npm a pnpm (`pnpm-workspace.yaml`, `pnpm import`, `package-lock.json` borrado). Bloqueante real encontrado: `corepack enable` falla en esta máquina (permisos), resuelto con `npm install -g pnpm`; `better-sqlite3@13.x` no publica binarios precompilados, bajado a `^12.11.1` (misma versión que ya usaba `@prisma/adapter-better-sqlite3` internamente)
+- [x] App NestJS movida a `apps/api/` (`git mv`, commit de solo movimiento — `dev.db`/`outputs/`/`.env` con datos reales preservados a mano, verificado contra el servidor real después)
+- [x] Docs de raíz confirmados en su lugar — no se "mueven" (la raíz del repo YA es la raíz del monorepo, no un contenedor nuevo)
+- [x] `packages/contracts` con `RemotionManifestSchema` (movido, sin reescribir) + tipos inferidos. La clase `RemotionManifestDto` (`createZodDto`) se queda en `apps/api` — detalle de la capa HTTP, no del contrato compartido (refinamiento sobre la spec original)
+- [x] `packages/video` desde cero: `core/buildSequence.ts` (puro), `themes/default/DebateComposition.tsx` (placeholder, sin audio), `personas/` (vacío, reservado), `fixtures/debate.sample.json`. Verificado con un **render real** (`remotion render`, no solo Studio) contra el fixture, con `.env` renombrado y sin DB
+- [x] `apps/dashboard` scaffold Next.js (`create-next-app` default) — sin páginas propias, tracking en `apps/dashboard/docs/`
+- [x] Script `studio` (`remotion studio src/index.ts`) + delegación raíz `pnpm video:studio` — probado levantando el servidor real (puerto 3000)
+- [x] `turbo.json` con pipeline `build`/`test`/`lint`/`dev` — verificado con caché real (`FULL TURBO`, 46ms en corridas repetidas)
+- [x] `scripts/check-boundaries.mjs` — probado en ambas direcciones (falla con un import de prueba insertado a mano, pasa limpio en el estado real)
 
 ## Referencias
 
