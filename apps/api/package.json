@@ -38,7 +38,7 @@
     "@prisma/adapter-better-sqlite3": "^7.10.0",
     "@prisma/client": "^7.9.1",
     "ai": "^6.0.277",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^12.11.1",
     "cockatiel": "^4.0.0",
     "echogarden": "^3.4.0",
     "google-tts-api": "^2.0.2",

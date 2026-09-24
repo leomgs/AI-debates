@@ -1,4 +1,16 @@
-# compiled output
+# spec 002 (docs/product/002-workspace-restructure.md) — monorepo: cada
+# apps/*/packages/* tiene su propio node_modules/dist, sin `/` de prefijo
+# para que matcheen a cualquier profundidad (a diferencia del repo pre-002,
+# donde todo colgaba de la raíz).
+apps/*/node_modules
+apps/*/dist
+apps/*/.next
+packages/*/node_modules
+packages/*/dist
+.turbo
+
+# compiled output (paquetes sin apps/*/packages/* — no debería haber ya,
+# se deja como red de seguridad)
 /dist
 /node_modules
 /build
@@ -18,6 +30,7 @@ lerna-debug.log*
 # Tests
 /coverage
 /.nyc_output
+apps/*/coverage
 
 # IDEs and editors
 /.idea
@@ -57,15 +70,16 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
 
-# DB local de desarrollo (SQLite) — se regenera con prisma migrate deploy +
-# db:seed, nunca se versiona (setup.md §2).
-/dev.db
+# DB local de desarrollo de apps/api (SQLite) — se regenera con
+# prisma migrate deploy + db:seed, nunca se versiona (setup.md §2).
+apps/api/dev.db
 
-# DBs de test temporales (aisladas de dev.db — ver test/jest-e2e.setup.ts y
-# src/modules/episodes/episodes.integration.spec.ts)
-test/tmp-e2e.db*
-src/modules/episodes/tmp-episodes-integration.db*
+# DBs de test temporales de apps/api (aisladas de dev.db — ver
+# test/jest-e2e.setup.ts y episodes.integration.spec.ts)
+apps/api/test/tmp-e2e.db*
+apps/api/src/modules/episodes/tmp-episodes-integration.db*
 
-# Audio generado por TtsModule (AC 6.1) — binarios regenerables desde
-# AudioAsset + resíntesis, nunca se versionan (decision-log.md 2026-09-09, #20)
-/outputs
+# Audio generado por TtsModule de apps/api (AC 6.1) — binarios regenerables
+# desde AudioAsset + resíntesis, nunca se versionan (decision-log.md
+# 2026-09-09, #20)
+apps/api/outputs
