@@ -14,6 +14,7 @@ import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeEventsService } from "./episode-events.service";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
+import { EpisodeContextService } from "./episode-context.service";
 import { EpisodePipelineHaltedError } from "./episodes.errors";
 
 const EPISODE_ID = "11111111-1111-4111-8111-111111111111";
@@ -91,6 +92,7 @@ describe("EpisodeOrchestratorService", () => {
   let budgetService: { withLlmCall: jest.Mock; withSearchRequest: jest.Mock; withTtsCall: jest.Mock };
   let eventsService: { emit: jest.Mock; complete: jest.Mock };
   let ttsService: { getOrderedOfficialArguments: jest.Mock; synthesizeSegment: jest.Mock };
+  let contextService: { build: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -140,6 +142,14 @@ describe("EpisodeOrchestratorService", () => {
     };
     eventsService = { emit: jest.fn(), complete: jest.fn() };
     ttsService = { getOrderedOfficialArguments: jest.fn().mockResolvedValue([]), synthesizeSegment: jest.fn() };
+    contextService = {
+      build: jest.fn().mockResolvedValue({
+        topic: "Un trend",
+        evidenceBase: { topic: "Un trend", facts: [] },
+        officialArguments: [],
+        participants: [],
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -154,6 +164,10 @@ describe("EpisodeOrchestratorService", () => {
         { provide: EpisodeStateService, useValue: stateService },
         { provide: EpisodeBudgetService, useValue: budgetService },
         { provide: EpisodeEventsService, useValue: eventsService },
+        // Stub: sus queries (incluida una lectura de Episode) tienen su propio
+        // spec, y acá rompería las secuencias de mockResolvedValueOnce de
+        // prisma.episode.findUniqueOrThrow de cada test.
+        { provide: EpisodeContextService, useValue: contextService },
       ],
     }).compile();
 

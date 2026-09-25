@@ -11,6 +11,7 @@ import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EpisodeEventsService } from "./episode-events.service";
+import { EpisodeContextService } from "./episode-context.service";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { EpisodeRecoveryService } from "./episode-recovery.service";
 import { EpisodesService } from "./episodes.service";
@@ -30,6 +31,7 @@ import { EpisodesController } from "./episodes.controller";
     EpisodeParticipantsService,
     EpisodeOrchestratorService,
     EpisodeEventsService,
+    EpisodeContextService,
     EpisodeActionsService,
     EpisodeRecoveryService,
     EpisodesService,

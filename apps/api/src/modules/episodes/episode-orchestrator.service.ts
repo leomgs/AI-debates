@@ -14,6 +14,7 @@ import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeEventsService } from "./episode-events.service";
+import { EpisodeContextService } from "./episode-context.service";
 import { BudgetExceededError, EpisodePipelineHaltedError } from "./episodes.errors";
 import {
   AmendmentFeedback,
@@ -120,7 +121,8 @@ export class EpisodeOrchestratorService {
     private readonly participants: EpisodeParticipantsService,
     private readonly state: EpisodeStateService,
     private readonly budget: EpisodeBudgetService,
-    private readonly events: EpisodeEventsService
+    private readonly events: EpisodeEventsService,
+    private readonly context: EpisodeContextService
   ) {}
 
   // Entrypoint público único, reusado por creación (EpisodesService), resume
@@ -216,7 +218,7 @@ export class EpisodeOrchestratorService {
 
     const existingVerdict = await this.prisma.verdict.findUnique({ where: { debateId: episode.debate.id } });
     if (!existingVerdict) {
-      const context = await this.buildDebateContext(episode);
+      const context = await this.context.build(episodeId);
       const judgeParticipant = episode.participants.find((p) => p.isJudge);
       if (!judgeParticipant) {
         throw new Error(`Episodio ${episodeId} no tiene EpisodeParticipant con isJudge:true — inconsistencia de datos.`);
@@ -411,7 +413,10 @@ export class EpisodeOrchestratorService {
       }
 
       const persona = this.personaOf(participant);
-      const context = await this.buildDebateContext(episode);
+      // Se reconstruye en cada turno (EpisodeContextService no cachea):
+      // officialArguments crece con cada Argument promovido a OFFICIAL
+      // dentro de la misma corrida.
+      const context = await this.context.build(episode.id);
 
       let content: string;
       let respondsToId: string | undefined;
@@ -487,47 +492,6 @@ export class EpisodeOrchestratorService {
   private async getOrCreateRound(debateId: string, round: number, type: RoundType): Promise<DebateRound> {
     const existing = await this.prisma.debateRound.findFirst({ where: { debateId, round, type } });
     return existing ?? this.debate.createRound(debateId, round, type);
-  }
-
-  // topic/evidenceBase/officialArguments — shape exacto de DebateContext
-  // (shared/contracts/agents.contracts.ts). Se reconstruye en cada turno (no
-  // se cachea en el loop) porque officialArguments crece con cada Argument
-  // promovido a OFFICIAL dentro de la misma corrida.
-  private async buildDebateContext(episode: EpisodeWithPipelineData): Promise<DebateContext> {
-    const topicId = episode.debate.topicId;
-    const topicTitle = episode.debate.topic.title;
-
-    const facts = await this.prisma.evidenceFact.findMany({
-      where: { source: { researchSession: { topicId } } },
-    });
-    const officialArgs = await this.prisma.argument.findMany({
-      where: { debateRound: { debateId: episode.debate.id }, status: "OFFICIAL" },
-      include: { debateRound: true },
-      orderBy: { createdAt: "asc" },
-    });
-
-    // Judge no entra acá — nunca es citable en officialArguments.agentId
-    // (architecture.md §7.1: solo los 2 debatientes generan Argument), así
-    // que no hace falta resolverlo para la transcripción ni para el oponente.
-    const debaterParticipants = episode.participants.filter((p) => !p.isJudge);
-
-    return {
-      topic: topicTitle,
-      evidenceBase: {
-        topic: topicTitle,
-        facts: facts.map((f) => ({ statement: f.content, sourceId: f.sourceId })),
-      },
-      officialArguments: officialArgs.map((a) => ({
-        id: a.id,
-        agentId: a.agentId,
-        content: a.content,
-        roundType: a.debateRound.type,
-      })),
-      participants: debaterParticipants.map((p) => {
-        const persona = this.personaOf(p);
-        return { agentId: p.agentId, personaId: persona.id, displayName: persona.displayName };
-      }),
-    };
   }
 
   // "Investigación completa" = existe al menos un EvidenceFact ya extraído

@@ -8,6 +8,7 @@ import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { TtsService } from "../tts/tts.service";
 import { EpisodeActionsService } from "./episode-actions.service";
+import { EpisodeContextService } from "./episode-context.service";
 import { InvalidEpisodeTransitionError } from "./episodes.errors";
 
 const EPISODE_ID = "11111111-1111-4111-8111-111111111111";
@@ -85,6 +86,8 @@ describe("EpisodeActionsService", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EpisodeActionsService,
+        // Real, no stub: el mock de Prisma de arriba ya cubre sus queries.
+        EpisodeContextService,
         { provide: PrismaService, useValue: prisma },
         { provide: DebateService, useValue: debateService },
         { provide: AgentsService, useValue: agentsService },

@@ -4,11 +4,11 @@ import { PrismaService } from "../../shared/prisma/prisma.service";
 import { DebateService } from "../debate/debate.service";
 import { AgentsService } from "../agents/agents.service";
 import { TtsService } from "../tts/tts.service";
-import { DebateContext } from "../../shared/contracts/agents.contracts";
 import { DEBATER_PERSONAS, DebaterPersona } from "../../shared/personas/agents.personas";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeOrchestratorService, ManualSource } from "./episode-orchestrator.service";
+import { EpisodeContextService } from "./episode-context.service";
 import { InvalidEpisodeTransitionError } from "./episodes.errors";
 import { EditActionDto } from "./dto/edit-action.dto";
 import { RegenerateActionDto } from "./dto/regenerate-action.dto";
@@ -36,7 +36,8 @@ export class EpisodeActionsService {
     private readonly state: EpisodeStateService,
     private readonly budget: EpisodeBudgetService,
     private readonly orchestrator: EpisodeOrchestratorService,
-    private readonly tts: TtsService
+    private readonly tts: TtsService,
+    private readonly context: EpisodeContextService
   ) {}
 
   // Dispara la etapa 2 de TTS fire-and-forget, mismo criterio que
@@ -68,7 +69,7 @@ export class EpisodeActionsService {
   // a "regenerado por pedido editorial", y agregar uno nuevo es más de lo
   // que este alcance pide.
   async regenerate(episodeId: string, dto: RegenerateActionDto): Promise<Argument> {
-    const episode = await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate");
+    await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate");
 
     const argument = await this.prisma.argument.findUniqueOrThrow({
       where: { id: dto.argumentId },
@@ -80,7 +81,7 @@ export class EpisodeActionsService {
     });
     const persona = DEBATER_PERSONAS[participant.agent.role as DebaterPersona["id"]];
     const agentInstance = this.agents.createDebateAgent(persona, participant.modelProvider);
-    const context = await this.buildDebateContext(episodeId, episode.debateId, episode.debate.topic.title, episode.debate.topic.id);
+    const context = await this.context.build(episodeId);
 
     let newContent: string;
     if (argument.debateRound.type === "CROSS_EXAMINATION") {
@@ -213,44 +214,4 @@ export class EpisodeActionsService {
     return episode;
   }
 
-  // Versión mínima del buildDebateContext de EpisodeOrchestratorService — no
-  // se reusa esa (privada, y este caso solo necesita el estado ACTUAL de
-  // officialArguments, sin la lógica de fases/rondas del orquestador).
-  private async buildDebateContext(
-    episodeId: string,
-    debateId: string,
-    topicTitle: string,
-    topicId: string
-  ): Promise<DebateContext> {
-    const facts = await this.prisma.evidenceFact.findMany({
-      where: { source: { researchSession: { topicId } } },
-    });
-    const officialArgs = await this.prisma.argument.findMany({
-      where: { debateRound: { debateId }, status: "OFFICIAL" },
-      include: { debateRound: true },
-      orderBy: { createdAt: "asc" },
-    });
-    const debaterParticipants = await this.prisma.episodeParticipant.findMany({
-      where: { episodeId, isJudge: false },
-      include: { agent: true },
-    });
-
-    return {
-      topic: topicTitle,
-      evidenceBase: {
-        topic: topicTitle,
-        facts: facts.map((f) => ({ statement: f.content, sourceId: f.sourceId })),
-      },
-      officialArguments: officialArgs.map((a) => ({
-        id: a.id,
-        agentId: a.agentId,
-        content: a.content,
-        roundType: a.debateRound.type,
-      })),
-      participants: debaterParticipants.map((p) => {
-        const persona = DEBATER_PERSONAS[p.agent.role as DebaterPersona["id"]];
-        return { agentId: p.agentId, personaId: persona.id, displayName: persona.displayName };
-      }),
-    };
-  }
 }
