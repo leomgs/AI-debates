@@ -314,6 +314,11 @@ model Episode {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Spec 003, API-7a: cuándo se publicó en el showcase. null = no
+  // publicado. Nadie la escribe todavía: la escriben las acciones
+  // publish/unpublish de API-7 cuando existan.
+  publishedAt DateTime?
+
   // Feature 2: Límites Operacionales por Episodio
   maxLlmCalls         Int @default(25)
   maxSearchQueries    Int @default(5)

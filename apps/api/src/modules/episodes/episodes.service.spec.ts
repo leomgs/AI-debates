@@ -69,6 +69,7 @@ describe("EpisodesService", () => {
         status: "CREATED",
         createdAt: now,
         updatedAt: now,
+        publishedAt: null,
       });
 
       const episode = await service.createEpisode("Un trend");
@@ -82,6 +83,8 @@ describe("EpisodesService", () => {
       // usa z.iso.datetime(): createEpisode serializa el Date real a ISO.
       expect(episode.createdAt).toBe("2026-09-24T12:00:00.000Z");
       expect(episode.updatedAt).toBe("2026-09-24T12:00:00.000Z");
+      // API-7a: un episodio recién creado nunca está publicado.
+      expect(episode.publishedAt).toBeNull();
       // Fire-and-forget (decisión D-11): createEpisode ya resolvió arriba sin
       // haber esperado runPipeline — alcanza con que se haya disparado.
       expect(orchestrator.runPipeline).toHaveBeenCalledWith(EPISODE_ID);
@@ -129,6 +132,21 @@ describe("EpisodesService", () => {
       await expect(service.listEpisodes("NOT_A_STATUS")).rejects.toThrow(BadRequestException);
       expect(prisma.episode.findMany).not.toHaveBeenCalled();
     });
+
+    // API-7a (AC 3.17): distintivo "Publicado" en la lista.
+    it("expone publishedAt: ISO si está publicado, null si no", async () => {
+      prisma.episode.findMany.mockResolvedValue([
+        { id: "e1", status: "READY_FOR_RENDER", title: "A", createdAt: new Date("2026-09-25T10:00:00.000Z"), publishedAt: new Date("2026-09-25T12:00:00.000Z") },
+        { id: "e2", status: "DEBATING", title: "B", createdAt: new Date("2026-09-25T09:00:00.000Z"), publishedAt: null },
+      ]);
+
+      const list = await service.listEpisodes();
+
+      expect(prisma.episode.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: expect.objectContaining({ publishedAt: true }) })
+      );
+      expect(list.map((e) => e.publishedAt)).toEqual(["2026-09-25T12:00:00.000Z", null]);
+    });
   });
 
   describe("getEpisodeDetail", () => {
@@ -137,6 +155,7 @@ describe("EpisodesService", () => {
         id: EPISODE_ID,
         status: "DEBATING",
         createdAt: new Date("2026-09-25T10:00:00.000Z"),
+        publishedAt: null as Date | null,
         participants: [
           { agentId: "agent-1", isJudge: false, agent: { name: "Analyst", role: "ANALYST" } },
           { agentId: "agent-2", isJudge: false, agent: { name: "Contrarian", role: "CONTRARIAN" } },
@@ -196,6 +215,15 @@ describe("EpisodesService", () => {
           debate: expect.objectContaining({ include: expect.objectContaining({ topic: expect.anything() }) }),
         }),
       });
+    });
+
+    // API-7a (AC 3.26): distintivo "Publicado" en la cabecera del detalle.
+    it("expone publishedAt: null si no está publicado, ISO si lo está", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
+      expect((await service.getEpisodeDetail(EPISODE_ID)).publishedAt).toBeNull();
+
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ ...detailRow(), publishedAt: new Date("2026-09-25T12:00:00.000Z") });
+      expect((await service.getEpisodeDetail(EPISODE_ID)).publishedAt).toBe("2026-09-25T12:00:00.000Z");
     });
 
     // API-12 (AC 3.39): un estado activo sin pipeline en curso es un

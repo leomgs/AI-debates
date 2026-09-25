@@ -49,6 +49,9 @@ export const EpisodeDetailSchema = z.object({
     title: z.string(),
   }),
   createdAt: z.iso.datetime(),
+  // API-7a (D10): distintivo "Publicado". null hasta que exista la acción
+  // `publish` (API-7).
+  publishedAt: z.iso.datetime().nullable(),
   // Vacío hasta que el pipeline selecciona los participantes (al salir de
   // CREATED). `agentId` es el que usan arguments[].agentId, verdict.judgeId
   // y verdict.winnerId. `role` es la persona (ANALYST, CONTRARIAN, ...) o
@@ -133,6 +136,7 @@ export function mapEpisodeDetail(episode: EpisodeWithDetail, runtime: { pipeline
     pipelineActive: runtime.pipelineActive,
     topic: { id: episode.debate.topic.id, title: episode.debate.topic.title },
     createdAt: episode.createdAt.toISOString(),
+    publishedAt: episode.publishedAt ? episode.publishedAt.toISOString() : null,
     participants: episode.participants.map((p) => ({
       agentId: p.agentId,
       name: p.agent.name,

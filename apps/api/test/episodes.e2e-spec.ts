@@ -14,6 +14,7 @@ import { PrismaService } from './../src/shared/prisma/prisma.service';
 import { EpisodeEventsService } from './../src/modules/episodes/episode-events.service';
 import { NotificationSchema } from './../src/modules/notifications/dto/notification.schema';
 import { EpisodeDetailSchema } from './../src/modules/episodes/episode-detail.mapper';
+import { EpisodeListItemSchema } from './../src/modules/episodes/dto/episode.schema';
 import { z } from 'zod';
 import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 
@@ -151,6 +152,27 @@ describe('Episodes (e2e)', () => {
         { agentId: analyst.id, name: 'Analyst e2e', role: 'ANALYST', isJudge: false },
         { agentId: judge.id, name: 'Judge e2e', role: 'JUDGE', isJudge: true },
       ]);
+    });
+  });
+
+  describe('API-7a: publishedAt en detalle y listado', () => {
+    it('es null por defecto y sale en ISO cuando la columna tiene valor', async () => {
+      const { episode } = await seedEpisode(prisma, 'PENDING_REVIEW');
+
+      const detail = await request(app.getHttpServer()).get(`/episodes/${episode.id}`).set('Cookie', cookie).expect(200);
+      expect(detail.body.publishedAt).toBeNull();
+
+      // Ninguna acción la escribe todavía (API-7); se setea directo en la base.
+      const publishedAt = new Date('2026-09-25T12:00:00.000Z');
+      await prisma.episode.update({ where: { id: episode.id }, data: { publishedAt } });
+
+      const after = await request(app.getHttpServer()).get(`/episodes/${episode.id}`).set('Cookie', cookie).expect(200);
+      expect(after.body.publishedAt).toBe(publishedAt.toISOString());
+
+      const list = await request(app.getHttpServer()).get('/episodes').set('Cookie', cookie).expect(200);
+      const items = z.array(EpisodeListItemSchema).parse(list.body);
+      expect(items.find((e) => e.id === episode.id)?.publishedAt).toBe(publishedAt.toISOString());
+      expect(items.filter((e) => e.id !== episode.id).every((e) => e.publishedAt === null)).toBe(true);
     });
   });
 

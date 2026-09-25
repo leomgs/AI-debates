@@ -25,6 +25,8 @@ export const EpisodeSchema = z.object({
   // EpisodesService (no Prisma directo) ya llega como ISO string.
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+  // API-7a (spec 003): null hasta que exista la acción `publish` (API-7).
+  publishedAt: z.iso.datetime().nullable(),
   maxLlmCalls: z.number().int(),
   maxSearchQueries: z.number().int(),
   maxTtsSegments: z.number().int(),
@@ -47,6 +49,8 @@ export const EpisodeListItemSchema = z.object({
   status: EpisodeStatusSchema,
   title: z.string(),
   createdAt: z.iso.datetime(),
+  // API-7a (spec 003, AC 3.17): distintivo "Publicado" en la lista.
+  publishedAt: z.iso.datetime().nullable(),
 });
 
 // spec 001 (@ZodResponse) — GET /episodes.

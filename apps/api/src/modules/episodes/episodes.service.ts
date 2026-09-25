@@ -52,17 +52,26 @@ export class EpisodesService {
     // z.date() no es representable en JSON Schema bajo Zod 4 (spec 001,
     // EpisodeSchema usa z.iso.datetime()) — se serializa acá, en el borde
     // HTTP, no en Prisma.
-    return { ...episode, createdAt: episode.createdAt.toISOString(), updatedAt: episode.updatedAt.toISOString() };
+    return {
+      ...episode,
+      createdAt: episode.createdAt.toISOString(),
+      updatedAt: episode.updatedAt.toISOString(),
+      publishedAt: episode.publishedAt ? episode.publishedAt.toISOString() : null,
+    };
   }
 
   async listEpisodes(statusCsv?: string): Promise<SerializedEpisodeListItem[]> {
     const statuses = this.parseStatusFilter(statusCsv);
     const episodes = await this.prisma.episode.findMany({
       where: statuses ? { status: { in: statuses } } : undefined,
-      select: { id: true, status: true, title: true, createdAt: true },
+      select: { id: true, status: true, title: true, createdAt: true, publishedAt: true },
       orderBy: { createdAt: "desc" },
     });
-    return episodes.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }));
+    return episodes.map((e) => ({
+      ...e,
+      createdAt: e.createdAt.toISOString(),
+      publishedAt: e.publishedAt ? e.publishedAt.toISOString() : null,
+    }));
   }
 
   async getEpisodeDetail(id: string): Promise<EpisodeDetailResponse> {
