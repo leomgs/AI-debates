@@ -1,3 +1,5 @@
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -170,9 +172,16 @@ describe('Auth (e2e) — rate-limit del login', () => {
 
 describe('Auth (e2e) — rate-limit con logins concurrentes', () => {
   let app: INestApplication<App>;
+  let baseUrl: string;
 
+  // Servidor escuchando de verdad: con request(app.getHttpServer()), supertest
+  // hace listen() sobre el mismo server en cada request, y 50 en paralelo
+  // disparaban MaxListenersExceededWarning.
   beforeAll(async () => {
     app = await createApp();
+    await app.listen(0, '127.0.0.1');
+    const address = (app.getHttpServer() as Server).address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${address.port}`;
   });
 
   afterAll(async () => {
@@ -183,18 +192,26 @@ describe('Auth (e2e) — rate-limit con logins concurrentes', () => {
   // separados por el await de scrypt, 200 logins concurrentes daban 199 401 y
   // ningún 429.
   it('50 logins incorrectos simultáneos: a lo sumo 5 responden 401 y el resto 429', async () => {
-    const server = app.getHttpServer();
     const results = await Promise.allSettled(
       Array.from({ length: 50 }, (_, i) =>
-        request(server).post('/auth/login').send({ username: E2E_CURATOR_USERNAME, password: `incorrecta-${i}` }),
+        request(baseUrl).post('/auth/login').send({ username: E2E_CURATOR_USERNAME, password: `incorrecta-${i}` }),
       ),
     );
-    const statuses = results.map((r) => (r.status === 'fulfilled' ? r.value.status : 0));
+    const responses = results.map((r) => (r.status === 'fulfilled' ? r.value : undefined));
+    const statuses = responses.map((r) => r?.status ?? 0);
 
     const unauthorized = statuses.filter((s) => s === 401).length;
     const tooMany = statuses.filter((s) => s === 429).length;
     expect(unauthorized).toBeGreaterThan(0);
     expect(unauthorized).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerClient);
     expect(unauthorized + tooMany).toBe(50);
+
+    // Los 429 son de uno de los dos tipos, cada uno con su Retry-After.
+    for (const res of responses.filter((r) => r?.status === 429)) {
+      const { code } = (res!.body as { error: { code: string } }).error;
+      expect(['TOO_MANY_ATTEMPTS', 'LOGIN_BUSY']).toContain(code);
+      expect(Number(res!.headers['retry-after'])).toBeGreaterThan(0);
+      if (code === 'LOGIN_BUSY') expect(res!.headers['retry-after']).toBe('1');
+    }
   });
 });
