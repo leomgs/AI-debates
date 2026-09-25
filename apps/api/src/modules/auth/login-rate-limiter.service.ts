@@ -2,21 +2,26 @@ import { Injectable } from "@nestjs/common";
 import { TooManyLoginAttemptsError } from "./auth.errors";
 
 // Rate-limit simple de POST /auth/login (spec 003 API-8, AC 3.8), en memoria
-// y sin dependencias. Cuenta solo intentos FALLIDOS en una ventana deslizante:
-// el curador que acierta no gasta cupo, y un login exitoso limpia el contador
-// de su cliente.
+// y sin dependencias.
 //
-// Dos cubetas, las dos tienen que tener lugar:
-// - por cliente (req.ip): frena a un atacante puntual sin bloquear al resto.
-// - global: la clave por cliente NO es confiable detrás del rewrite de Next.
-//   El proxy de rewrites de Next 16 (router-server -> proxy-request.js) no
-//   agrega X-Forwarded-For, así que según el despliegue req.ip es la IP de
-//   Next para todos, o un X-Forwarded-For que mandó el propio cliente (y que
-//   puede rotar a gusto). El techo global acota la fuerza bruta aunque el
-//   atacante rote esa clave; el costo es que un ataque sostenido también le
-//   bloquea el login al curador hasta que la ventana se vacíe (aceptable para
-//   una herramienta de un solo usuario; no hay sesión que se pierda: las
-//   cookies ya emitidas siguen valiendo).
+// Cada intento se registra como fallo PROVISORIO en el mismo tick síncrono en
+// que se chequea el límite (beginAttempt), antes del `await` de scrypt. Si
+// el chequeo y el registro quedaran separados por ese await, N logins
+// concurrentes pasarían todos el chequeo antes de que el primero registre
+// su fallo (la revisión de API-8 lo reprodujo: 200 logins concurrentes
+// incorrectos dieron 199 401 y ningún 429). Si el login acierta,
+// recordSuccess deshace ese registro; si falla, el registro ya es el fallo.
+//
+// Tres límites, todos tienen que tener lugar:
+// - por cliente (req.ip): 5 intentos fallidos o en curso por ventana.
+// - global: 20 por ventana. La clave por cliente NO es confiable detrás del
+//   rewrite de Next (no agrega X-Forwarded-For; ver setup.md, "Despliegue"),
+//   así que el techo global acota la fuerza bruta aunque se rote la clave. El
+//   costo: un ataque sostenido también le bloquea el login al curador hasta
+//   que la ventana se vacíe (las cookies ya emitidas siguen valiendo).
+// - verificaciones scrypt en curso: 2. scrypt corre en el threadpool de
+//   libuv (4 hilos por defecto, compartido con fs, dns y zlib); sin tope,
+//   una ráfaga de logins lo satura y frena al resto del proceso.
 //
 // Estado en memoria del proceso: un reinicio lo vacía (igual que el resto de
 // la sesión es sin estado, ADR 0001). No sirve con varias réplicas de la API,
@@ -25,48 +30,84 @@ import { TooManyLoginAttemptsError } from "./auth.errors";
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILURES_PER_CLIENT = 5;
 const MAX_FAILURES_GLOBAL = 20;
+const MAX_CONCURRENT_VERIFICATIONS = 2;
+// Retry-After cuando lo que falta es un lugar en las verificaciones en curso:
+// se libera en decenas de ms, no hace falta esperar a la ventana.
+const CONCURRENCY_RETRY_AFTER_SECONDS = 1;
 // Techo de claves distintas en memoria: si alguien rota la clave de cliente
 // a propósito, el Map no crece sin límite.
 const MAX_TRACKED_CLIENTS = 10_000;
 
+// Intento en curso: lo devuelve beginAttempt y lo consume recordSuccess (el
+// lugar de verificación se libera con release()). `at` identifica el registro
+// provisorio a deshacer si el login acierta.
+export interface LoginAttempt {
+  readonly clientKey: string;
+  readonly at: number;
+}
+
+// Las cubetas nunca superan su máximo (solo se registra un intento cuando hay
+// lugar), así que purgar desde el frente y buscar un timestamp son O(máximo),
+// sin copiar el array en cada intento.
+function pruneInPlace(timestamps: number[], now: number): void {
+  const cutoff = now - WINDOW_MS;
+  while (timestamps.length > 0 && timestamps[0] <= cutoff) timestamps.shift();
+}
+
+function removeOne(timestamps: number[], at: number): void {
+  const index = timestamps.lastIndexOf(at);
+  if (index !== -1) timestamps.splice(index, 1);
+}
+
 @Injectable()
 export class LoginRateLimiterService {
   private readonly failuresByClient = new Map<string, number[]>();
-  private globalFailures: number[] = [];
+  private readonly globalFailures: number[] = [];
+  private inFlight = 0;
 
-  // Lanza TooManyLoginAttemptsError si el cliente o el total ya agotaron el
-  // cupo de la ventana. Se llama ANTES de verificar la credencial: mientras
-  // dure el bloqueo, ni siquiera una contraseña correcta entra (si no, el
-  // bloqueo le seguiría confirmando al atacante cuándo acertó).
-  assertAllowed(clientKey: string, now: number = Date.now()): void {
-    this.globalFailures = this.prune(this.globalFailures, now);
-    const clientFailures = this.prune(this.failuresByClient.get(clientKey) ?? [], now);
-    this.store(clientKey, clientFailures);
+  // Síncrono a propósito (ver arriba). Lanza TooManyLoginAttemptsError si no
+  // hay lugar; si lo hay, registra el intento como fallo provisorio en las
+  // dos cubetas y ocupa un lugar de verificación que hay que liberar con
+  // release(). Mientras dure un bloqueo ni siquiera una contraseña correcta
+  // entra (si no, el bloqueo le avisaría al atacante cuándo acertó).
+  beginAttempt(clientKey: string, now: number = Date.now()): LoginAttempt {
+    pruneInPlace(this.globalFailures, now);
+    const clientFailures = this.failuresByClient.get(clientKey) ?? [];
+    pruneInPlace(clientFailures, now);
 
     const blockedUntil = Math.max(
       clientFailures.length >= MAX_FAILURES_PER_CLIENT ? clientFailures[0] + WINDOW_MS : 0,
       this.globalFailures.length >= MAX_FAILURES_GLOBAL ? this.globalFailures[0] + WINDOW_MS : 0
     );
     if (blockedUntil > now) {
+      this.store(clientKey, clientFailures);
       throw new TooManyLoginAttemptsError(Math.ceil((blockedUntil - now) / 1000));
     }
-  }
+    if (this.inFlight >= MAX_CONCURRENT_VERIFICATIONS) {
+      this.store(clientKey, clientFailures);
+      throw new TooManyLoginAttemptsError(CONCURRENCY_RETRY_AFTER_SECONDS);
+    }
 
-  recordFailure(clientKey: string, now: number = Date.now()): void {
-    this.globalFailures = [...this.prune(this.globalFailures, now), now];
-    this.store(clientKey, [...this.prune(this.failuresByClient.get(clientKey) ?? [], now), now]);
+    clientFailures.push(now);
+    this.globalFailures.push(now);
+    this.store(clientKey, clientFailures);
     this.enforceCapacity(now);
+    this.inFlight++;
+    return { clientKey, at: now };
   }
 
-  // Solo limpia la cubeta del cliente: los fallos globales siguen contando
-  // hasta salir de la ventana (un acierto no "perdona" un ataque en curso).
-  recordSuccess(clientKey: string): void {
-    this.failuresByClient.delete(clientKey);
+  // Login correcto: borra la cubeta del cliente (sus fallos previos quedan
+  // perdonados) y saca de la global solo el registro provisorio de este
+  // intento; los fallos globales de otros siguen contando.
+  recordSuccess(attempt: LoginAttempt): void {
+    this.failuresByClient.delete(attempt.clientKey);
+    removeOne(this.globalFailures, attempt.at);
   }
 
-  private prune(timestamps: number[], now: number): number[] {
-    const cutoff = now - WINDOW_MS;
-    return timestamps.filter((t) => t > cutoff);
+  // Libera el lugar de verificación. Se llama siempre (finally), acierte,
+  // falle o lance.
+  release(): void {
+    this.inFlight = Math.max(0, this.inFlight - 1);
   }
 
   private store(clientKey: string, failures: number[]): void {
@@ -77,7 +118,10 @@ export class LoginRateLimiterService {
   private enforceCapacity(now: number): void {
     if (this.failuresByClient.size <= MAX_TRACKED_CLIENTS) return;
 
-    for (const [key, failures] of this.failuresByClient) this.store(key, this.prune(failures, now));
+    for (const [key, failures] of this.failuresByClient) {
+      pruneInPlace(failures, now);
+      this.store(key, failures);
+    }
     // Si sigue excedido, se descartan las claves más viejas (orden de
     // inserción del Map). El techo global sigue protegiendo igual.
     for (const key of this.failuresByClient.keys()) {
@@ -91,4 +135,5 @@ export const LOGIN_RATE_LIMIT = {
   windowMs: WINDOW_MS,
   maxFailuresPerClient: MAX_FAILURES_PER_CLIENT,
   maxFailuresGlobal: MAX_FAILURES_GLOBAL,
+  maxConcurrentVerifications: MAX_CONCURRENT_VERIFICATIONS,
 } as const;

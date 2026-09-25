@@ -27,21 +27,25 @@ export class AuthService {
   // clientKey: identificador del cliente para el rate-limit (req.ip; ver
   // LoginRateLimiterService sobre por qué no es confiable por sí solo).
   async login(username: string, password: string, clientKey: string): Promise<{ token: string; expiresAt: number }> {
-    this.rateLimiter.assertAllowed(clientKey);
+    // Síncrono y antes de cualquier await: chequea el límite y registra el
+    // intento como fallo provisorio en el mismo tick (ver
+    // LoginRateLimiterService sobre la carrera que esto evita).
+    const attempt = this.rateLimiter.beginAttempt(clientKey);
+    try {
+      // Las dos comparaciones corren siempre, sin cortocircuito: un usuario
+      // incorrecto tarda lo mismo que una contraseña incorrecta (scrypt
+      // incluido), así el tiempo de respuesta no revela cuál falló (AC 3.2).
+      const usernameMatches = this.usernameMatches(username);
+      const passwordMatches = await verifyPassword(password, this.passwordHash);
 
-    // Las dos comparaciones corren siempre, sin cortocircuito: un usuario
-    // incorrecto tarda lo mismo que una contraseña incorrecta (scrypt
-    // incluido), así el tiempo de respuesta no revela cuál falló (AC 3.2).
-    const usernameMatches = this.usernameMatches(username);
-    const passwordMatches = await verifyPassword(password, this.passwordHash);
+      // Fallo: no hay nada que registrar, beginAttempt ya lo contó.
+      if (!usernameMatches || !passwordMatches) throw new InvalidCredentialsError();
 
-    if (!usernameMatches || !passwordMatches) {
-      this.rateLimiter.recordFailure(clientKey);
-      throw new InvalidCredentialsError();
+      this.rateLimiter.recordSuccess(attempt);
+      return this.sessions.issue();
+    } finally {
+      this.rateLimiter.release();
     }
-
-    this.rateLimiter.recordSuccess(clientKey);
-    return this.sessions.issue();
   }
 
   // timingSafeEqual exige buffers del mismo largo: se comparan los SHA-256

@@ -61,10 +61,37 @@ describe("AuthService", () => {
     await expect(service.login("curador", "contraseña-correcta", "ip-b")).resolves.toHaveProperty("token");
   });
 
-  it("un login exitoso limpia los fallos previos del cliente", async () => {
-    const successSpy = jest.spyOn(rateLimiter, "recordSuccess");
-    await expect(service.login("curador", "mal", "ip-a")).rejects.toBeInstanceOf(InvalidCredentialsError);
-    await service.login("curador", "contraseña-correcta", "ip-a");
-    expect(successSpy).toHaveBeenCalledWith("ip-a");
+  it("4 fallos, 1 acierto y 4 fallos más no bloquean: el acierto perdona los fallos del cliente", async () => {
+    const almostFull = LOGIN_RATE_LIMIT.maxFailuresPerClient - 1;
+    for (let i = 0; i < almostFull; i++) {
+      await expect(service.login("curador", "mal", "ip-a")).rejects.toBeInstanceOf(InvalidCredentialsError);
+    }
+    await expect(service.login("curador", "contraseña-correcta", "ip-a")).resolves.toHaveProperty("token");
+    for (let i = 0; i < almostFull; i++) {
+      await expect(service.login("curador", "mal", "ip-a")).rejects.toBeInstanceOf(InvalidCredentialsError);
+    }
+    await expect(service.login("curador", "contraseña-correcta", "ip-a")).resolves.toHaveProperty("token");
+  });
+
+  it("50 logins incorrectos concurrentes: a lo sumo 5 llegan a verificarse (401), el resto es 429", async () => {
+    const results = await Promise.allSettled(Array.from({ length: 50 }, (_, i) => service.login("curador", `mal-${i}`, "ip-a")));
+    const reasons = results.map((r) => (r.status === "rejected" ? r.reason : r.value));
+
+    const invalid = reasons.filter((r) => r instanceof InvalidCredentialsError).length;
+    const tooMany = reasons.filter((r) => r instanceof TooManyLoginAttemptsError).length;
+    expect(invalid).toBeGreaterThan(0);
+    expect(invalid).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerClient);
+    expect(invalid + tooMany).toBe(50);
+  });
+
+  it("libera el lugar de verificación aunque verifyPassword lance", async () => {
+    const release = jest.spyOn(rateLimiter, "release");
+    const broken = new AuthService(
+      configWith({ CURATOR_USERNAME: "curador", CURATOR_PASSWORD_HASH: "hash-roto", SESSION_SECRET: SECRET, NODE_ENV: "test" }),
+      new SessionService(configWith({ SESSION_SECRET: SECRET, NODE_ENV: "test" })),
+      rateLimiter
+    );
+    await expect(broken.login("curador", "x", "ip-a")).rejects.toThrow(/formato/);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

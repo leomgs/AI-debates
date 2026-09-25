@@ -159,3 +159,34 @@ describe('Auth (e2e) — rate-limit del login', () => {
     expect(blocked.headers['set-cookie']).toBeUndefined();
   });
 });
+
+describe('Auth (e2e) — rate-limit con logins concurrentes', () => {
+  let app: INestApplication<App>;
+
+  beforeAll(async () => {
+    app = await createApp();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  // Regresión del review de API-8: con el chequeo y el registro del fallo
+  // separados por el await de scrypt, 200 logins concurrentes daban 199 401 y
+  // ningún 429.
+  it('50 logins incorrectos simultáneos: a lo sumo 5 responden 401 y el resto 429', async () => {
+    const server = app.getHttpServer();
+    const results = await Promise.allSettled(
+      Array.from({ length: 50 }, (_, i) =>
+        request(server).post('/auth/login').send({ username: E2E_CURATOR_USERNAME, password: `incorrecta-${i}` }),
+      ),
+    );
+    const statuses = results.map((r) => (r.status === 'fulfilled' ? r.value.status : 0));
+
+    const unauthorized = statuses.filter((s) => s === 401).length;
+    const tooMany = statuses.filter((s) => s === 429).length;
+    expect(unauthorized).toBeGreaterThan(0);
+    expect(unauthorized).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerClient);
+    expect(unauthorized + tooMany).toBe(50);
+  });
+});
