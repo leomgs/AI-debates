@@ -1,21 +1,25 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
-import { HttpErrorFilter } from './../src/shared/http/http-error.filter';
+import { configureApp } from './../src/configure-app';
+import type { Env } from './../src/shared/config/env.schema';
 import { LOGIN_RATE_LIMIT } from './../src/modules/auth/login-rate-limiter.service';
 import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 
 // API-8 (ADR 0001, spec 003 AC 3.2-3.5 y 3.8) — AppModule completo, con el
-// SessionGuard global real. Se registra el mismo HttpErrorFilter que main.ts
-// para verificar el envelope { error: { code, message } } de punta a punta.
+// SessionGuard global real y el mismo configureApp() que main.ts (filter,
+// trust proxy, estáticos, Swagger), para verificar el envelope
+// { error: { code, message } } y el resto del wiring de punta a punta.
 async function createApp(): Promise<INestApplication<App>> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
-  const app = moduleFixture.createNestApplication<INestApplication<App>>();
-  app.useGlobalFilters(new HttpErrorFilter());
+  const app = moduleFixture.createNestApplication<NestExpressApplication>();
+  configureApp(app, app.get<ConfigService<Env, true>>(ConfigService));
   await app.init();
   return app;
 }
@@ -66,6 +70,10 @@ describe('Auth (e2e)', () => {
     const cookie = await login(app);
     const tampered = cookie.replace(/.$/, (c) => (c === '0' ? '1' : '0'));
     await request(app.getHttpServer()).get('/episodes').set('Cookie', tampered).expect(401);
+  });
+
+  it('fuera de producción, /docs (Swagger) está montado y es público', async () => {
+    await request(app.getHttpServer()).get('/docs').expect(200);
   });
 
   it('GET / sigue siendo público', () => {
