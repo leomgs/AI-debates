@@ -2,7 +2,9 @@
 // process.env antes de bootstrapear AppModule — process.env tiene prioridad
 // sobre apps/api/.env en ConfigModule, así que la credencial real del
 // desarrollador nunca participa de los tests. El hash corresponde a
-// E2E_CURATOR_PASSWORD (generado con el script auth:hash-password).
+// E2E_CURATOR_PASSWORD (generado con el script auth:hash-password cuando el
+// default era N=2^14; se deja así a propósito: es más rápido y prueba que un
+// hash con parámetros viejos sigue verificando).
 export const E2E_CURATOR_USERNAME = "curador-e2e";
 export const E2E_CURATOR_PASSWORD = "test-password";
 export const E2E_CURATOR_PASSWORD_HASH =

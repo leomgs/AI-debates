@@ -15,15 +15,19 @@ import { randomBytes, scrypt, timingSafeEqual, type ScryptOptions } from "node:c
 // (scripts/hash-password.ts, ver setup.md).
 
 const PREFIX = "scrypt";
-const DEFAULT_PARAMS = { N: 16_384, r: 8, p: 1 } as const; // 2^14: ~16 MiB y decenas de ms por intento
+// 2^16: 64 MiB y ~225 ms por verificación (medido con Node 22 en la máquina de
+// desarrollo: 2^14 ~55 ms, 2^15 ~110 ms, 2^16 ~225 ms, 2^17 ~450 ms). Con el
+// tope de 2 verificaciones en curso del rate-limit, el pico es de 128 MiB. Los
+// hashes generados con otros parámetros siguen verificando: viajan en el hash.
+const DEFAULT_PARAMS = { N: 65_536, r: 8, p: 1 } as const;
 const SALT_BYTES = 16;
 const KEY_BYTES = 64;
 
-// Techos defensivos al parsear: un hash con N o r absurdos haría que cada
-// login reserve memoria sin límite. No es un input externo (sale del .env),
-// pero un typo no debería tumbar el proceso en el primer login.
-const MAX_N = 2 ** 20;
-const MAX_R = 32;
+// Techos defensivos al parsear. scrypt usa 128·N·r bytes: se limita ese
+// producto (256 MiB) y no N y r por separado, que juntos permitían 4 GiB. p
+// multiplica el tiempo, no la memoria. No es un input externo (sale del
+// .env), pero un typo no debería tumbar el proceso en el primer login.
+const MAX_MEMORY_BYTES = 256 * 1024 * 1024;
 const MAX_P = 16;
 const MIN_SALT_BYTES = 16;
 const MIN_KEY_BYTES = 32;
@@ -66,7 +70,7 @@ export function parsePasswordHash(encoded: string): ParsedPasswordHash | undefin
   const p = parsePositiveInt(pRaw);
   if (N === undefined || r === undefined || p === undefined) return undefined;
   // N tiene que ser potencia de 2 mayor que 1 (requisito de scrypt).
-  if (N < 2 || N > MAX_N || (N & (N - 1)) !== 0 || r > MAX_R || p > MAX_P) return undefined;
+  if (N < 2 || (N & (N - 1)) !== 0 || p > MAX_P || 128 * N * r > MAX_MEMORY_BYTES) return undefined;
 
   const base64url = /^[A-Za-z0-9_-]+$/;
   if (!base64url.test(saltRaw) || !base64url.test(hashRaw)) return undefined;
