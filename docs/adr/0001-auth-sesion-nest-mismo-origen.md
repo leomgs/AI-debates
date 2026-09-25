@@ -27,7 +27,7 @@ La spec 003 exige login de un solo usuario con credencial en `.env`, sesión por
 - (+) Todo endpoint nuevo queda protegido por defecto.
 - (−) Cerrar sesión no revoca una cookie copiada antes de su vencimiento; revocar todas las sesiones = rotar `SESSION_SECRET`.
 - (−) El despliegue exige que Next alcance a Nest por red interna; `API_INTERNAL_URL` se necesita en build (declararla en `env` de Turborepo).
-- (−) `/docs` queda fuera del guard (middleware de Swagger); pendiente decidir si se desactiva en producción.
+- (−) `/docs` queda fuera del guard (middleware de Swagger). Resuelto por D20 de la spec 003: se monta solo fuera de producción (implementado en API-8).
 
 ## Alternativas consideradas
 
