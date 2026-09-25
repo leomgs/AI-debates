@@ -13,6 +13,7 @@ import type { Env } from './../src/shared/config/env.schema';
 import { PrismaService } from './../src/shared/prisma/prisma.service';
 import { EpisodeEventsService } from './../src/modules/episodes/episode-events.service';
 import { NotificationSchema } from './../src/modules/notifications/dto/notification.schema';
+import { EpisodeDetailSchema } from './../src/modules/episodes/episode-detail.mapper';
 import { z } from 'zod';
 import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 
@@ -129,6 +130,27 @@ describe('Episodes (e2e)', () => {
       // transforme o bufferee el stream. Lo pone Nest, no este proyecto.
       expect(res.headers['cache-control']).toMatch(/\bno-transform\b/);
       expect(body).toMatch(/event: research\.started/);
+    });
+  });
+
+  describe('API-1 (parte 1): tópico, createdAt y participantes en el detalle', () => {
+    it('GET /episodes/:id cumple EpisodeDetailSchema y trae los participantes, debatientes primero', async () => {
+      const { topic, episode } = await seedEpisode(prisma, 'PENDING_REVIEW');
+      const voiceId = { LOCAL: 'x', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
+      const judge = await prisma.agent.create({ data: { name: 'Judge e2e', role: 'JUDGE', systemPrompt: '-', voiceId } });
+      const analyst = await prisma.agent.create({ data: { name: 'Analyst e2e', role: 'ANALYST', systemPrompt: '-', voiceId } });
+      await prisma.episodeParticipant.create({ data: { episodeId: episode.id, agentId: judge.id, modelProvider: 'GOOGLE', isJudge: true } });
+      await prisma.episodeParticipant.create({ data: { episodeId: episode.id, agentId: analyst.id, modelProvider: 'GOOGLE' } });
+
+      const res = await request(app.getHttpServer()).get(`/episodes/${episode.id}`).set('Cookie', cookie).expect(200);
+
+      const detail = EpisodeDetailSchema.parse(res.body);
+      expect(detail.topic).toEqual({ id: topic.id, title: 'Un trend' });
+      expect(detail.createdAt).toBe(episode.createdAt.toISOString());
+      expect(detail.participants).toEqual([
+        { agentId: analyst.id, name: 'Analyst e2e', role: 'ANALYST', isJudge: false },
+        { agentId: judge.id, name: 'Judge e2e', role: 'JUDGE', isJudge: true },
+      ]);
     });
   });
 

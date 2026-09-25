@@ -10,8 +10,14 @@ import { CheckpointReasonSchema } from "./dto/checkpoint-reason.schema";
 export const EPISODE_DETAIL_INCLUDE = {
   usage: true,
   checkpoints: { orderBy: { createdAt: "asc" } },
+  // API-1: debatientes primero y el juez al final.
+  participants: {
+    orderBy: { isJudge: "asc" },
+    include: { agent: { select: { name: true, role: true } } },
+  },
   debate: {
     include: {
+      topic: { select: { id: true, title: true } },
       rounds: {
         orderBy: { round: "asc" },
         include: { arguments: { orderBy: { createdAt: "asc" } } },
@@ -35,6 +41,26 @@ export const EpisodeDetailSchema = z.object({
   // proceso. Con un estado activo y esto en false, el episodio está trabado
   // hasta que EpisodeRecoveryService lo retome al reiniciar (AC 3.39).
   pipelineActive: z.boolean(),
+  // API-1, parte 1 (spec 003, AC 3.26-3.29): cabecera del detalle y nombres
+  // de los agentes del timeline y del veredicto. `language` (parte 2) llega
+  // con la migración de la spec 004 (tasks.md §13.7).
+  topic: z.object({
+    id: z.string().uuid(),
+    title: z.string(),
+  }),
+  createdAt: z.iso.datetime(),
+  // Vacío hasta que el pipeline selecciona los participantes (al salir de
+  // CREATED). `agentId` es el que usan arguments[].agentId, verdict.judgeId
+  // y verdict.winnerId. `role` es la persona (ANALYST, CONTRARIAN, ...) o
+  // JUDGE; `name`, su nombre visible.
+  participants: z.array(
+    z.object({
+      agentId: z.string().uuid(),
+      name: z.string(),
+      role: z.string().nullable(),
+      isJudge: z.boolean(),
+    })
+  ),
   usage: z
     .object({
       llmCalls: z.number().int(),
@@ -105,6 +131,14 @@ export function mapEpisodeDetail(episode: EpisodeWithDetail, runtime: { pipeline
     id: episode.id,
     status: episode.status,
     pipelineActive: runtime.pipelineActive,
+    topic: { id: episode.debate.topic.id, title: episode.debate.topic.title },
+    createdAt: episode.createdAt.toISOString(),
+    participants: episode.participants.map((p) => ({
+      agentId: p.agentId,
+      name: p.agent.name,
+      role: p.agent.role,
+      isJudge: p.isJudge,
+    })),
     usage: episode.usage
       ? {
           llmCalls: episode.usage.llmCalls,

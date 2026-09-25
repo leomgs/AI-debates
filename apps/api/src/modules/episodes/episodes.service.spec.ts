@@ -136,12 +136,19 @@ describe("EpisodesService", () => {
       return {
         id: EPISODE_ID,
         status: "DEBATING",
+        createdAt: new Date("2026-09-25T10:00:00.000Z"),
+        participants: [
+          { agentId: "agent-1", isJudge: false, agent: { name: "Analyst", role: "ANALYST" } },
+          { agentId: "agent-2", isJudge: false, agent: { name: "Contrarian", role: "CONTRARIAN" } },
+          { agentId: "judge-1", isJudge: true, agent: { name: "Judge", role: "JUDGE" } },
+        ],
         maxLlmCalls: 25,
         maxSearchQueries: 5,
         maxTtsSegments: 40,
         usage: { llmCalls: 1, searchRequests: 1, ttsRequests: 0, executionTime: 100 },
         checkpoints: [],
         debate: {
+          topic: { id: TOPIC_ID, title: "Un trend" },
           rounds: [
             {
               id: "round-1",
@@ -165,6 +172,30 @@ describe("EpisodesService", () => {
 
       expect(detail.debate.rounds[0].arguments).toHaveLength(1);
       expect(detail.debate.rounds[0].arguments[0].id).toBe("a1");
+    });
+
+    // API-1, parte 1 (AC 3.26-3.29): con los participantes el front resuelve
+    // el nombre de cada agentId de arguments[] y del veredicto (y cierra
+    // API-9: el agente sin argumento aprobado en VALIDATION_INCONSISTENCY).
+    it("trae el tópico, createdAt y los participantes con nombre, rol e isJudge", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
+
+      const detail = await service.getEpisodeDetail(EPISODE_ID);
+
+      expect(detail.topic).toEqual({ id: TOPIC_ID, title: "Un trend" });
+      expect(detail.createdAt).toBe("2026-09-25T10:00:00.000Z");
+      expect(detail.participants).toEqual([
+        { agentId: "agent-1", name: "Analyst", role: "ANALYST", isJudge: false },
+        { agentId: "agent-2", name: "Contrarian", role: "CONTRARIAN", isJudge: false },
+        { agentId: "judge-1", name: "Judge", role: "JUDGE", isJudge: true },
+      ]);
+      expect(prisma.episode.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: EPISODE_ID },
+        include: expect.objectContaining({
+          participants: expect.objectContaining({ orderBy: { isJudge: "asc" } }),
+          debate: expect.objectContaining({ include: expect.objectContaining({ topic: expect.anything() }) }),
+        }),
+      });
     });
 
     // API-12 (AC 3.39): un estado activo sin pipeline en curso es un
