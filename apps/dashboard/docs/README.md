@@ -1,6 +1,6 @@
 # Docs — Dashboard (front)
 
-Carpeta creada el 2026-09-24 como **placeholder** — `apps/dashboard/` todavía no existe como aplicación real (ni `package.json`, ni Next.js instalado, nada). Se crea recién cuando se implemente `../../../docs/product/002-workspace-restructure.md`, que hoy solo prevé un scaffold vacío. Esta carpeta guarda, desde antes de que exista código, la documentación que es **puramente del front**, separada de los docs de raíz del repo (que siguen siendo específicos del backend/infraestructura compartida).
+Carpeta creada el 2026-09-24, antes de que existiera código. `apps/dashboard/` ya existe como scaffold Next.js vacío (creado por `../../../docs/product/002-workspace-restructure.md`). Esta carpeta guarda la documentación que es **puramente del front**, separada de los docs de raíz del repo (que siguen siendo específicos del backend/infraestructura compartida).
 
 ## Convención de dónde vive cada cosa (acordada 2026-09-24, ver `decision-log.md` raíz #28)
 
@@ -12,4 +12,4 @@ Carpeta creada el 2026-09-24 como **placeholder** — `apps/dashboard/` todavía
 
 ## Estado actual
 
-Nada implementado todavía. Ver `roadmap.md` de esta carpeta — depende de que `002-workspace-restructure.md` (backend) cree el scaffold de `apps/dashboard` antes de que el trabajo de front pueda arrancar.
+Scaffold vacío, sin páginas propias. La UI real está especificada en `../../../docs/product/003-dashboard-ui.md` (revisada por `architect`, auth en `../../../docs/adr/0001-auth-sesion-nest-mismo-origen.md`). Secuenciación en `roadmap.md` y tareas en `tasks.md` de esta carpeta; el primer bloqueante real es API-8 (auth) en el backend.

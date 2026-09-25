@@ -4,4 +4,8 @@ Un archivo por decisión arquitectónica significativa, mantenido por el agente 
 
 Cada ADR cubre: contexto, decisión, consecuencias, y alternativas consideradas. Para el estado actual de la arquitectura (no el historial de cómo se llegó ahí), ver `../../architecture.md`.
 
-Todavía no hay ADRs registrados — las decisiones tomadas hasta ahora están documentadas directamente en `architecture.md`.
+## Registro
+
+- [`0001-auth-sesion-nest-mismo-origen.md`](0001-auth-sesion-nest-mismo-origen.md) — Auth del curador: sesión emitida y validada por Nest, dashboard Next como único origen público (2026-09-25, spec 003).
+
+Las decisiones anteriores a este registro siguen documentadas directamente en `architecture.md`.

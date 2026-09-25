@@ -6,6 +6,19 @@ Convención: cada entrada tiene fecha, de qué módulo/decisión del backend vie
 
 ## Entradas
 
+### 2026-09-25: hay 5 motivos de `REQUIRES_HUMAN_REVIEW`, no 4, y correcciones a la entrada del 2026-09-08
+
+Contexto: al escribir y revisar la spec `docs/product/003-dashboard-ui.md` (agentes `product-analyst` y `architect`), estas notas se contrastaron con `openapi.json` y con el código real.
+
+- **Quinto motivo, `PROVIDER_QUOTA_EXCEEDED`**: se agotó la cuota del proveedor, o el LLM o el TTS no están disponibles. Es distinto de `USAGE_LIMIT_EXCEEDED`, que es el presupuesto propio del episodio. La UI necesita un panel propio que explique que no se resuelve subiendo límites: hay que esperar a que el proveedor recupere cupo y después reanudar.
+- **Correcciones a la entrada del 2026-09-08 (`VALIDATION_INCONSISTENCY`)**:
+  - `regenerate` no aplica: solo es válida en `PENDING_REVIEW` y necesita un `argumentId` que en este caso no existe.
+  - `resume {}` tampoco lo resuelve: vuelve a lanzar la misma excepción y el episodio pasa a `FAILED` de forma determinista. La UI ofrece solo "Rechazar" (spec 003, D13). Con las rondas por defecto, el caso es prácticamente inalcanzable.
+  - El agente afectado no sale del `snapshot`: ese campo es `EpisodeUsage` y no se expone. Se deduce del detalle cuando exista API-1 (participantes): es el debatiente que no tiene argumentos OFFICIAL.
+  - El ejemplo "un curador usó `reject` sobre un draft" es imposible: `reject` actúa sobre el episodio entero, no sobre un argumento.
+
+El detalle completo, los AC y los cambios de API asociados están en la spec 003.
+
 ### 2026-09-24 — Contrato tipado (`openapi.json`) y el dashboard entran al mismo repo
 
 Contexto: se revisaron dos specs nuevas (`docs/product/001-openapi-contract-zod.md`, `docs/product/002-workspace-restructure.md`, detalle del proceso en `decision-log.md` #28). Dos cosas relevantes para cuando arranque el proyecto de frontend, ninguna de las dos es una decisión del front en sí:

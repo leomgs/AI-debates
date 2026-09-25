@@ -4,4 +4,8 @@ Un archivo por feature/spec nueva, mantenido por el agente `product-analyst`: pr
 
 El spec del MVP v1.0 (Features 1-10) está **congelado** en `../../features.md` — no se edita acá. Esta carpeta es para especificar trabajo nuevo, posterior al MVP congelado.
 
-Todavía no hay specs nuevas registradas.
+## Registro
+
+- [`001-openapi-contract-zod.md`](001-openapi-contract-zod.md) — contrato OpenAPI generado desde Zod. Implementada (2026-09-24).
+- [`002-workspace-restructure.md`](002-workspace-restructure.md) — monorepo pnpm + Turborepo (`apps/api`, `apps/dashboard`, `packages/contracts`, `packages/video`). Implementada (2026-09-24).
+- [`003-dashboard-ui.md`](003-dashboard-ui.md) — dashboard: panel de curación privado + showcase público. Escrita por `product-analyst` y revisada por `architect` (2026-09-25), sin implementar. Decisión de auth en [`../adr/0001-auth-sesion-nest-mismo-origen.md`](../adr/0001-auth-sesion-nest-mismo-origen.md).

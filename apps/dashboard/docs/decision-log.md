@@ -25,3 +25,36 @@ Mismo criterio que el `decision-log.md` de la raíz del repo: bitácora del *pro
 **Contexto**: parte de por qué el dashboard terminó en este mismo repo (`002-workspace-restructure.md`, decisión "el dashboard vive en este mismo repo") es justamente para que pueda importar `packages/video` directo (preview en vivo con `@remotion/player`) sin necesidad de publicarlo a un registry.
 
 **Resolución**: `apps/dashboard` depende de `@contracts` (tipos de `RemotionManifest` y lo que exponga `openapi.json` vía `openapi-typescript`) y, cuando exista preview en vivo, de `@video` — ambos resueltos por el workspace de pnpm, no instalados como paquetes publicados. No hay nada más que decidir acá hasta que exista código real.
+
+**Nota 2026-09-25**: los nombres reales de los paquetes son `@ai-trend-debates/contracts` y `@ai-trend-debates/video` (`@contracts`/`@video` era una abreviatura de los docs). La revisión de la spec 003 encontró que `@ai-trend-debates/video` todavía no se puede importar desde el dashboard: `src/index.ts` llama a `registerRoot()` al importarse y las versiones de React no coinciden. La solución (entry de Studio separado, peers y catálogo de pnpm) está en la spec 003, "Restricciones técnicas".
+
+---
+
+## 2026-09-25
+
+### 3. Autenticación: login de un solo usuario, sesión emitida por Nest, dashboard como único origen
+
+**Contexto**: cierra el gap de la entrada #1 (nada separaba el panel de curación de la vista pública). Surgió al escribir la spec `docs/product/003-dashboard-ui.md`.
+
+**Resolución**: el usuario eligió login de un solo usuario (credencial en `.env`, sesión por cookie). Descartó "solo uso local" y OAuth externo: es lo mínimo que permite publicar el sitio sin sumar un proveedor. La topología la propuso el agente `architect` al revisar la spec y el usuario la aceptó tal cual:
+- Nest emite y valida la sesión, con un guard global que niega por defecto.
+- Next es el único origen público y hace rewrite de `/api/*` y `/audio-files/*`.
+- Se elimina el CORS abierto.
+
+Motivo principal: `EventSource` no manda headers y las URLs de audio firmadas son relativas. Con un solo origen, la cookie, el SSE y el audio funcionan sin CORS ni `withCredentials`. Se descartó la sesión en memoria: permite revocar de verdad, pero cada reinicio del backend cierra la sesión. Detalle completo en `../../../docs/adr/0001-auth-sesion-nest-mismo-origen.md`.
+
+### 4. Stack de UI y datos: Tailwind + shadcn/ui + TanStack Query + openapi-fetch
+
+**Contexto**: la spec 003 tenía que definir cómo se consume la API y cómo se construye la UI antes de arrancar.
+
+**Resolución** (el usuario eligió entre tres opciones):
+- Tailwind, que ya viene en el scaffold.
+- shadcn/ui: componentes accesibles copiados al repo, sin sumar una librería pesada.
+- TanStack Query: cache e invalidación después de las acciones de curaduría y de los eventos SSE.
+- Cliente generado con `openapi-typescript`/`openapi-fetch` desde `openapi.json`.
+
+Se descartó "Tailwind + fetch nativo con Server Actions" porque se combina peor con el SSE y con el polling del inbox. El panel busca los datos del lado del cliente (`/api`, vía rewrite); solo el SSR del showcase llama a la API con `API_INTERNAL_URL`.
+
+### 5. Showcase: episodios publicados explícitamente, con `@remotion/player`
+
+**Resolución**: la vista pública muestra los episodios en `READY_FOR_RENDER` o posteriores **que el curador publicó** (`Episode.publishedAt`, acciones `publish`/`unpublish`). Se reproducen en vivo con `@remotion/player` contra el manifest, sin esperar al worker de render (Feature 9). El paso explícito de publicar lo pidió el usuario después de la revisión del `architect`: sin él, un episodio quedaba público antes de que el curador lo previsualizara.

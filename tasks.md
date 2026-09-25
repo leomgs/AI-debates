@@ -2,11 +2,13 @@
 
 Tracking del estado de implementación. No repite el diseño (eso vive en `architecture.md` / `features.md` / `api-contract.md` / `coding-rules.md`) — solo lista qué está hecho y qué falta, módulo por módulo, para saber en qué seguir sin releer todo el proyecto.
 
-Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-24.
+Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-25.
 
-## Dónde retomar (última sesión: 2026-09-24 — spec 002 (workspace) implementada, monorepo real. Fase 5 completa)
+## Dónde retomar (última sesión: 2026-09-25 — spec 003 (dashboard) escrita y revisada, ADR 0001 de auth aceptado)
 
-**Esta sesión**: implementado y verificado el monorepo completo (`pnpm` + Turborepo) — sección 11 más abajo, proceso completo y hallazgos reales en `decision-log.md` entrada 30. El repo pasó de una sola app NestJS a `apps/api` + `packages/contracts` + `packages/video` (con un render real de Remotion probado) + `apps/dashboard` (scaffold). Bloqueante real no anticipado: `better-sqlite3@13.x` no publica binarios precompilados, bajado a `^12.11.1`. **Con esto, la Fase 5 del roadmap queda completa** — no queda ningún ítem P0/post-MVP planeado pendiente. Próximo paso real: la spec 003 (UI real del dashboard), todavía sin escribir, o Feature 9 (worker de Remotion).
+**Esta sesión (2026-09-25)**: escrita `docs/product/003-dashboard-ui.md` (agente `product-analyst`), revisada por `architect` contra el código real, y aceptado `docs/adr/0001-auth-sesion-nest-mismo-origen.md`. No se tocó código. Las dependencias de backend que pide la spec (API-1..API-16, auth, `packages/video` como librería) quedaron como sección 12 de este archivo, ordenadas por la fase del dashboard que desbloquean. Proceso en `decision-log.md` entrada 31. **Próximo paso real**: API-8 (módulo `auth` del ADR 0001), bloqueante de la F1 del dashboard.
+
+**Sesión previa (2026-09-24)**: implementado y verificado el monorepo completo (`pnpm` + Turborepo) — sección 11 más abajo, proceso completo y hallazgos reales en `decision-log.md` entrada 30. El repo pasó de una sola app NestJS a `apps/api` + `packages/contracts` + `packages/video` (con un render real de Remotion probado) + `apps/dashboard` (scaffold). Bloqueante real no anticipado: `better-sqlite3@13.x` no publica binarios precompilados, bajado a `^12.11.1`. **Con esto, la Fase 5 del roadmap queda completa** — no queda ningún ítem P0/post-MVP planeado pendiente. Próximo paso real: la spec 003 (UI real del dashboard), todavía sin escribir, o Feature 9 (worker de Remotion).
 
 **Sesión previa**: implementada y verificada contra el servidor real la spec 001 — proceso completo en `decision-log.md` entrada 29 (`z.date()` no representable en JSON Schema, `createZodDto` no envuelve uniones, un bug propio de `import type` que dejaba el pipe global sin validar nada).
 
@@ -197,7 +199,7 @@ Entidad: `Asset`. **Corrección 2026-09-14** (`decision-log.md` entrada 26): est
 - [ ] Worker desacoplado que ejecuta el binario de Remotion
 - [ ] Persistencia en `Asset` del `.mp4` resultante
 - [ ] Wirear transición `RENDERING → COMPLETED`
-- [ ] Frontend: consumo del manifest vía `@remotion/player`, resolviendo las URLs firmadas de los audios
+- [ ] Frontend: consumo del manifest vía `@remotion/player`, resolviendo las URLs firmadas de los audios — **cubierto por la spec 003** (D2, fases F3/F4 del dashboard), no depende de este worker
 
 ## 7. Episodes — el orquestador (`modules/episodes/`) — COMPLETA (código + tests + integración, 2026-09-08)
 
@@ -206,7 +208,7 @@ Entidades: `Episode`, `EpisodeParticipant`, `EpisodeUsage`, `EpisodeCheckpoint`.
 - [x] `EpisodeStateService` (coding-rules.md §6) — único escritor de `Episode.status`. Un método por **estado destino** (no por arista from→to), cada uno valida un `ALLOWED_FROM` de orígenes permitidos — reusa el mismo método en flujo normal y en resume. `requireHumanReview(reason)` detecta "la misma causa volvió a ocurrir tras un resume" comparando contra el `EpisodeCheckpoint` más reciente, y escala directo a `markFailed` si coincide (sin pasar por otro `REQUIRES_HUMAN_REVIEW` intermedio). No implementa `markGeneratingAudio`/`markReadyForRender`/`markRendering`/`markCompleted` todavía (TTS/Render no existen — YAGNI documentado, se agregan después con el mismo patrón).
 - [x] Selección de participantes al crear el episodio (arquitectura §7.1 — `EpisodeParticipantsService`: 2 de 4 personas + Judge con provider distinto + sorteo de orden de turnos). Providers "disponibles" para el sorteo se resuelven con un chequeo propio de env vars en este service (sin tocar `ModelProviderFactory`, fuera de scope). Fallback documentado cuando solo hay 1 provider configurado (caso real hoy, solo GOOGLE): el Judge sortea entre todos igual.
 - [x] Loop de rondas OPENING → REBUTTAL → CROSS_EXAMINATION (arquitectura §7.2, `EpisodeOrchestratorService.runDebatePhase`/`runRound`). Orden de turnos derivado sin columna nueva en `EpisodeParticipant` (D-4 del plan): se fija por el `createdAt` del primer `Argument` de la ronda OPENING/1, resortea si todavía no hay ninguno — resistente a resume/recovery sin necesitar un cursor persistido.
-  - [x] `NoCrossExaminationTargetError` de `DebateModule.pickCrossExaminationTarget` → `EpisodeCheckpoint` con `reason: VALIDATION_INCONSISTENCY` → `REQUIRES_HUMAN_REVIEW` (mapeado en `handlePipelineError`, resolución vía `regenerate` como ya estaba previsto)
+  - [x] `NoCrossExaminationTargetError` de `DebateModule.pickCrossExaminationTarget` → `EpisodeCheckpoint` con `reason: VALIDATION_INCONSISTENCY` → `REQUIRES_HUMAN_REVIEW` (mapeado en `handlePipelineError`, resolución vía `regenerate` como ya estaba previsto) — **corregido 2026-09-25 (spec 003, D13)**: `regenerate` no aplica en `REQUIRES_HUMAN_REVIEW` y `resume {}` vuelve a fallar determinísticamente → `FAILED`; la resolución real es `reject`
 - [x] `procesarBorrador` — `EpisodeOrchestratorService.processDraft` (arquitectura §7.3): claim extraction + fact-check/editorial + loop de enmienda.
   - [x] **Decisión D-7 del plan**: NO se agrupan manualmente las llamadas de fact-check por `ModelProvider` — `Promise.all` sobre todos los claims. `LlmRateLimiterService.acquire()` (sección 0.1) ya serializa correctamente por provider vía su mutex interno; agrupar en el orquestador hubiera duplicado esa garantía. Reemplaza la idea original de "cola por provider" de esta misma sección.
   - [x] Conteo de `intentos` contra `episode.maxRevisionAttempts` → al agotarse, `DebateService.rejectArgument` + `EpisodeStateService.requireHumanReview(reason: MAX_REVISIONS_EXCEEDED)`, señalizado con `EpisodePipelineHaltedError` (excepción de control interna, para que `handlePipelineError` no la vuelva a mapear)
@@ -277,6 +279,78 @@ Post-MVP, fuera de `features.md` (congelado). Requería la sección 10 (001) mer
 - [x] Script `studio` (`remotion studio src/index.ts`) + delegación raíz `pnpm video:studio` — probado levantando el servidor real (puerto 3000)
 - [x] `turbo.json` con pipeline `build`/`test`/`lint`/`dev` — verificado con caché real (`FULL TURBO`, 46ms en corridas repetidas)
 - [x] `scripts/check-boundaries.mjs` — probado en ambas direcciones (falla con un import de prueba insertado a mano, pasa limpio en el estado real)
+
+## 12. Dependencias de backend del dashboard (`docs/product/003-dashboard-ui.md`) — sin empezar
+
+Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `architect` el 2026-09-25; auth según `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Cada ítem sale de "Cambios requeridos en la API" (API-n), "Restricciones técnicas" o el plan F1-F4 de la spec, con los AC 3.x que desbloquea. Ordenado por la fase del front que desbloquea (`apps/dashboard/docs/roadmap.md`); la secuencia y la clasificación bloqueante/no bloqueante están en `roadmap.md` Fase 6. El trabajo del front en sí no se trackea acá (`apps/dashboard/docs/tasks.md`).
+
+### 12.1. Antes de F1 — auth y workspace
+
+**API-8 — Módulo auth (ADR 0001) — bloqueante (AC 3.1-3.9)**
+- [ ] `EnvSchema`: `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` (scrypt de `node:crypto`) y `SESSION_SECRET`, sin defaults; sincronizar `.env.example` (ADR 0001 punto 2)
+- [ ] Token de sesión sin estado HMAC (`exp` + firma, patrón de `audio-url-signer.ts`), vigencia 7 días (ADR 0001 punto 2; AC 3.3)
+- [ ] `modules/auth`: `POST /auth/login`, `POST /auth/logout`, `GET /auth/session`, cookie `httpOnly`/`SameSite=Lax`/`Path=/`/sin `Domain`/`Secure` según entorno (ADR 0001 puntos 1-2; AC 3.2, AC 3.4)
+- [ ] `@Public()` en `shared/http/public.decorator.ts` + `SessionGuard` global (`APP_GUARD`) que niega por defecto; públicos solo login/logout, `/showcase/*` y `GET /` (ADR 0001 punto 1; AC 3.5)
+- [ ] `401` con `code: UNAUTHORIZED` en el envelope de error, incluido el stream SSE, y documentado en OpenAPI (AC 3.5)
+- [ ] Rate-limit simple en `POST /auth/login` con respuesta distinguible de credencial incorrecta (AC 3.8)
+- [ ] `trust proxy` (la API queda detrás del rewrite de Next) y eliminar `enableCors()` de `main.ts` (ADR 0001 punto 3; AC 3.9)
+- [ ] En producción, `EnvSchema` falla si `AUDIO_SIGNING_SECRET` conserva el default (ADR 0001 punto 5)
+- [ ] Tests del guard/login/sesión + verificación con curl: sin cookie → `401` en `/episodes` y acciones; con cookie → `200`
+- [ ] `openapi.json` regenerado e idempotente (`pnpm openapi:generate && git diff --exit-code openapi.json`)
+
+**Workspace (spec, "Límites del workspace" y "Turborepo y tipos")**
+- [ ] `scripts/check-boundaries.mjs` extendido a `apps/dashboard`: prohíbe `@ai-trend-debates/api` e imports relativos fuera del paquete; detecta `import()` dinámico e `import "x"`; corre en CI o `prebuild` (F1)
+- [ ] `turbo.json` raíz: `dev.dependsOn: ["^build"]`
+
+### 12.2. Antes de F2 — panel de curación
+
+**Bloqueantes** (recomendados en paralelo con F1)
+- [ ] **API-1** — `getEpisodeDetail` trae tópico, `createdAt` y participantes (id, nombre/persona, `isJudge`) (AC 3.26-3.29, 3.32, 3.51). Cierra API-9.
+- [ ] **API-5** — schema de respuesta de `listNotifications`, `markNotificationRead` y `markAllNotificationsRead` en `openapi.json` (AC 3.10-3.14)
+- [ ] **API-12** — `pipelineActive: boolean` en `getEpisodeDetail`; `streamEpisodeEvents` completa enseguida si el pipeline no está activo (AC 3.32, 3.35, 3.38, 3.39)
+- [ ] **API-13** — evento SSE `heartbeat` cada 15 s mientras el pipeline está activo, como séptimo DTO SSE en `openapi.json`, + `Cache-Control: no-transform` en el stream (AC 3.33; ADR 0001 punto 6)
+
+**No bloqueantes**
+- [ ] **API-10** (recomendado antes de F2) — bodies y respuestas por acción de `runEpisodeAction` y envelope de error con sus códigos en `openapi.json` (`@ZodResponse` en acciones, DTO de `ResumeActionBodySchema`, pendientes de la spec 001)
+- [ ] **API-10** — corregir en `features.md`/`api-contract.md` la documentación de `argument.approved` (no lleva `sequenceIndex`)
+- [ ] **API-10b** — `BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED` y errores de proveedor → `503 PROVIDER_QUOTA_EXCEEDED` en `regenerate` (`episode-actions.service.ts:99,109`) y `regenerate-audio` (`:131`) (AC 3.50, 3.62)
+- [ ] **API-14** — `edit`/`regenerate` validan que el `argumentId` pertenezca al episodio → `404 NOT_FOUND` (`episode-actions.service.ts:56,73`) (AC 3.50, importante por integridad)
+- [ ] **API-16** — aceptar `maxTtsSegments` en `UsageLimitResumeSchema` (parte de AC 3.51)
+- [ ] **API-15** (menor) — `resume` valida el estado antes de aplicar límites nuevos (`episode-actions.service.ts:151` vs. `:153`)
+- [ ] **API-6** (mejora) — filtro `status` de `listEpisodes` tipado con los valores válidos; status inválido → `VALIDATION_ERROR` en vez de `BADREQUEST` (`episodes.service.ts:133`)
+- [ ] **API-11** (mejora, no necesaria para el MVP: la spec la cubre con polling) — eventos SSE para `APPROVED`/`GENERATING_AUDIO`
+
+### 12.3. Antes de F3 — `packages/video` como librería (spec, "Restricciones técnicas", puntos 1-4)
+
+- [ ] `src/studio.ts` con `registerRoot`; script `"studio": "remotion studio src/studio.ts"` (punto 1)
+- [ ] `src/index.ts` como librería pura: exporta `DebateComposition`, `DebateCompositionPropsSchema`/`DebateCompositionProps`, `buildTimelineFrames`, `totalDurationInFrames` y `DEBATE_VIDEO = { fps: 30, width: 1920, height: 1080 }`; elimina el FPS duplicado (`Root.tsx:8`, `DebateComposition.tsx:20`) (punto 2)
+- [ ] `react`/`react-dom`/`remotion` a `peerDependencies` (+ `devDependencies`); `@remotion/cli` a `devDependencies`; `@remotion/player` movido a `apps/dashboard` (punto 3)
+- [ ] Catálogo de pnpm con versiones exactas: `react`/`react-dom` `19.3.0`, `remotion`/`@remotion/*` `4.0.528` (punto 4)
+- [ ] Audio real en la composición (pendiente heredado de la spec 002; plan F3), tolerando segmentos sin `audioUrl` (AC 3.63)
+- [ ] Verificar: `pnpm why react` muestra una sola versión; `pnpm video:studio` sigue funcionando; render real contra el fixture sigue en verde
+
+### 12.4. Antes de F4 — publicación y showcase
+
+**API-7 — Showcase y publicación — bloqueante para publicar (AC 3.17, 3.26, 3.64-3.72)**
+- [ ] `Episode.publishedAt` (migración) + exposición en `getEpisodeDetail` y `listEpisodes` (AC 3.17, 3.26)
+- [ ] Acciones `publish`/`unpublish` válidas desde `READY_FOR_RENDER` o posterior; `409 INVALID_STATE_TRANSITION` fuera de eso (AC 3.64, 3.65)
+- [ ] `showcase.controller.ts` en `EpisodesModule`, `@Controller("showcase")` + `@Public()` (AC 3.66-3.68)
+- [ ] `GET /showcase/episodes` (`listShowcaseEpisodes` → `{ id, title, createdAt, durationSec }[]`) filtrado por `publishedAt` no nulo y `SHOWCASE_STATUSES` (AC 3.66)
+- [ ] `GET /showcase/episodes/:id` (`getShowcaseEpisode` → `{ id, title, createdAt, manifest }`); inexistente o no público → `404 NOT_FOUND`, sin usar `MANIFEST_NOT_READY` para decidir (AC 3.68)
+- [ ] Respuestas públicas sin `usage`, `limits`, `checkpoints`, `pipelineActive`, `publishedAt`, notificaciones ni origen de argumentos (AC 3.69)
+- [ ] Tests + verificación con curl sin sesión: showcase `200`, no publicado/despublicado `404`, acciones `401`
+
+**Resto**
+- [ ] Ajustar `coding-rules.md` §1: varios controllers por módulo cuando la política de acceso es distinta (spec, "Dependencias"; F4)
+- [ ] Producción: `AUDIO_URL_TTL_SECONDS=3600` (D12) y API-8 activo con `Secure` en la cookie
+
+### 12.5. No MVP — nice-to-have (no se implementan sin pedirlo)
+
+- [ ] **API-2** — consultar las fuentes de la Evidence Base de un episodio
+- [ ] **API-3** — exponer los fact-checks por argumento (Feature 10, UI P1)
+- [ ] **API-4** — exponer el `ArgumentHistory` (texto original antes de la edición humana)
+
+API-9 está cerrado vía API-1 (no requiere trabajo propio).
 
 ## Referencias
 
