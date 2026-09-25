@@ -6,7 +6,7 @@ import { ZodValidationException } from "nestjs-zod";
 import { InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
 import { SequenceIndexOutOfRangeError } from "../../modules/tts/tts.errors";
 import { ManifestNotReadyError } from "../../modules/render/render.errors";
-import { InvalidCredentialsError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
+import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
 
 // Reusado por los dos branches que terminan en 400 VALIDATION_ERROR: el
 // ZodError "crudo" del pipe propio (path param `action`) y el que envuelve
@@ -65,6 +65,15 @@ export class HttpErrorFilter implements ExceptionFilter {
     // abajo convierte en 401 UNAUTHORIZED.
     if (exception instanceof InvalidCredentialsError) {
       return { status: 401, code: "INVALID_CREDENTIALS", message: exception.message };
+    }
+
+    if (exception instanceof LoginBusyError) {
+      return {
+        status: 429,
+        code: "LOGIN_BUSY",
+        message: exception.message,
+        headers: { "Retry-After": String(exception.retryAfterSeconds) },
+      };
     }
 
     if (exception instanceof TooManyLoginAttemptsError) {

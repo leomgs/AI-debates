@@ -1,4 +1,4 @@
-import { TooManyLoginAttemptsError } from "./auth.errors";
+import { LoginBusyError, TooManyLoginAttemptsError } from "./auth.errors";
 import { LOGIN_RATE_LIMIT, LoginRateLimiterService } from "./login-rate-limiter.service";
 
 const { windowMs, maxFailuresPerClient, maxFailuresGlobal, maxConcurrentVerifications } = LOGIN_RATE_LIMIT;
@@ -94,12 +94,12 @@ describe("LoginRateLimiterService", () => {
     expect(() => limiter.beginAttempt("ip-nueva", T0 + windowMs)).not.toThrow();
   });
 
-  it("tope de verificaciones en curso: sin release(), el siguiente intento es 429 con Retry-After corto", () => {
+  it("tope de verificaciones en curso: sin release(), el siguiente intento es LoginBusyError con Retry-After corto", () => {
     for (let i = 0; i < maxConcurrentVerifications; i++) limiter.beginAttempt(`ip-${i}`, T0);
 
     const error = errorOf(() => limiter.beginAttempt("ip-otra", T0));
-    expect(error).toBeInstanceOf(TooManyLoginAttemptsError);
-    expect((error as TooManyLoginAttemptsError).retryAfterSeconds).toBe(1);
+    expect(error).toBeInstanceOf(LoginBusyError);
+    expect((error as LoginBusyError).retryAfterSeconds).toBe(1);
 
     limiter.release();
     expect(() => limiter.beginAttempt("ip-otra", T0)).not.toThrow();
@@ -107,7 +107,7 @@ describe("LoginRateLimiterService", () => {
 
   it("un intento rechazado por el tope de concurrencia no se cuenta como fallo", () => {
     for (let i = 0; i < maxConcurrentVerifications; i++) limiter.beginAttempt(`ocupa-${i}`, T0);
-    for (let i = 0; i < 10; i++) expect(() => limiter.beginAttempt("ip-a", T0)).toThrow(TooManyLoginAttemptsError);
+    for (let i = 0; i < 10; i++) expect(() => limiter.beginAttempt("ip-a", T0)).toThrow(LoginBusyError);
     for (let i = 0; i < maxConcurrentVerifications; i++) limiter.release();
 
     fail(limiter, "ip-a", maxFailuresPerClient - 1);

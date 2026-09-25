@@ -2,7 +2,7 @@ import { ConfigService } from "@nestjs/config";
 import type { Env } from "../../shared/config/env.schema";
 import { hashPassword } from "../../shared/crypto/scrypt-password";
 import { AuthService } from "./auth.service";
-import { InvalidCredentialsError, TooManyLoginAttemptsError } from "./auth.errors";
+import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "./auth.errors";
 import { LOGIN_RATE_LIMIT, LoginRateLimiterService } from "./login-rate-limiter.service";
 import { SessionService } from "./session.service";
 import { checkSessionToken } from "./session-token";
@@ -73,15 +73,15 @@ describe("AuthService", () => {
     await expect(service.login("curador", "contraseña-correcta", "ip-a")).resolves.toHaveProperty("token");
   });
 
-  it("50 logins incorrectos concurrentes: a lo sumo 5 llegan a verificarse (401), el resto es 429", async () => {
+  it("50 logins incorrectos concurrentes: a lo sumo 5 llegan a verificarse (401), el resto se rechaza (429)", async () => {
     const results = await Promise.allSettled(Array.from({ length: 50 }, (_, i) => service.login("curador", `mal-${i}`, "ip-a")));
     const reasons = results.map((r) => (r.status === "rejected" ? r.reason : r.value));
 
     const invalid = reasons.filter((r) => r instanceof InvalidCredentialsError).length;
-    const tooMany = reasons.filter((r) => r instanceof TooManyLoginAttemptsError).length;
+    const rejected = reasons.filter((r) => r instanceof TooManyLoginAttemptsError || r instanceof LoginBusyError).length;
     expect(invalid).toBeGreaterThan(0);
     expect(invalid).toBeLessThanOrEqual(LOGIN_RATE_LIMIT.maxFailuresPerClient);
-    expect(invalid + tooMany).toBe(50);
+    expect(invalid + rejected).toBe(50);
   });
 
   it("libera el lugar de verificación aunque verifyPassword lance", async () => {

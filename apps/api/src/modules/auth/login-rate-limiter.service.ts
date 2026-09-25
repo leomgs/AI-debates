@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { TooManyLoginAttemptsError } from "./auth.errors";
+import { LoginBusyError, TooManyLoginAttemptsError } from "./auth.errors";
 
 // Rate-limit simple de POST /auth/login (spec 003 API-8, AC 3.8), en memoria
 // y sin dependencias.
@@ -21,7 +21,8 @@ import { TooManyLoginAttemptsError } from "./auth.errors";
 //   que la ventana se vacíe (las cookies ya emitidas siguen valiendo).
 // - verificaciones scrypt en curso: 2. scrypt corre en el threadpool de
 //   libuv (4 hilos por defecto, compartido con fs, dns y zlib); sin tope,
-//   una ráfaga de logins lo satura y frena al resto del proceso.
+//   una ráfaga de logins lo satura y frena al resto del proceso. Al
+//   superarlo: LoginBusyError (429 LOGIN_BUSY), sin contar como fallo.
 //
 // Estado en memoria del proceso: un reinicio lo vacía (igual que el resto de
 // la sesión es sin estado, ADR 0001). No sirve con varias réplicas de la API,
@@ -85,7 +86,7 @@ export class LoginRateLimiterService {
     }
     if (this.inFlight >= MAX_CONCURRENT_VERIFICATIONS) {
       this.store(clientKey, clientFailures);
-      throw new TooManyLoginAttemptsError(CONCURRENCY_RETRY_AFTER_SECONDS);
+      throw new LoginBusyError(CONCURRENCY_RETRY_AFTER_SECONDS);
     }
 
     clientFailures.push(now);

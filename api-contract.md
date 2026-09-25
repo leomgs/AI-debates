@@ -7,7 +7,7 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
 ## 1. Convenciones generales
 
 - Formato: JSON sobre HTTP, salvo el endpoint de eventos (SSE).
-- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1), y los de auth (§1.1): `UNAUTHORIZED` (401, sin sesión válida), `INVALID_CREDENTIALS` (401, login rechazado) y `TOO_MANY_ATTEMPTS` (429, login bloqueado por rate-limit).
+- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1), y los de auth (§1.1): `UNAUTHORIZED` (401, sin sesión válida), `INVALID_CREDENTIALS` (401, login rechazado), `TOO_MANY_ATTEMPTS` (429, login bloqueado por rate-limit) y `LOGIN_BUSY` (429, reintentar en un segundo).
 - Una acción de curaduría llamada en un estado que no la admite (ver tabla de la sección 5) responde `409 Conflict`, nunca `400` — el request está bien formado, lo que falla es la transición.
 
 ### 1.1 Autenticación (API-8, ADR 0001)
@@ -33,10 +33,10 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
 - Rate-limit (AC 3.8), en memoria del proceso (reiniciar la API vacía los contadores), con ventana deslizante de 15 minutos:
   - Cada intento cuenta como fallo **desde que empieza**, antes de verificar la contraseña. Así, logins concurrentes no pueden pasar todos el chequeo antes de que se registre el primer fallo. Si el intento acierta, ese registro se deshace.
   - Con 5 intentos fallidos (o en curso) del mismo cliente (`req.ip`), o 20 en total entre todos los clientes, responde `429 TOO_MANY_ATTEMPTS` con `Retry-After` hasta que el intento más viejo salga de la ventana (hasta 900 s).
-  - Si ya hay 2 verificaciones de contraseña en curso, responde `429 TOO_MANY_ATTEMPTS` con `Retry-After: 1`, sin contarlo como fallo. Protege el threadpool de libuv, donde corre scrypt (unos 225 ms por verificación).
+  - Si ya hay 2 verificaciones de contraseña en curso, responde `429 LOGIN_BUSY` con `Retry-After: 1` y el mensaje "Hay otro intento de inicio de sesión en curso. Reintentá en un momento.", sin contarlo como fallo. Tiene `code` propio para que el dashboard elija el mensaje por el `code`, como con el resto de los errores: `TOO_MANY_ATTEMPTS` es "esperá unos minutos" (AC 3.8) y `LOGIN_BUSY` es "reintentá ya", sin tener que interpretar `Retry-After`. Protege el threadpool de libuv, donde corre scrypt (unos 225 ms por verificación).
   - Mientras dura un bloqueo, **tampoco entra la contraseña correcta**.
   - Un login exitoso borra los fallos de ese cliente y saca de la cuenta global solo su propio intento; los fallos globales de otros clientes siguen contando.
-  - Ejemplo real: 50 logins incorrectos simultáneos del mismo cliente dan 5 `401` y 45 `429`.
+  - Ejemplo real: 50 logins incorrectos simultáneos del mismo cliente dan 5 `401` y 45 `429` (`LOGIN_BUSY` o `TOO_MANY_ATTEMPTS`, según el momento en que llega cada uno).
 
 #### `POST /auth/logout` (público)
 

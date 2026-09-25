@@ -35,7 +35,9 @@ export class AuthController {
   @ApiResponse({
     status: 429,
     type: ErrorResponseDto,
-    description: "`TOO_MANY_ATTEMPTS`: demasiados intentos fallidos; reintentar después de `Retry-After` segundos.",
+    description:
+      "`TOO_MANY_ATTEMPTS`: demasiados intentos fallidos, reintentar después de `Retry-After` segundos (hasta 900). " +
+      "`LOGIN_BUSY`: ya hay verificaciones de contraseña en curso, reintentar en `Retry-After` segundos (1); no cuenta como fallo.",
     headers: { "Retry-After": { description: "Segundos hasta que se vuelve a aceptar un intento.", schema: { type: "integer" } } },
   })
   async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
