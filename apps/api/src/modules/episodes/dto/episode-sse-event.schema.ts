@@ -78,11 +78,23 @@ export const EpisodeRequiresReviewEventSchema = z.object({
   }),
 });
 
+// API-13 (spec 003, AC 3.33): keep-alive cada 15 s mientras el pipeline está
+// activo (EpisodeEventsService.stream). No es un evento de negocio: lo emite
+// EpisodeEventsService, no el orquestador, y por eso no está en
+// EpisodeSseEventTypeSchema (el tipo de lo que el orquestador puede emitir).
+// Sin payload, igual que research.started: los bytes alcanzan para que el
+// rewrite de Next no corte la conexión, y la UI no lo muestra en el feed.
+export const HEARTBEAT_EVENT_TYPE = "heartbeat";
+
+export const HeartbeatEventSchema = z.object({
+  type: z.literal(HEARTBEAT_EVENT_TYPE),
+});
+
 // Unión para uso interno/type-checking — NO se registra en el OpenAPI vía
 // createZodDto: TS2509, "constructor return type... is not an object type",
 // misma limitación que ResumeActionBodySchema (createZodDto no envuelve
 // z.union/z.discriminatedUnion). Para components.schemas se registran los
-// 6 schemas individuales de arriba en su lugar, cada uno con su propio DTO.
+// 7 schemas individuales de arriba en su lugar, cada uno con su propio DTO.
 export const EpisodeSseEventSchema = z.discriminatedUnion("type", [
   ResearchStartedEventSchema,
   AgentThinkingEventSchema,
@@ -90,11 +102,12 @@ export const EpisodeSseEventSchema = z.discriminatedUnion("type", [
   ArgumentApprovedEventSchema,
   EpisodePendingReviewEventSchema,
   EpisodeRequiresReviewEventSchema,
+  HeartbeatEventSchema,
 ]);
 
 // Para que aterricen en components.schemas del openapi.json (restricción
 // técnica de la spec 001) — GET /episodes/:id/events documenta su
-// content-type text/event-stream a mano (OpenAPI no modela SSE); estos 6
+// content-type text/event-stream a mano (OpenAPI no modela SSE); estos 7
 // DTOs se registran vía @ApiExtraModels en EpisodesController para que
 // queden nombrados en el documento sin atarlos a ningún @ZodResponse (el
 // wire format real es SSE, no un objeto JSON con esta forma).
@@ -104,3 +117,4 @@ export class FactCheckCompletedEventDto extends createZodDto(FactCheckCompletedE
 export class ArgumentApprovedEventDto extends createZodDto(ArgumentApprovedEventSchema) {}
 export class EpisodePendingReviewEventDto extends createZodDto(EpisodePendingReviewEventSchema) {}
 export class EpisodeRequiresReviewEventDto extends createZodDto(EpisodeRequiresReviewEventSchema) {}
+export class HeartbeatEventDto extends createZodDto(HeartbeatEventSchema) {}

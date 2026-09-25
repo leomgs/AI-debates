@@ -123,6 +123,9 @@ describe('Episodes (e2e)', () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/event-stream/);
+      // API-13: que ningún proxy (ni la compresión del rewrite de Next)
+      // transforme o bufferee el stream. Lo pone Nest, no este proyecto.
+      expect(res.headers['cache-control']).toMatch(/\bno-transform\b/);
       expect(body).toMatch(/event: research\.started/);
     });
   });

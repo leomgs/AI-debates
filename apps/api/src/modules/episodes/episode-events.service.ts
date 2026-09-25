@@ -1,5 +1,11 @@
 import { Injectable, MessageEvent } from "@nestjs/common";
-import { EMPTY, Observable, Subject } from "rxjs";
+import { EMPTY, endWith, ignoreElements, interval, map, merge, Observable, Subject, takeUntil } from "rxjs";
+import { HEARTBEAT_EVENT_TYPE } from "./dto/episode-sse-event.schema";
+
+// API-13 (spec 003): la mitad del corte por inactividad del rewrite de Next
+// (30 s, `proxyTimeout` por defecto), así nunca pasa un intervalo entero
+// sin bytes aunque un heartbeat se atrase.
+export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 
 // SSE (api-contract.md §4) — Subject en memoria por episodio, no
 // @nestjs/event-emitter (no instalado, innecesario: un Map<string, Subject>
@@ -37,9 +43,22 @@ export class EpisodeEventsService {
   // Sin pipeline activo el stream completa enseguida (API-12, AC 3.38/3.39):
   // no hay nadie que vaya a emitir, y dejarlo abierto era una conexión
   // colgada sin fin.
+  //
+  // Con pipeline activo se mezcla un `heartbeat` cada 15 s (API-13, AC
+  // 3.33): el rewrite de Next corta el socket tras 30 s sin bytes, y una
+  // fase puede pasar más que eso sin eventos de negocio (research, la
+  // espera del limitador de RPM). El heartbeat vive lo mismo que el Subject:
+  // termina cuando la corrida completa el stream, y su interval se libera
+  // también si el cliente se desconecta antes (unsubscribe del merge).
   stream(episodeId: string): Observable<MessageEvent> {
     if (!this.isPipelineActive(episodeId)) return EMPTY;
-    return this.getOrCreate(episodeId).asObservable();
+    const events$ = this.getOrCreate(episodeId).asObservable();
+    const pipelineDone$ = events$.pipe(ignoreElements(), endWith(true));
+    const heartbeat$ = interval(SSE_HEARTBEAT_INTERVAL_MS).pipe(
+      map(() => ({ type: HEARTBEAT_EVENT_TYPE }) as unknown as MessageEvent),
+      takeUntil(pipelineDone$)
+    );
+    return merge(events$, heartbeat$);
   }
 
   emit(episodeId: string, type: string, data?: unknown): void {

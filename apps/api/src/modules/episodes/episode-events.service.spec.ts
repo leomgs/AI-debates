@@ -1,4 +1,4 @@
-import { EpisodeEventsService } from "./episode-events.service";
+import { EpisodeEventsService, SSE_HEARTBEAT_INTERVAL_MS } from "./episode-events.service";
 
 describe("EpisodeEventsService", () => {
   let service: EpisodeEventsService;
@@ -103,6 +103,58 @@ describe("EpisodeEventsService", () => {
       service.begin("ep-1");
 
       expect(service.isPipelineActive("ep-1")).toBe(true);
+    });
+  });
+
+  describe("heartbeat (API-13)", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("emite un heartbeat cada 15 s mientras el pipeline está activo, mezclado con los eventos de negocio", () => {
+      service.begin("ep-1");
+      const received: Array<{ type: string }> = [];
+      service.stream("ep-1").subscribe((event) => received.push(event as unknown as { type: string }));
+
+      jest.advanceTimersByTime(SSE_HEARTBEAT_INTERVAL_MS - 1);
+      expect(received).toEqual([]);
+
+      jest.advanceTimersByTime(1);
+      service.emit("ep-1", "research.started");
+      jest.advanceTimersByTime(SSE_HEARTBEAT_INTERVAL_MS);
+
+      expect(received.map((e) => e.type)).toEqual(["heartbeat", "research.started", "heartbeat"]);
+    });
+
+    it("deja de latir cuando la corrida termina, y el stream completa", () => {
+      service.begin("ep-1");
+      let completed = false;
+      const received: unknown[] = [];
+      service.stream("ep-1").subscribe({ next: (e) => received.push(e), complete: () => (completed = true) });
+
+      jest.advanceTimersByTime(SSE_HEARTBEAT_INTERVAL_MS);
+      service.complete("ep-1");
+      jest.advanceTimersByTime(SSE_HEARTBEAT_INTERVAL_MS * 4);
+
+      expect(completed).toBe(true);
+      expect(received).toHaveLength(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("si el cliente se desconecta, libera el interval aunque la corrida siga", () => {
+      service.begin("ep-1");
+      const subscription = service.stream("ep-1").subscribe();
+      expect(jest.getTimerCount()).toBe(1);
+
+      subscription.unsubscribe();
+
+      expect(jest.getTimerCount()).toBe(0);
+      expect(service.isPipelineActive("ep-1")).toBe(true);
+    });
+
+    it("sin pipeline activo no programa ningún heartbeat", () => {
+      service.stream("ep-1").subscribe();
+
+      expect(jest.getTimerCount()).toBe(0);
     });
   });
 });

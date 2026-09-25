@@ -23,6 +23,7 @@ import {
   ArgumentApprovedEventDto,
   EpisodePendingReviewEventDto,
   EpisodeRequiresReviewEventDto,
+  HeartbeatEventDto,
 } from "./dto/episode-sse-event.schema";
 
 const SSE_EVENT_DTOS = [
@@ -32,6 +33,7 @@ const SSE_EVENT_DTOS = [
   ArgumentApprovedEventDto,
   EpisodePendingReviewEventDto,
   EpisodeRequiresReviewEventDto,
+  HeartbeatEventDto,
 ] as const;
 
 // api-contract.md §2/§3/§4. /episodes/:id/manifest (Feature 7, P0) — la
@@ -129,15 +131,24 @@ export class EpisodesController {
 
   // Feature 8 — OpenAPI no modela streams SSE (spec 001, restricción
   // técnica): se documenta el content-type real (text/event-stream) con un
-  // oneOf manual sobre los 6 DTOs de evento, registrados en
+  // oneOf manual sobre los 7 DTOs de evento, registrados en
   // components.schemas vía @ApiExtraModels (EpisodeSseEventSchema, la unión,
   // no se puede envolver en un solo DTO — ver episode-sse-event.schema.ts).
+  //
+  // Cache-Control: `no-transform` (API-13) ya lo pone Nest en todo @Sse
+  // (SseStream.commitHeaders, @nestjs/core 11: "private, no-cache, no-store,
+  // must-revalidate, max-age=0, no-transform", más X-Accel-Buffering: no), y
+  // no se puede pisar desde acá: los headers propios se aplican antes que
+  // los de Nest. Lo cubre un test e2e (test/episodes.e2e-spec.ts).
   @Sse(":id/events")
   @ApiOperation({ operationId: "streamEpisodeEvents" })
   @ApiExtraModels(...SSE_EVENT_DTOS)
   @ApiResponse({
     status: 200,
-    description: "Server-Sent Events (Feature 8) — cada `event:` corresponde a uno de los 6 schemas listados.",
+    description:
+      "Server-Sent Events (Feature 8) — cada `event:` corresponde a uno de los 7 schemas listados. " +
+      "Si no hay una ejecución del pipeline en curso (`pipelineActive: false` en el detalle), el stream cierra enseguida sin eventos. " +
+      "Mientras hay una, llega un `heartbeat` cada 15 s, que no es un evento de negocio.",
     content: {
       "text/event-stream": {
         schema: { oneOf: SSE_EVENT_DTOS.map((dto) => ({ $ref: getSchemaPath(dto) })) },
