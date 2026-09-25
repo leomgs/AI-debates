@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -42,6 +43,11 @@ async function bootstrap() {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
   const audioStorageDir = resolve(config.get('AUDIO_STORAGE_DIR', { infer: true }));
   const audioSigningSecret = config.get('AUDIO_SIGNING_SECRET', { infer: true });
+
+  // NODE_ENV es requerida (EnvSchema) y decide cookie Secure, /docs y el
+  // secreto de audio: se loguea el valor efectivo para que un despliegue mal
+  // configurado se vea en el primer renglón del log.
+  new Logger('Bootstrap').log(`NODE_ENV=${config.get('NODE_ENV', { infer: true })}`);
   app.use('/audio-files', (req: Request, res: Response, next: () => void) => {
     const storageKey = decodeURIComponent(req.path.replace(/^\//, ''));
     const expiresAt = Number(req.query.expires);

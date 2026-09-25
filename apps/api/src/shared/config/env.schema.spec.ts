@@ -6,6 +6,7 @@ const VALID_HASH =
 
 function baseEnv(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    NODE_ENV: "development",
     DATABASE_URL: "file:./test.db",
     GOOGLE_API_KEY: "k",
     TAVILY_API_KEY: "k",
@@ -17,14 +18,18 @@ function baseEnv(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 describe("validateEnv (API-8)", () => {
-  it("acepta un entorno completo y aplica NODE_ENV=development por defecto", () => {
+  it("acepta un entorno completo", () => {
     const env = validateEnv(baseEnv());
     expect(env.NODE_ENV).toBe("development");
     expect(env.CURATOR_USERNAME).toBe("curador");
   });
 
-  it.each(["CURATOR_USERNAME", "CURATOR_PASSWORD_HASH", "SESSION_SECRET"])("falla si falta %s (sin default)", (key) => {
+  it.each(["NODE_ENV", "CURATOR_USERNAME", "CURATOR_PASSWORD_HASH", "SESSION_SECRET"])("falla si falta %s (sin default)", (key) => {
     expect(() => validateEnv(baseEnv({ [key]: undefined }))).toThrow(key);
+  });
+
+  it("falla si NODE_ENV no es uno de los tres valores", () => {
+    expect(() => validateEnv(baseEnv({ NODE_ENV: "prod" }))).toThrow(/NODE_ENV/);
   });
 
   it("falla si CURATOR_PASSWORD_HASH no tiene el formato scrypt", () => {

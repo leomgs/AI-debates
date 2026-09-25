@@ -14,8 +14,11 @@ export const EnvSchema = z
   .object({
     // "production" activa las reglas de despliegue: cookie de sesión Secure,
     // Swagger (/docs) sin montar (spec 003, D20) y AUDIO_SIGNING_SECRET
-    // obligatorio distinto del default. Jest setea "test" solo.
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // obligatorio distinto del default. Requerida y SIN default a propósito
+    // (review de API-8): con un default "development", olvidarla en
+    // producción desactivaba en silencio las tres reglas. Jest setea "test"
+    // solo; main.ts loguea el valor efectivo al arrancar.
+    NODE_ENV: z.enum(["development", "test", "production"]),
 
     DATABASE_URL: z.string().min(1), // sqlite: "file:./dev.db"
 
