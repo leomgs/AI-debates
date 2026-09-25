@@ -13,7 +13,11 @@ import { SESSION_COOKIE_NAME } from '../src/modules/auth/session-cookie';
 // (raíz del monorepo) — spec 002 movió este script a apps/api/scripts/, dos
 // niveles down de donde vive openapi.json ahora.
 async function main() {
-  const app = await NestFactory.create(AppModule, { logger: false });
+  // abortOnError: false para que un entorno inválido (por ejemplo, sin
+  // NODE_ENV o sin la credencial del curador) llegue al catch de abajo y se
+  // imprima. Con el default (true) y logger: false, Nest termina el proceso
+  // con exit 1 sin mostrar ningún mensaje.
+  const app = await NestFactory.create(AppModule, { logger: false, abortOnError: false });
   const document = buildOpenApiDocument(app, SESSION_COOKIE_NAME);
 
   const outputPath = resolve(__dirname, '..', '..', '..', 'openapi.json');
