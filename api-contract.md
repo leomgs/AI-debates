@@ -2,13 +2,43 @@
 
 Superficie HTTP del backend. Cubre P0 (creación de episodios, acciones de curaduría, updates en tiempo real) y deja marcado qué queda pendiente para P1 (Feature 9: preview con `@remotion/player`).
 
-Alcance de este MVP: sin autenticación — es una herramienta de uso local/personal, no multi-tenant. Si en algún momento se expone públicamente, esto es lo primero que hay que agregar.
+Autenticación: un solo usuario (el curador), con sesión por cookie emitida y validada por esta API (ADR 0001, spec 003 API-8, implementada el 2026-09-25). Todo endpoint exige sesión salvo los marcados como públicos (§1.1). No es multi-tenant: no hay usuarios, roles ni permisos por recurso.
 
 ## 1. Convenciones generales
 
 - Formato: JSON sobre HTTP, salvo el endpoint de eventos (SSE).
-- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), y `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1).
+- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1), y los de auth (§1.1): `UNAUTHORIZED` (401, sin sesión válida), `INVALID_CREDENTIALS` (401, login rechazado) y `TOO_MANY_ATTEMPTS` (429, login bloqueado por rate-limit).
 - Una acción de curaduría llamada en un estado que no la admite (ver tabla de la sección 5) responde `409 Conflict`, nunca `400` — el request está bien formado, lo que falla es la transición.
+
+### 1.1 Autenticación (API-8, ADR 0001)
+
+- **Topología**: la API no se expone directo al navegador; el dashboard (Next) es el único origen público y reescribe `/api/*` y `/audio-files/*` hacia la API. Por eso la API no tiene CORS y confía en un proxy delante (`trust proxy` = 1).
+- **Sesión**: cookie `atd_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, sin `Domain`, `Secure` solo con `NODE_ENV=production`. El valor es un token sin estado `<exp>.<firma>` (HMAC-SHA256 con `SESSION_SECRET`), que vence a los 7 días del login (AC 3.3); la cookie tiene `Max-Age` igual. Cerrar sesión borra la cookie en ese navegador pero no revoca una copia hecha antes; para invalidar todas las sesiones hay que rotar `SESSION_SECRET`.
+- **Qué exige sesión**: todo handler de la API, incluidos el stream SSE (§4) y `/notifications`. Son públicos solo `POST /auth/login`, `POST /auth/logout` y `GET /`; cuando exista `/showcase/*` (API-7) también lo será. Todo endpoint nuevo queda protegido por defecto (`SessionGuard` global; se abre con `@Public()`).
+- **Fuera del guard** (no son handlers de Nest): `/audio-files/*` (protegido solo por su firma HMAC, porque el showcase público lo necesita), `/public/*` (estáticos) y `/docs` (Swagger), que solo se monta fuera de producción (spec 003, D20). En producción `/docs` responde 404.
+- **Sin sesión válida** (falta la cookie, está alterada o venció): `401` con `code: UNAUTHORIZED`. En el SSE el `401` llega como respuesta JSON normal, antes de abrir el stream.
+
+#### `POST /auth/login` (público)
+
+```json
+// Request
+{ "username": "curador", "password": "..." }
+
+// Response 200 + Set-Cookie: atd_session=...; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax
+{ "authenticated": true, "expiresAt": "2026-10-02T16:47:06.150Z" }
+```
+
+- Credencial incorrecta: `401 INVALID_CREDENTIALS`, con el mismo mensaje sea el usuario o la contraseña (AC 3.2). No emite cookie.
+- Body mal formado (falta un campo, campos extra): `400 VALIDATION_ERROR`.
+- Rate-limit (AC 3.8): cuenta solo intentos **fallidos**, en una ventana deslizante de 15 minutos, en memoria del proceso. Con 5 fallos del mismo cliente (`req.ip`), o 20 en total entre todos los clientes, responde `429 TOO_MANY_ATTEMPTS` con header `Retry-After` (segundos) hasta que el fallo más viejo salga de la ventana. Mientras dura el bloqueo, **tampoco entra la contraseña correcta**. Un login exitoso limpia los fallos de ese cliente, pero no los globales. Reiniciar la API vacía los contadores.
+
+#### `POST /auth/logout` (público)
+
+Responde `204` y borra la cookie (`Set-Cookie: atd_session=; Expires=Thu, 01 Jan 1970 ...`, mismos atributos). Es idempotente: no hace falta tener sesión.
+
+#### `GET /auth/session`
+
+Con sesión válida: `200 { "authenticated": true, "expiresAt": "..." }`. Sin sesión: `401 UNAUTHORIZED`, como cualquier endpoint protegido.
 
 ## 2. Episodes
 

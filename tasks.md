@@ -4,9 +4,11 @@ Tracking del estado de implementación. No repite el diseño (eso vive en `archi
 
 Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-25.
 
-## Dónde retomar (última sesión: 2026-09-25 — spec 003 (dashboard) escrita y revisada, ADR 0001 de auth aceptado)
+## Dónde retomar (última sesión: 2026-09-25 — API-8 (auth del curador) implementada)
 
-**Esta sesión (2026-09-25)**: escrita `docs/product/003-dashboard-ui.md` (agente `product-analyst`), revisada por `architect` contra el código real, y aceptado `docs/adr/0001-auth-sesion-nest-mismo-origen.md`. No se tocó código. Las dependencias de backend que pide la spec (API-1..API-16, auth, `packages/video` como librería) quedaron como sección 12 de este archivo, ordenadas por la fase del dashboard que desbloquean. Proceso en `decision-log.md` entrada 31. **Próximo paso real**: API-8 (módulo `auth` del ADR 0001), bloqueante de la F1 del dashboard.
+**Última tarea (2026-09-25)**: API-8 implementada y verificada en la rama `feat/api-8-auth` (sección 12.1): `modules/auth` con login/logout/sesión, `SessionGuard` global que niega por defecto, cookie `atd_session` con token HMAC sin estado de 7 días, rate-limit del login, `/docs` solo fuera de producción y `enableCors()` eliminado. **Acción pendiente del usuario**: `apps/api/.env` necesita `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` y `SESSION_SECRET` (`setup.md` §3.2); sin ellas no arrancan ni la API, ni `pnpm openapi:generate`, ni los smoke scripts. Proceso y hallazgos en `decision-log.md` entrada 33. Lo que sigue de §12.1: los dos ítems de Workspace.
+
+**Antes, el mismo día (2026-09-25)**: escrita `docs/product/003-dashboard-ui.md` (agente `product-analyst`), revisada por `architect` contra el código real, y aceptado `docs/adr/0001-auth-sesion-nest-mismo-origen.md`. No se tocó código. Las dependencias de backend que pide la spec (API-1..API-16, auth, `packages/video` como librería) quedaron como sección 12 de este archivo, ordenadas por la fase del dashboard que desbloquean. Proceso en `decision-log.md` entrada 31. **Próximo paso real**: API-8 (módulo `auth` del ADR 0001), bloqueante de la F1 del dashboard.
 
 **Sesión previa (2026-09-24)**: implementado y verificado el monorepo completo (`pnpm` + Turborepo) — sección 11 más abajo, proceso completo y hallazgos reales en `decision-log.md` entrada 30. El repo pasó de una sola app NestJS a `apps/api` + `packages/contracts` + `packages/video` (con un render real de Remotion probado) + `apps/dashboard` (scaffold). Bloqueante real no anticipado: `better-sqlite3@13.x` no publica binarios precompilados, bajado a `^12.11.1`. **Con esto, la Fase 5 del roadmap queda completa** — no queda ningún ítem P0/post-MVP planeado pendiente. Próximo paso real: la spec 003 (UI real del dashboard), todavía sin escribir, o Feature 9 (worker de Remotion).
 
@@ -282,24 +284,24 @@ Post-MVP, fuera de `features.md` (congelado). Requería la sección 10 (001) mer
 - [x] `turbo.json` con pipeline `build`/`test`/`lint`/`dev` — verificado con caché real (`FULL TURBO`, 46ms en corridas repetidas)
 - [x] `scripts/check-boundaries.mjs` — probado en ambas direcciones (falla con un import de prueba insertado a mano, pasa limpio en el estado real)
 
-## 12. Dependencias de backend del dashboard (`docs/product/003-dashboard-ui.md`) — sin empezar
+## 12. Dependencias de backend del dashboard (`docs/product/003-dashboard-ui.md`) — en curso (API-8 hecha)
 
 Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `architect` el 2026-09-25, ajustada el mismo día por la spec 004 (API-7a, API-17, API-18, AC 3.78/3.79, 6 motivos de `REQUIRES_HUMAN_REVIEW`) y por el cierre de sus preguntas abiertas (D17-D20, API-19, AC 3.81-3.86); auth según `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Cada ítem sale de "Cambios requeridos en la API" (API-n), "Restricciones técnicas" o el plan F1-F4 de la spec, con los AC 3.x que desbloquea. Ordenado por la fase del front que desbloquea (`apps/dashboard/docs/roadmap.md`); la secuencia, la clasificación bloqueante/no bloqueante y el **orden respecto de la sección 13 (spec 004)** están en `roadmap.md` Fases 6 y 7 ("Orden crítico entre la Fase 6 y la Fase 7"). El trabajo del front en sí no se trackea acá (`apps/dashboard/docs/tasks.md`).
 
 ### 12.1. Antes de F1 — auth y workspace
 
-**API-8 — Módulo auth (ADR 0001) — bloqueante (AC 3.1-3.9)**
-- [ ] `EnvSchema`: `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` (scrypt de `node:crypto`) y `SESSION_SECRET`, sin defaults; sincronizar `.env.example` (ADR 0001 punto 2)
-- [ ] Token de sesión sin estado HMAC (`exp` + firma, patrón de `audio-url-signer.ts`), vigencia 7 días (ADR 0001 punto 2; AC 3.3)
-- [ ] `modules/auth`: `POST /auth/login`, `POST /auth/logout`, `GET /auth/session`, cookie `httpOnly`/`SameSite=Lax`/`Path=/`/sin `Domain`/`Secure` según entorno (ADR 0001 puntos 1-2; AC 3.2, AC 3.4)
-- [ ] `@Public()` en `shared/http/public.decorator.ts` + `SessionGuard` global (`APP_GUARD`) que niega por defecto; públicos solo login/logout, `/showcase/*` y `GET /` (ADR 0001 punto 1; AC 3.5)
-- [ ] `401` con `code: UNAUTHORIZED` en el envelope de error, incluido el stream SSE, y documentado en OpenAPI (AC 3.5)
-- [ ] Rate-limit simple en `POST /auth/login` con respuesta distinguible de credencial incorrecta (AC 3.8)
-- [ ] `trust proxy` (la API queda detrás del rewrite de Next) y eliminar `enableCors()` de `main.ts` (ADR 0001 punto 3; AC 3.9)
-- [ ] En producción, `EnvSchema` falla si `AUDIO_SIGNING_SECRET` conserva el default (ADR 0001 punto 5)
-- [ ] Swagger (`/docs`) montado solo fuera de producción; en producción `/docs` no responde (D20). `openapi:generate` sigue funcionando porque no depende del montaje
-- [ ] Tests del guard/login/sesión + verificación con curl: sin cookie → `401` en `/episodes` y acciones; con cookie → `200`
-- [ ] `openapi.json` regenerado e idempotente (`pnpm openapi:generate && git diff --exit-code openapi.json`)
+**API-8 — Módulo auth (ADR 0001) — bloqueante (AC 3.1-3.9) — hecho 2026-09-25** (rama `feat/api-8-auth`; proceso y hallazgos en `decision-log.md` entrada 33)
+- [x] `EnvSchema`: `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` (scrypt de `node:crypto`) y `SESSION_SECRET`, sin defaults; sincronizar `.env.example` (ADR 0001 punto 2). Formato del hash `scrypt:<N>:<r>:<p>:<sal>:<hash>` (`shared/crypto/scrypt-password.ts`), generado con `pnpm --filter api auth:hash-password` (`setup.md` §3.2). Se sumó `NODE_ENV` (default `development`)
+- [x] Token de sesión sin estado HMAC (`exp` + firma, patrón de `audio-url-signer.ts`), vigencia 7 días (ADR 0001 punto 2; AC 3.3). La primitiva HMAC se extrajo a `shared/crypto/hmac-signature.ts`, compartida con `audio-url-signer.ts`
+- [x] `modules/auth`: `POST /auth/login`, `POST /auth/logout`, `GET /auth/session`, cookie `httpOnly`/`SameSite=Lax`/`Path=/`/sin `Domain`/`Secure` según entorno (ADR 0001 puntos 1-2; AC 3.2, AC 3.4)
+- [x] `@Public()` en `shared/http/public.decorator.ts` + `SessionGuard` global (`APP_GUARD`) que niega por defecto; públicos solo login/logout, `/showcase/*` y `GET /` (ADR 0001 punto 1; AC 3.5). `/showcase/*` todavía no existe: cuando llegue API-7, su controller se marca `@Public()`
+- [x] `401` con `code: UNAUTHORIZED` en el envelope de error, incluido el stream SSE, y documentado en OpenAPI (AC 3.5)
+- [x] Rate-limit simple en `POST /auth/login` con respuesta distinguible de credencial incorrecta (AC 3.8): `429 TOO_MANY_ATTEMPTS` + `Retry-After` contra `401 INVALID_CREDENTIALS`; 5 fallos por cliente y 20 globales en 15 min
+- [x] `trust proxy` (la API queda detrás del rewrite de Next) y eliminar `enableCors()` de `main.ts` (ADR 0001 punto 3; AC 3.9). Valor `1` (un salto), no `true`
+- [x] En producción, `EnvSchema` falla si `AUDIO_SIGNING_SECRET` conserva el default (ADR 0001 punto 5)
+- [x] Swagger (`/docs`) montado solo fuera de producción; en producción `/docs` no responde (D20). `openapi:generate` sigue funcionando porque no depende del montaje
+- [x] Tests del guard/login/sesión + verificación con curl: sin cookie → `401` en `/episodes` y acciones; con cookie → `200`
+- [x] `openapi.json` regenerado e idempotente (`pnpm openapi:generate && git diff --exit-code openapi.json`)
 
 **Workspace (spec, "Límites del workspace" y "Turborepo y tipos")**
 - [ ] `scripts/check-boundaries.mjs` extendido a `apps/dashboard`: prohíbe `@ai-trend-debates/api` e imports relativos fuera del paquete; detecta `import()` dinámico e `import "x"`; corre en CI o `prebuild` (F1)

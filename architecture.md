@@ -10,7 +10,7 @@ Este documento formaliza las decisiones de arquitectura tomadas durante el dise�
 | Prisma 7 | Persistencia (SQLite en desarrollo local) |
 | Vercel AI SDK | Abstracción multi-provider de LLMs, structured output |
 | OpenRouter | Quinto `ModelProvider` — dos modelos `:free` validados a mano contra la API real (`nvidia/nemotron-3-super-120b-a12b`, `liquid/lfm-2.5-2.6b`), free tier sin tarjeta. Ver `decision-log.md` entrada 13 para el proceso de validación |
-| Zod 4 | Contratos de input/output de agentes (`shared/contracts/`) y DTOs HTTP (`modules/episodes/dto/`, `modules/notifications/dto/`) — capas separadas aunque el shape a veces coincida (coding-rules.md §3) |
+| Zod 4 | Contratos de input/output de agentes (`shared/contracts/`) y DTOs HTTP (`modules/episodes/dto/`, `modules/notifications/dto/`, `modules/auth/dto/`) — capas separadas aunque el shape a veces coincida (coding-rules.md §3) |
 | Cockatiel | Retry / circuit breaker por integración externa |
 | Tavily | Proveedor de búsqueda web para `ResearchModule` (Feature 1) — free tier 1000 créditos/mes sin tarjeta |
 | echogarden + Piper / google-tts-api / OpenRouter | 3 proveedores seleccionables vía `AudioProvider` (env var `TTS_PROVIDER`, no por llamada) — **Local (`echogarden`+Piper) implementado y verificado contra el motor real**; Google (`google-tts-api`, ya instalado sin usar) y OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por validación manual) todavía no implementados (`tasks.md` sección 5, `decision-log.md` entradas 19-22) |
@@ -35,13 +35,20 @@ src/
                            Feature 9 (P1, Asset/worker de Remotion): todavía no existe
     episodes/            ← Feature 2/4/5: Episode, EpisodeParticipant, EpisodeUsage,
                            EpisodeCheckpoint — el orquestador
+    auth/                ← Spec 003 API-8 (ADR 0001): login del único curador, sesión por cookie
+                           (token HMAC sin estado) y SessionGuard global. Sin tablas propias
   shared/
     prisma/             ← PrismaService, módulo global
     config/              ← env.schema.ts (Zod) + validateEnv, única fuente de verdad de env vars
     contracts/           ← agents.contracts.ts (Zod schemas + DebateAgent + DebateContext)
     personas/            ← agents.personas.ts (4 DebaterPersona + JudgePersona + builders de system prompt)
-    http/                ← ZodValidationPipe + HttpErrorFilter (formato de error HTTP consistente,
-                           api-contract.md §1) — genéricos, no específicos de episodes
+    http/                ← HttpErrorFilter (formato de error HTTP consistente, api-contract.md §1),
+                           buildOpenApiDocument, @Public() y ErrorResponseDto — genéricos, no
+                           específicos de episodes (el ZodValidationPipe propio se reemplazó por el
+                           de nestjs-zod en la spec 001)
+    crypto/              ← Primitivas sin estado de node:crypto: firma HMAC-SHA256 (usada por las URLs
+                           de audio de tts/ y por el token de sesión de auth/) y hash scrypt de
+                           contraseña (CURATOR_PASSWORD_HASH)
 ```
 
 Cada módulo de dominio (`research`, `agents`, `debate`, `fact-check`, `tts`, `render`) es responsable de un conjunto de entidades del `schema.prisma` y no conoce a `episodes`. `ai` y `notifications` no son módulos de dominio en ese sentido — `ai` es infraestructura compartida (como `PrismaModule`, marcado `@Global()`) y `notifications` es un módulo standalone con su propio controller HTTP, importado explícitamente por `EpisodesModule` para que `EpisodeStateService` pueda inyectar `NotificationsService`.
@@ -67,9 +74,11 @@ Cada módulo de dominio (`research`, `agents`, `debate`, `fact-check`, `tts`, `r
 
 `AiModule` es distinto de los seis de arriba: es infraestructura global (`@Global()`, mismo criterio que `PrismaModule`) — `ResearchModule`, `AgentsModule` y `FactCheckModule` lo inyectan directo, sin que `EpisodesModule` medie. `NotificationsModule` sí cuelga de `EpisodesModule` en el diagrama porque, a diferencia de `AiModule`, tiene su propio controller HTTP (`GET /notifications`) — es un módulo de aplicación con superficie propia, no infraestructura transversal.
 
+`AuthModule` (spec 003 API-8, ADR 0001) no aparece en el diagrama porque no participa del pipeline: lo importa `AppModule` directamente, no importa ni es importado por ningún otro módulo y no tiene tablas (la credencial vive en el `.env` y la sesión es un token firmado sin estado). Su efecto transversal es el `SessionGuard`, registrado como `APP_GUARD`: se aplica a los controllers de **todos** los módulos y niega por defecto, salvo los handlers o controllers marcados con `@Public()` (`shared/http/public.decorator.ts`). Un controller nuevo en cualquier módulo queda protegido sin hacer nada; abrirlo exige marcarlo a propósito. Lo que no es un handler de Nest (middleware de Express en `main.ts`: `/audio-files`, `/public`, `/docs`) queda fuera del guard. Detalle del contrato en `api-contract.md` §1.1.
+
 Regla: las flechas solo van hacia abajo. `AgentsModule` no importa nada de `EpisodesModule` ni de `DebateModule` — solo expone un servicio que, dado un `DebateContext` (definido en `shared/contracts/`), devuelve un `ArgumentDraft` o `CrossExaminationDraft`. Esto es lo que permite testear cada módulo de dominio de forma aislada, sin levantar el pipeline entero.
 
-`shared/` no depende de ningún módulo — es el único código que todos pueden importar sin generar ciclos. No tiene `@Injectable()` ni nada acoplado a NestJS (con la excepción de `shared/http/`, que sí son primitivas de NestJS — `PipeTransform`/`ExceptionFilter` — pero genéricas, sin lógica de negocio ni imports de ningún módulo).
+`shared/` no depende de ningún módulo — es el único código que todos pueden importar sin generar ciclos. No tiene `@Injectable()` ni nada acoplado a NestJS (con la excepción de `shared/http/`, que sí son primitivas de NestJS — `ExceptionFilter`, decoradores, el documento OpenAPI — genéricas y sin lógica de negocio). Excepción conocida dentro de `shared/http/`: `HttpErrorFilter` importa las clases de error tipadas de los módulos (`episodes`, `tts`, `render`, `auth`) para mapearlas a status y `code`, y `openapi-document.ts` importa el nombre de la cookie de sesión de `auth/session-cookie.ts`. Son imports de constantes y clases de error, sin providers; no generan ciclos porque ningún módulo importa esos dos archivos. `shared/crypto/` sí es puro: funciones sobre `node:crypto`, sin NestJS.
 
 ## 4. Patrón de orquestación: Episode como dueño único del estado
 
@@ -238,6 +247,7 @@ Al terminar la última ronda de `CROSS_EXAMINATION`, `EpisodeOrchestratorService
 - `features.md` — contrato de producto, máquina de estados de producto, criterios de aceptación por feature.
 - `api-contract.md` — superficie HTTP completa (endpoints, SSE, formato de error, tabla de transiciones válidas).
 - `coding-rules.md` — convenciones de código a seguir al implementar cada pieza.
+- `docs/adr/0001-auth-sesion-nest-mismo-origen.md` — auth del curador (sesión emitida por Nest, Next como único origen), implementado en `modules/auth`.
 - `decision-log.md` — bitácora del *proceso* detrás de cada decisión no obvia (qué se consideró, qué se descartó, qué evidencia real la resolvió).
 - `tasks.md` — estado de implementación módulo por módulo.
 - `shared/contracts/agents.contracts.ts` — contratos Zod y interfaz `DebateAgent`.

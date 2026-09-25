@@ -447,3 +447,41 @@ Consultado el catálogo real de Echogarden vits (`es` 7 voces, de las cuales sol
 - i18n completo del showcase (`/es`, `/en`, `/pt`) como nice-to-have. F4 sale en español bajo `/[locale]`, con dos layouts raíz.
 
 **Resultado**: `docs/product/004-debate-language.md`, `docs/adr/0002-voces-por-agente-e-idioma.md` y el planning (Fase 7 en `roadmap.md`, §13 en `tasks.md`). La spec 004 es bloqueante de la F2 del dashboard a través de API-17.
+
+## 2026-09-25
+
+### 33. API-8 (auth del curador, ADR 0001) implementada y verificada contra el servidor real
+
+**Contexto**: primera dependencia de backend de la spec 003 (bloqueante de F1 del dashboard). El ADR 0001 ya fijaba la topología (Nest emite y valida la sesión, Next único origen) y la semántica (token HMAC sin estado, 7 días, `SessionGuard` global que niega por defecto). Quedaban por decidir detalles de implementación que el ADR no cubría.
+
+**Decisiones de implementación** (dentro del margen del ADR, sin cambiarlo):
+- **Formato de `CURATOR_PASSWORD_HASH`**: `scrypt:<N>:<r>:<p>:<sal base64url>:<hash base64url>`, autocontenido (sal y parámetros viajan con el hash). Separador `:` y no `$` (el típico de crypt/PHC), porque `$` dispara expansión de variables en shells, `docker-compose` y algunos parsers de `.env`. Parámetros N=2^14, r=8, p=1, clave de 64 bytes. `EnvSchema` valida el formato al arrancar. Script `pnpm --filter api auth:hash-password`: pide la contraseña sin eco en una TTY y, si stdin no es una TTY (Git Bash/mintty sin winpty), lee la primera línea de stdin; nunca la acepta como argumento.
+- **HMAC compartido**: la firma y la comparación con `timingSafeEqual` de `audio-url-signer.ts` se extrajeron a `shared/crypto/hmac-signature.ts`, que usan tanto las URLs de audio como el token de sesión (payload `session:<exp>`, token `<exp>.<firma>`). El comportamiento del firmador de audio no cambió: sus 7 tests pasan sin tocarlos.
+- **`NODE_ENV`** entró al `EnvSchema` (`development|test|production`, default `development`): hacía falta para tres reglas de "producción" que pedía la spec (cookie `Secure`, `/docs` sin montar, `AUDIO_SIGNING_SECRET` distinto del default) y no existía ninguna variable que la representara.
+- **Códigos de error**: `401 UNAUTHORIZED` para sesión ausente o vencida (lo lanza el guard como `UnauthorizedException`); `401 INVALID_CREDENTIALS` para el login rechazado, así el cliente no confunde "credencial incorrecta" con "sesión vencida" en la propia pantalla de login (AC 3.7 redirige ante un 401); `429 TOO_MANY_ATTEMPTS` + `Retry-After` para el rate-limit (AC 3.8).
+- **`GET /auth/session`** no es público (el ADR solo abre login, logout, `/showcase/*` y `GET /`): con sesión responde `200 { authenticated: true, expiresAt }`, sin sesión el guard responde `401`.
+- **OpenAPI**: `@Public()` además de la metadata del guard agrega una marca `x-public` a la operación; `buildOpenApiDocument` la consume y le agrega `security` (cookie `atd_session`) y un `401` con `ErrorResponseDto` a toda operación que no la tenga, y después la borra. Así un endpoint nuevo queda documentado como protegido sin decorarlo, igual que queda protegido en runtime.
+- **e2e serializado**: al sumar `auth.e2e-spec.ts`, jest corría los dos archivos e2e en workers paralelos, y `jest-e2e.setup.ts` (que corre antes de cada archivo) borraba y migraba el mismo `tmp-e2e.db` desde los dos a la vez. Pasó igual en la primera corrida, pero era una carrera. Se fijó `maxWorkers: 1` en `jest-e2e.json`.
+
+**Hallazgo real: la IP del cliente no es confiable detrás del rewrite de Next.** Para decidir el valor de `trust proxy` se leyó el código de Next 16 instalado. El proxy de rewrites externos (`router-server.js` → `proxy-request.js`, httpxy sin `xfwd`) **no agrega `X-Forwarded-For`**; el único lugar que lo setea (`base-server.js:612`) usa `??=` y no está en el camino de los rewrites. Consecuencia: según el despliegue, Nest ve como `req.ip` la IP de Next para todos los clientes, o un `X-Forwarded-For` que mandó el propio cliente. Verificado con curl contra el servidor real: tras 5 fallos, un `X-Forwarded-For: 203.0.113.9` inventado vuelve a entrar. Resolución:
+- `trust proxy` = `1` (un salto) y no `true`: con `true`, `req.ip` sería el primer valor de la cadena, el que controla el cliente; con `1` es el que agregó el proxy más cercano, si lo agrega.
+- El rate-limit tiene dos cubetas: 5 fallos por cliente y **20 globales** en una ventana deslizante de 15 minutos. La global acota la fuerza bruta aunque se rote la clave de cliente (verificado: con 20 fallos repartidos en 15 IPs inventadas, una IP nueva recibe `429`). Costo aceptado: un ataque sostenido también bloquea el login del curador hasta que la ventana se vacíe; las sesiones ya abiertas siguen valiendo.
+- Mientras dura un bloqueo no entra ni la contraseña correcta (si no, el bloqueo le avisaría al atacante cuándo acertó). Un acierto limpia la cubeta del cliente, no la global.
+- Pendiente para cuando exista el despliegue real: si delante de Next hay un proxy que setea `X-Forwarded-For` (nginx, un load balancer), revisar el valor de `trust proxy` y, si Next no lo propaga, considerar que Next agregue el header en el rewrite.
+
+**Verificación con el servidor real** (`node dist/src/main.js`, DB temporal migrada aparte, credenciales solo por variables de entorno, `.env` intacto, comprobado con md5):
+- `GET /` → 200 sin cookie.
+- Sin cookie: `/episodes`, `/notifications` y el SSE `/episodes/:id/events` → `401 {"error":{"code":"UNAUTHORIZED",...}}` (el SSE responde JSON antes de abrir el stream).
+- Login incorrecto → `401 INVALID_CREDENTIALS`, sin cookie. Login correcto → `200` + `Set-Cookie: atd_session=<exp>.<firma>; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax`.
+- Con cookie: `/episodes`, `/notifications` y `/auth/session` → 200. Token con el `exp` alterado → 401.
+- Logout → `204` y cookie vencida; el siguiente pedido con esa cookie jar → 401. Una copia de la cookie hecha antes del logout sigue valiendo (consecuencia aceptada en el ADR).
+- 5 fallos → el 6.º intento, con la contraseña correcta, recibe `429 TOO_MANY_ATTEMPTS` y `Retry-After: 900`.
+- `NODE_ENV=production`: con el `AUDIO_SIGNING_SECRET` por defecto el proceso no arranca; con uno propio arranca, `/docs` responde 404 y la cookie sale con `Secure`. Un preflight `OPTIONS` con `Origin` ajeno no recibe headers `Access-Control-*`.
+
+**Otros hallazgos, sin corregir (fuera del alcance de API-8)**:
+- `HttpErrorFilter` arma el `code` de las `HttpException` genéricas quitando `Exception` del nombre de la clase: un 404 de ruta inexistente sale como `NOTFOUND`, mientras que el 404 de Prisma (P2025) sale como `NOT_FOUND`. Inconsistencia previa; `UnauthorizedException` da `UNAUTHORIZED` correctamente por el mismo mecanismo.
+- `start:prod` apunta a `dist/main`, pero el build deja `dist/src/main.js` (porque `scripts/` y `prisma/` también compilan). Se probó con `node dist/src/main.js`.
+- El SSE con sesión sobre un episodio inexistente abre el stream (200) en vez de responder 404; lo cubre API-12.
+- `pnpm openapi:generate` y los smoke scripts bootstrapean `AppModule`, así que ahora también exigen las tres variables de auth en el `.env`. El documento generado no depende de sus valores (verificado: con otras credenciales, `git diff` vacío).
+
+**Resultado**: 6 commits en `feat/api-8-auth` (el último, esta documentación). `pnpm build` verde; `apps/api`: 227 tests unitarios (31 suites) y 17 e2e en verde; `openapi.json` regenerado e idempotente. **Acción pendiente del usuario**: completar `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` y `SESSION_SECRET` en `apps/api/.env` (`setup.md` §3.2). El ADR 0001 todavía dice, en "Consecuencias", que `/docs` en producción está pendiente de decidir: lo resolvió D20 y quedó implementado acá.
