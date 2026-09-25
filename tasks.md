@@ -6,7 +6,7 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 
 ## Dónde retomar (última sesión: 2026-09-25 — API-8 (auth del curador) implementada)
 
-**Última tarea (2026-09-25)**: API-8 implementada y verificada en la rama `feat/api-8-auth` (sección 12.1): `modules/auth` con login/logout/sesión, `SessionGuard` global que niega por defecto, cookie `atd_session` con token HMAC sin estado de 7 días, rate-limit del login, `/docs` solo fuera de producción y `enableCors()` eliminado. **Acción pendiente del usuario**: `apps/api/.env` necesita `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` y `SESSION_SECRET` (`setup.md` §3.2); sin ellas no arrancan ni la API, ni `pnpm openapi:generate`, ni los smoke scripts. Proceso y hallazgos en `decision-log.md` entrada 33. Lo que sigue de §12.1: los dos ítems de Workspace.
+**Última tarea (2026-09-25)**: API-8 implementada y verificada en la rama `feat/api-8-auth` (sección 12.1): `modules/auth` con login/logout/sesión, `SessionGuard` global que niega por defecto, cookie `atd_session` con token HMAC sin estado de 7 días, rate-limit del login, `/docs` solo fuera de producción y `enableCors()` eliminado. Después pasó por la revisión de `code-reviewer`; las 7 correcciones pedidas están aplicadas en la misma rama (`decision-log.md` entrada 33, "Revisión"). **Acción pendiente del usuario**: `apps/api/.env` necesita `NODE_ENV=development`, `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` y `SESSION_SECRET` (`setup.md` §3.2); sin ellas no arrancan ni la API, ni `pnpm openapi:generate`, ni los smoke scripts. Proceso y hallazgos en `decision-log.md` entrada 33. Lo que sigue de §12.1: los dos ítems de Workspace.
 
 **Antes, el mismo día (2026-09-25)**: escrita `docs/product/003-dashboard-ui.md` (agente `product-analyst`), revisada por `architect` contra el código real, y aceptado `docs/adr/0001-auth-sesion-nest-mismo-origen.md`. No se tocó código. Las dependencias de backend que pide la spec (API-1..API-16, auth, `packages/video` como librería) quedaron como sección 12 de este archivo, ordenadas por la fase del dashboard que desbloquean. Proceso en `decision-log.md` entrada 31. **Próximo paso real**: API-8 (módulo `auth` del ADR 0001), bloqueante de la F1 del dashboard.
 
@@ -291,17 +291,22 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 ### 12.1. Antes de F1 — auth y workspace
 
 **API-8 — Módulo auth (ADR 0001) — bloqueante (AC 3.1-3.9) — hecho 2026-09-25** (rama `feat/api-8-auth`; proceso y hallazgos en `decision-log.md` entrada 33)
-- [x] `EnvSchema`: `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` (scrypt de `node:crypto`) y `SESSION_SECRET`, sin defaults; sincronizar `.env.example` (ADR 0001 punto 2). Formato del hash `scrypt:<N>:<r>:<p>:<sal>:<hash>` (`shared/crypto/scrypt-password.ts`), generado con `pnpm --filter api auth:hash-password` (`setup.md` §3.2). Se sumó `NODE_ENV` (default `development`)
+- [x] `EnvSchema`: `CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH` (scrypt de `node:crypto`) y `SESSION_SECRET`, sin defaults; sincronizar `.env.example` (ADR 0001 punto 2). Formato del hash `scrypt:<N>:<r>:<p>:<sal>:<hash>` (`shared/crypto/scrypt-password.ts`), generado con `pnpm --filter api auth:hash-password` (`setup.md` §3.2). Se sumó `NODE_ENV`, requerida y sin default (review), y `HOST` (default `127.0.0.1`); `PORT` ahora se usa
 - [x] Token de sesión sin estado HMAC (`exp` + firma, patrón de `audio-url-signer.ts`), vigencia 7 días (ADR 0001 punto 2; AC 3.3). La primitiva HMAC se extrajo a `shared/crypto/hmac-signature.ts`, compartida con `audio-url-signer.ts`
 - [x] `modules/auth`: `POST /auth/login`, `POST /auth/logout`, `GET /auth/session`, cookie `httpOnly`/`SameSite=Lax`/`Path=/`/sin `Domain`/`Secure` según entorno (ADR 0001 puntos 1-2; AC 3.2, AC 3.4)
 - [x] `@Public()` en `shared/http/public.decorator.ts` + `SessionGuard` global (`APP_GUARD`) que niega por defecto; públicos solo login/logout, `/showcase/*` y `GET /` (ADR 0001 punto 1; AC 3.5). `/showcase/*` todavía no existe: cuando llegue API-7, su controller se marca `@Public()`
 - [x] `401` con `code: UNAUTHORIZED` en el envelope de error, incluido el stream SSE, y documentado en OpenAPI (AC 3.5)
-- [x] Rate-limit simple en `POST /auth/login` con respuesta distinguible de credencial incorrecta (AC 3.8): `429 TOO_MANY_ATTEMPTS` + `Retry-After` contra `401 INVALID_CREDENTIALS`; 5 fallos por cliente y 20 globales en 15 min
+- [x] Rate-limit simple en `POST /auth/login` con respuesta distinguible de credencial incorrecta (AC 3.8): `429 TOO_MANY_ATTEMPTS` + `Retry-After` contra `401 INVALID_CREDENTIALS`; 5 fallos por cliente y 20 globales en 15 min, cada intento contado desde que empieza (sin carrera con logins concurrentes) y a lo sumo 2 verificaciones scrypt en curso
 - [x] `trust proxy` (la API queda detrás del rewrite de Next) y eliminar `enableCors()` de `main.ts` (ADR 0001 punto 3; AC 3.9). Valor `1` (un salto), no `true`
 - [x] En producción, `EnvSchema` falla si `AUDIO_SIGNING_SECRET` conserva el default (ADR 0001 punto 5)
 - [x] Swagger (`/docs`) montado solo fuera de producción; en producción `/docs` no responde (D20). `openapi:generate` sigue funcionando porque no depende del montaje
 - [x] Tests del guard/login/sesión + verificación con curl: sin cookie → `401` en `/episodes` y acciones; con cookie → `200`
 - [x] `openapi.json` regenerado e idempotente (`pnpm openapi:generate && git diff --exit-code openapi.json`)
+
+**Pendientes menores de API-8** (salieron de la revisión, fuera de alcance a propósito; ninguno bloquea F1):
+- [ ] `globalSetup` para los e2e: hoy `jest-e2e.setup.ts` recrea la DB antes de cada archivo y por eso el e2e corre con `maxWorkers: 1`
+- [ ] CSRF en `POST /auth/logout`: es público y sin token, así que otro sitio puede cerrar la sesión del curador (solo molestia: `SameSite=Lax` no deja mandar la cookie en un POST cruzado, pero el logout no la necesita)
+- [ ] `scripts/hash-password.ts` silencia el eco pisando `rl._writeToOutput`, una API interna de `readline` que puede cambiar entre versiones de Node
 
 **Workspace (spec, "Límites del workspace" y "Turborepo y tipos")**
 - [ ] `scripts/check-boundaries.mjs` extendido a `apps/dashboard`: prohíbe `@ai-trend-debates/api` e imports relativos fuera del paquete; detecta `import()` dinámico e `import "x"`; corre en CI o `prebuild` (F1)

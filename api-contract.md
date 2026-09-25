@@ -12,7 +12,7 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
 
 ### 1.1 Autenticación (API-8, ADR 0001)
 
-- **Topología**: la API no se expone directo al navegador; el dashboard (Next) es el único origen público y reescribe `/api/*` y `/audio-files/*` hacia la API. Por eso la API no tiene CORS y confía en un proxy delante (`trust proxy` = 1).
+- **Topología**: la API no se expone directo al navegador; el dashboard (Next) es el único origen público y reescribe `/api/*` y `/audio-files/*` hacia la API. Por eso la API no tiene CORS, escucha por defecto solo en `127.0.0.1` (`HOST`) y confía en exactamente un proxy delante (`trust proxy` = 1). **Condición de despliegue**: el proxy de borde tiene que **agregar** `X-Forwarded-For` y Next reenviarlo (el rewrite de Next 16 no lo agrega por su cuenta). Si no, `req.ip` no identifica al cliente y del rate-limit del login solo protege el límite global (`setup.md` §3.3).
 - **Sesión**: cookie `atd_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, sin `Domain`, `Secure` solo con `NODE_ENV=production`. El valor es un token sin estado `<exp>.<firma>` (HMAC-SHA256 con `SESSION_SECRET`), que vence a los 7 días del login (AC 3.3); la cookie tiene `Max-Age` igual. Cerrar sesión borra la cookie en ese navegador pero no revoca una copia hecha antes; para invalidar todas las sesiones hay que rotar `SESSION_SECRET`.
 - **Qué exige sesión**: todo handler de la API, incluidos el stream SSE (§4) y `/notifications`. Son públicos solo `POST /auth/login`, `POST /auth/logout` y `GET /`; cuando exista `/showcase/*` (API-7) también lo será. Todo endpoint nuevo queda protegido por defecto (`SessionGuard` global; se abre con `@Public()`).
 - **Fuera del guard** (no son handlers de Nest): `/audio-files/*` (protegido solo por su firma HMAC, porque el showcase público lo necesita), `/public/*` (estáticos) y `/docs` (Swagger), que solo se monta fuera de producción (spec 003, D20). En producción `/docs` responde 404.
@@ -30,7 +30,13 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
 
 - Credencial incorrecta: `401 INVALID_CREDENTIALS`, con el mismo mensaje sea el usuario o la contraseña (AC 3.2). No emite cookie.
 - Body mal formado (falta un campo, campos extra): `400 VALIDATION_ERROR`.
-- Rate-limit (AC 3.8): cuenta solo intentos **fallidos**, en una ventana deslizante de 15 minutos, en memoria del proceso. Con 5 fallos del mismo cliente (`req.ip`), o 20 en total entre todos los clientes, responde `429 TOO_MANY_ATTEMPTS` con header `Retry-After` (segundos) hasta que el fallo más viejo salga de la ventana. Mientras dura el bloqueo, **tampoco entra la contraseña correcta**. Un login exitoso limpia los fallos de ese cliente, pero no los globales. Reiniciar la API vacía los contadores.
+- Rate-limit (AC 3.8), en memoria del proceso (reiniciar la API vacía los contadores), con ventana deslizante de 15 minutos:
+  - Cada intento cuenta como fallo **desde que empieza**, antes de verificar la contraseña. Así, logins concurrentes no pueden pasar todos el chequeo antes de que se registre el primer fallo. Si el intento acierta, ese registro se deshace.
+  - Con 5 intentos fallidos (o en curso) del mismo cliente (`req.ip`), o 20 en total entre todos los clientes, responde `429 TOO_MANY_ATTEMPTS` con `Retry-After` hasta que el intento más viejo salga de la ventana (hasta 900 s).
+  - Si ya hay 2 verificaciones de contraseña en curso, responde `429 TOO_MANY_ATTEMPTS` con `Retry-After: 1`, sin contarlo como fallo. Protege el threadpool de libuv, donde corre scrypt (unos 225 ms por verificación).
+  - Mientras dura un bloqueo, **tampoco entra la contraseña correcta**.
+  - Un login exitoso borra los fallos de ese cliente y saca de la cuenta global solo su propio intento; los fallos globales de otros clientes siguen contando.
+  - Ejemplo real: 50 logins incorrectos simultáneos del mismo cliente dan 5 `401` y 45 `429`.
 
 #### `POST /auth/logout` (público)
 
