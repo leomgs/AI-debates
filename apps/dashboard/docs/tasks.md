@@ -1,6 +1,6 @@
 # Tasks — Dashboard (front)
 
-Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-25, tercera pasada (spec 003: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; spec 004: preguntas A y B resueltas; nada implementado). Segunda pasada del mismo día: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
+Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-25, cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
 
 Cada tarea cita su origen en la spec 003 (AC 3.x, D-n, API-n o "Restricciones técnicas"). "Requiere" indica una dependencia explícita con otra tarea de este archivo (§n) o con backend (API-n, trackeado en `tasks.md` de la raíz §12; API-17, en §13). Antes de escribir código de Next: leer la guía de la versión instalada en `node_modules/next/dist/docs/` (`apps/dashboard/AGENTS.md`).
 
@@ -13,11 +13,11 @@ Bloqueantes previos resueltos:
 
 Dependencias de backend/workspace de la spec 003, trackeadas en `tasks.md` de la raíz §12 (orden según la fase que desbloquean):
 
-- [ ] Antes de F1: API-8 (auth, ADR 0001); `check-boundaries` extendido a `apps/dashboard`; `dev.dependsOn: ["^build"]` en el `turbo.json` raíz
-- [ ] Antes de F2: API-1, API-5, API-7a, API-12, API-13, API-17 (bloqueantes); API-10, API-10b, API-14, API-16 (recomendadas); API-18 (no bloqueante)
+- [ ] Antes de F1: API-8 (auth, ADR 0001; incluye `/docs` solo fuera de producción, D20); `check-boundaries` extendido a `apps/dashboard`; `dev.dependsOn: ["^build"]` en el `turbo.json` raíz
+- [ ] Antes de F2: API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (bloqueantes); API-10b (recomendada, pero prerrequisito de API-19 en el backend); API-10, API-14, API-16 (recomendadas); API-18 (no bloqueante)
 - [ ] API-17 (y el `language` de API-1) lo entrega la spec 004: `tasks.md` de la raíz §13. Sus preguntas abiertas A y B ya están resueltas; lo que queda es trabajo de backend en serie (voces `EN`/`PT`, migración, TTS, API)
 - [ ] Antes de F3: `packages/video` como librería con audio real + catálogo de pnpm (Restricciones técnicas, puntos 1-4)
-- [ ] Antes de F4: API-7; API-8 en producción con TTL de audio 3600 s (D12); ajuste de `coding-rules.md` §1
+- [ ] Antes de F4: API-7; API-8 en producción con TTL de audio 3600 s (D12) y sin `/docs` (D20); ajuste de `coding-rules.md` §1
 
 ## 1. F1 — Base: auth, origen único, cliente tipado, layouts — sin empezar
 
@@ -26,7 +26,8 @@ Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1.
 - [ ] Instalar shadcn/ui, TanStack Query, `openapi-typescript` y `openapi-fetch` (D4)
 - [ ] `apps/dashboard/turbo.json` con `extends: ["//"]` y tarea `generate:api` → `src/lib/api/schema.d.ts`; `build`/`dev`/`lint` dependen de ella, con `env: ["API_INTERNAL_URL"]` (Restricciones técnicas, "Turborepo y tipos")
 - [ ] Verificar qué genera `openapi-typescript` con `avatarUrl` (`type: ["string","null"]` en un documento 3.0.0) (Restricciones técnicas, "Tipos generados")
-- [ ] Rewrites `/api/:path*` y `/audio-files/:path*` hacia `API_INTERNAL_URL` (apuntando al puerto 3000 fijo de `main.ts:54`) + `experimental.proxyTimeout` alto (ADR 0001 punto 3; AC 3.9)
+- [ ] Rewrites `/api/:path*` y `/audio-files/:path*` hacia `API_INTERNAL_URL` (apuntando al puerto 3000 fijo de `main.ts:54`) (ADR 0001 punto 3; AC 3.9)
+- [ ] `experimental.proxyTimeout` por encima del peor caso de `regenerate-verdict` (API-19, sincrónica): unos 90 s de espera del limitador de RPM más los reintentos; cubre también el SSE junto con el `heartbeat` (Restricciones técnicas, "Rewrites y SSE")
 - [ ] Cliente `openapi-fetch`: `baseUrl` `/api` en el navegador, `API_INTERNAL_URL` en el render de servidor, sin reenviar cookies (D11)
 - [ ] Provider de TanStack Query + manejo global del `401` → `/login?next=<ruta actual>` con aviso de acción no ejecutada (AC 3.7)
 
@@ -53,14 +54,15 @@ Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1.
 
 ## 2. F2 — Panel de curación (privado) — sin empezar
 
-Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17 (§0). Criterio: ver `roadmap.md`, Fase 2.
+Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§0). Criterio: ver `roadmap.md`, Fase 2.
 
-**Idioma del debate (compartido por lista, crear, detalle)** — requiere API-17:
-- [ ] Mapeo de `DebateLanguage` a etiqueta (`ES` → "Español", `EN` → "English", `PT` → "Português") como módulo compartido, con el tipo del enum generado de `openapi.json`, nunca una lista escrita a mano (spec, "Mapeo de estados a UI"; D5; Restricciones técnicas, "Tipos generados")
+**Compartido:**
+- [ ] Constantes de polling en un único módulo: 30 s inbox, 10 s detalle (fases sin SSE) y lista; ninguna pantalla define su propio intervalo (AC 3.86; D19). Verificable por revisión de código
+- [ ] Mapeo de `DebateLanguage` a etiqueta (`ES` → "Español", `EN` → "English", `PT` → "Português") como módulo compartido, con el tipo del enum generado de `openapi.json`, nunca una lista escrita a mano (spec, "Mapeo de estados a UI"; D5; Restricciones técnicas, "Tipos generados") — requiere API-17
 - [ ] Componente de distintivo de idioma: código compacto (`ES`/`EN`/`PT`) con el nombre completo accesible, por ejemplo en un tooltip (spec, "Mapeo de estados a UI")
 
 **Inbox (sección 2 de la spec)** — requiere API-5:
-- [ ] Contador de no leídas en el header, polling (30 s propuesto, pregunta 8) + refetch al volver el foco (AC 3.10)
+- [ ] Contador de no leídas en el header, polling de 30 s desde las constantes (D19) + refetch al volver el foco (AC 3.10)
 - [ ] Lista del inbox con mensaje, tipo con categoría visual y fecha relativa (AC 3.11, AC 3.74)
 - [ ] Click → `markNotificationRead` + navegación al episodio (AC 3.12)
 - [ ] "Marcar todas como leídas" (AC 3.13)
@@ -72,7 +74,7 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17 (§0). Crit
 - [ ] Contador y estado vacío de "Requiere acción" (AC 3.18)
 - [ ] Filtro multi-estado en la URL, tolerante a valores inválidos (AC 3.19)
 - [ ] Estados vacío/carga/error (AC 3.20, AC 3.73)
-- [ ] Auto-refresco mientras haya episodios "En curso" (AC 3.21)
+- [ ] Auto-refresco de 10 s (constantes, D19) mientras haya episodios "En curso" (AC 3.21)
 
 **Crear `/studio/new` (sección 4)** — requiere API-17:
 - [ ] Formulario `topic` con contador y validación 1-300 tras recortar (AC 3.22)
@@ -96,14 +98,14 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17 (§0). Crit
 - [ ] Cliente SSE con `addEventListener` por tipo de evento, solo en estados "SSE" con `pipelineActive` (AC 3.32; Restricciones técnicas, "Cliente SSE")
 - [ ] Feed de actividad traducido + indicador en vivo/desconectado, sin `heartbeat` en el feed (AC 3.32, AC 3.33, AC 3.37)
 - [ ] Refetch del detalle por cada evento de negocio, sin reconstruir estado (AC 3.34, D7)
-- [ ] Polling de 10 s en `APPROVED`/`GENERATING_AUDIO`/`RENDERING` con `pipelineActive` (AC 3.35)
+- [ ] Polling de 10 s (constantes, D19) en `APPROVED`/`GENERATING_AUDIO`/`RENDERING` con `pipelineActive` (AC 3.35)
 - [ ] Cierre sin reintento en estados frenados/terminales (AC 3.36)
 - [ ] Reconexión condicionada en `onerror` + `401` vía refetch (AC 3.38, AC 3.7)
 - [ ] Mensaje de episodio trabado con `pipelineActive: false` (AC 3.39)
 - [ ] Verificar: 60 s sin eventos de negocio sin reconexiones (AC 3.33)
 
 **Curaduría en `PENDING_REVIEW` (sección 6):**
-- [ ] Controles visibles solo en los estados de `api-contract.md` §5 (AC 3.42)
+- [ ] Controles visibles solo en los estados de `api-contract.md` §5 y API-19 (AC 3.42)
 - [ ] Aprobar con confirmación y paso a polling hasta `READY_FOR_RENDER` (AC 3.43)
 - [ ] Editor inline de un argumento a la vez (AC 3.44)
 - [ ] Regenerar argumento con confirmación de los 3 avisos y estado "Regenerando…" (AC 3.45, AC 3.75)
@@ -112,6 +114,13 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17 (§0). Crit
 - [ ] `409 INVALID_STATE_TRANSITION` → refetch + aviso (AC 3.48)
 - [ ] Bloqueo de acciones concurrentes sobre el mismo episodio (AC 3.49)
 - [ ] Errores específicos de `regenerate` (AC 3.50; mensajes específicos requieren API-10b, `404` de argumento requiere API-14)
+
+**Veredicto desactualizado y "Volver a juzgar" (sección 6; D17)** — requiere API-19:
+- [ ] Aviso "Este veredicto es anterior a cambios en los argumentos…" en el bloque del veredicto cuando `debate.verdict.stale` es verdadero en `PENDING_REVIEW`; aparece tras `edit`/`regenerate` y desaparece al volver a estar al día, sin recargar (AC 3.81; D7)
+- [ ] Botón "Volver a juzgar" (`regenerate-verdict`) siempre visible en `PENDING_REVIEW`, destacado con el aviso; confirmación con el costo a la vista (1 llamada LLM, usadas y límite) y el aviso de que reemplaza veredicto y ganador; "Juzgando…" mientras corre, con AC 3.49; refetch al terminar (AC 3.82, AC 3.75)
+- [ ] Deshabilitar "Volver a juzgar", con la explicación a la vista, si `usage.llmCalls >= limits.maxLlmCalls` (AC 3.83)
+- [ ] Confirmación de "Aprobar" con veredicto desactualizado: advertencia "El veredicto es anterior a tus cambios y es el que se va a publicar" y "Volver a juzgar" como alternativa en el mismo diálogo (AC 3.84)
+- [ ] Errores de `regenerate-verdict`: `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` con los mensajes de AC 3.50; `409 INVALID_STATE_TRANSITION` como en AC 3.48; el veredicto anterior queda y el bloque nunca queda en "Juzgando…" (AC 3.85)
 
 **Resolución de `REQUIRES_HUMAN_REVIEW` (sección 7):**
 - [ ] Panel de resolución con motivo, `fromState`, ronda, sobre el checkpoint más reciente (AC 3.51)
@@ -125,7 +134,7 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17 (§0). Crit
 - [ ] Body exacto por motivo, reapertura de SSE o polling según `fromState` (`GENERATING_AUDIO` → polling, también para `VOICE_NOT_CONFIGURED`) (AC 3.53)
 - [ ] `VALIDATION_ERROR` dentro del formulario sin perder datos (AC 3.54)
 - [ ] Panel genérico para motivo desconocido (AC 3.55)
-- [ ] Verificar criterio F2: crear un episodio en cada idioma con voces configuradas → en vivo hasta `PENDING_REVIEW` sin cortes; crear en un idioma sin voces muestra AC 3.78; forzar y resolver cada uno de los 6 motivos en local (para `VOICE_NOT_CONFIGURED`, quitando una voz del seed); "Publicado" con `publishedAt` puesto a mano
+- [ ] Verificar criterio F2: crear un episodio en cada idioma con voces configuradas → en vivo hasta `PENDING_REVIEW` sin cortes; crear en un idioma sin voces muestra AC 3.78; editar un argumento hace aparecer el aviso de veredicto desactualizado y "Volver a juzgar" lo hace desaparecer; forzar y resolver cada uno de los 6 motivos en local (para `VOICE_NOT_CONFIGURED`, quitando una voz del seed); "Publicado" con `publishedAt` puesto a mano
 
 ## 3. F3 — Preview con audio — sin empezar
 
@@ -144,13 +153,13 @@ Requiere §2 (detalle) y el refactor de `packages/video` + catálogo de pnpm (§
 
 ## 4. F4 — Publicación y showcase público (interfaz en español) — sin empezar
 
-Requiere §3 y API-7 (§0); preguntas 4 y 10 de la spec resueltas. Criterio: ver `roadmap.md`, Fase 4. Fuera de esta fase: `/en`, `/pt` y el selector de idioma de interfaz (§6, D16).
+Requiere §3 y API-7 (§0). Criterio: ver `roadmap.md`, Fase 4. Fuera de esta fase: `/en`, `/pt` y el selector de idioma de interfaz (§6, D16).
 
 - [ ] "Publicar" en el preview con confirmación (visible para cualquiera en `/es` y `/es/e/[id]`), distintivo y enlace público a `/es/e/[id]` (AC 3.64)
 - [ ] "Despublicar" con confirmación; deja de aparecer en `/[locale]` y `/[locale]/e/[id]` responde "no encontrado" (AC 3.65)
 - [ ] `/[locale]` con `listShowcaseEpisodes`, render de servidor contra `API_INTERNAL_URL`, con distintivo de idioma del debate por episodio (AC 3.66, D11; AC 4.23)
 - [ ] Showcase vacío (AC 3.71)
-- [ ] `/[locale]/e/[id]` con player, transcripción por segmento, veredicto y distintivo de idioma desde `manifest.meta.language` (AC 3.67; AC 4.23)
+- [ ] `/[locale]/e/[id]` con player, transcripción por segmento, veredicto y distintivo de idioma desde `manifest.meta.language`, sin distintivo de origen de los argumentos (AC 3.67; AC 4.23; D18)
 - [ ] `<html lang>` según el `locale` de la ruta (en F4, siempre `es`), y transcripción y veredicto marcados con el idioma del debate (AC 3.79 c)
 - [ ] Interfaz del showcase en español (etiquetas, botones, textos fijos, mensajes de vacío y error); enlaces internos y el del preview siempre con el segmento de idioma (AC 3.80)
 - [ ] Verificar AC 3.80: `/` → 307 a `/es`; `/es` y `/es/e/[id]` funcionan; `/en`, `/pt`, `/xx` y `/en/e/[id]` → 404
@@ -158,7 +167,7 @@ Requiere §3 y API-7 (§0); preguntas 4 y 10 de la spec resueltas. Criterio: ver
 - [ ] Título y transcripción en el HTML inicial + metadatos por episodio (AC 3.70)
 - [ ] Caché del HTML y de respuestas con `audioUrl` acotada al TTL; renovación como en AC 3.59 (AC 3.72)
 - [ ] Layout usable a 360 px (AC 3.76)
-- [ ] Verificar sin sesión: ninguna respuesta de red contiene datos internos (AC 3.69; `language` sí es público); acciones con curl → `401`; despublicado → `404`
+- [ ] Verificar sin sesión: ninguna respuesta de red contiene datos internos ni el origen de los argumentos (AC 3.69, D18; `language` sí es público); acciones con curl → `401`; despublicado → `404`
 
 ## 5. Transversales — sin empezar
 
@@ -166,7 +175,7 @@ Se verifican al cerrar cada fase sobre sus pantallas.
 
 - [ ] Estados de carga/vacío/error en toda pantalla con datos (AC 3.73)
 - [ ] Fechas en zona del navegador, relativas con absoluta en tooltip (AC 3.74)
-- [ ] Confirmación en `reject`/`publish`/`unpublish`/`regenerate`/`regenerate-audio` y en ninguna otra (AC 3.75)
+- [ ] Confirmación en `reject`/`publish`/`unpublish`/`regenerate`/`regenerate-audio`/`regenerate-verdict` y en ninguna otra (AC 3.75, AC 3.82)
 - [ ] Panel usable a 1280 px (AC 3.76)
 - [ ] Teclado y foco atrapado en diálogos, verificado (AC 3.77)
 - [ ] Ningún tipo de la API escrito a mano (D5), incluido `DebateLanguage` — revisión al cerrar cada fase
@@ -179,8 +188,8 @@ Se verifican al cerrar cada fase sobre sus pantallas.
 
 - `roadmap.md` (esta carpeta) — secuenciación, objetivo, dependencias y criterio de completitud de cada fase.
 - `decision-log.md` (esta carpeta) — decisiones ya tomadas (framework, dependencias).
-- `docs/product/003-dashboard-ui.md` — spec de UI (AC 3.1-3.80, API-1..API-18 con API-7a, plan F1-F4, D16).
+- `docs/product/003-dashboard-ui.md` — spec de UI (AC 3.1-3.86, API-1..API-19 con API-7a, plan F1-F4, D16-D20).
 - `docs/product/004-debate-language.md` — idioma del debate (AC 4.20-4.23 se implementan acá, vía los AC 3.x equivalentes).
 - `docs/adr/0001-auth-sesion-nest-mismo-origen.md` — auth y origen único.
 - `docs/adr/0002-voces-por-agente-e-idioma.md` — voces por agente e idioma, origen de `VOICE_NOT_CONFIGURED`.
-- `tasks.md` de la raíz §12 — dependencias de backend de la spec 003; §13 — spec 004 (entrega API-17).
+- `tasks.md` de la raíz §12 — dependencias de backend de la spec 003 (incluida API-19); §13 — spec 004 (entrega API-17).

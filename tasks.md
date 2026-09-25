@@ -284,7 +284,7 @@ Post-MVP, fuera de `features.md` (congelado). Requería la sección 10 (001) mer
 
 ## 12. Dependencias de backend del dashboard (`docs/product/003-dashboard-ui.md`) — sin empezar
 
-Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `architect` el 2026-09-25, ajustada el mismo día por la spec 004 (API-7a, API-17, API-18, AC 3.78/3.79, 6 motivos de `REQUIRES_HUMAN_REVIEW`); auth según `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Cada ítem sale de "Cambios requeridos en la API" (API-n), "Restricciones técnicas" o el plan F1-F4 de la spec, con los AC 3.x que desbloquea. Ordenado por la fase del front que desbloquea (`apps/dashboard/docs/roadmap.md`); la secuencia, la clasificación bloqueante/no bloqueante y el **orden respecto de la sección 13 (spec 004)** están en `roadmap.md` Fases 6 y 7 ("Orden crítico entre la Fase 6 y la Fase 7"). El trabajo del front en sí no se trackea acá (`apps/dashboard/docs/tasks.md`).
+Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `architect` el 2026-09-25, ajustada el mismo día por la spec 004 (API-7a, API-17, API-18, AC 3.78/3.79, 6 motivos de `REQUIRES_HUMAN_REVIEW`) y por el cierre de sus preguntas abiertas (D17-D20, API-19, AC 3.81-3.86); auth según `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Cada ítem sale de "Cambios requeridos en la API" (API-n), "Restricciones técnicas" o el plan F1-F4 de la spec, con los AC 3.x que desbloquea. Ordenado por la fase del front que desbloquea (`apps/dashboard/docs/roadmap.md`); la secuencia, la clasificación bloqueante/no bloqueante y el **orden respecto de la sección 13 (spec 004)** están en `roadmap.md` Fases 6 y 7 ("Orden crítico entre la Fase 6 y la Fase 7"). El trabajo del front en sí no se trackea acá (`apps/dashboard/docs/tasks.md`).
 
 ### 12.1. Antes de F1 — auth y workspace
 
@@ -297,6 +297,7 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 - [ ] Rate-limit simple en `POST /auth/login` con respuesta distinguible de credencial incorrecta (AC 3.8)
 - [ ] `trust proxy` (la API queda detrás del rewrite de Next) y eliminar `enableCors()` de `main.ts` (ADR 0001 punto 3; AC 3.9)
 - [ ] En producción, `EnvSchema` falla si `AUDIO_SIGNING_SECRET` conserva el default (ADR 0001 punto 5)
+- [ ] Swagger (`/docs`) montado solo fuera de producción; en producción `/docs` no responde (D20). `openapi:generate` sigue funcionando porque no depende del montaje
 - [ ] Tests del guard/login/sesión + verificación con curl: sin cookie → `401` en `/episodes` y acciones; con cookie → `200`
 - [ ] `openapi.json` regenerado e idempotente (`pnpm openapi:generate && git diff --exit-code openapi.json`)
 
@@ -309,17 +310,29 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 **Bloqueantes** (recomendados en paralelo con F1)
 - [ ] **API-1 (parte 1)** — `getEpisodeDetail` trae tópico, `createdAt` y participantes (id, nombre/persona, `isJudge`) (AC 3.26-3.29, 3.32, 3.51 — agente afectado en `VALIDATION_INCONSISTENCY`, participantes en `VOICE_NOT_CONFIGURED`). Cierra API-9. Hacerla junto con API-7a (mismo mapeo de detalle y listado).
 - [ ] **API-1 (parte 2)** — `language` en `getEpisodeDetail` y en `listEpisodes` (AC 3.17 idioma, 3.26 idioma). **Lo entrega la sección 13, paso 7** (AC 4.18), porque la columna nace en la migración de la spec 004; no se implementa por separado acá.
-- [ ] **API-7a** — columna `Episode.publishedAt` (nullable, `null` hasta que exista `publish`) + migración aplicada con `migrate deploy` (`decision-log.md` #21) + exposición en `getEpisodeDetail` y `listEpisodes` (AC 3.17, 3.26 distintivo "Publicado"; D10). **Antes** de la migración de la sección 13 (paso 4), para no tener dos migraciones abiertas en paralelo.
+- [ ] **API-7a** — columna `Episode.publishedAt` (nullable, `null` hasta que exista `publish`) + migración aplicada con `migrate deploy` (`decision-log.md` #21) + exposición en `getEpisodeDetail` y `listEpisodes` (AC 3.17, 3.26 distintivo "Publicado"; D10). Primera de la cola de migraciones: API-7a → `VerdictHistory` (API-19) → sección 13, paso 4.
 - [ ] **API-17** — idioma del debate: `language` en `CreateEpisodeDto` (default `ES`), `409 VOICE_NOT_CONFIGURED` en `createEpisode`, `CheckpointReason.VOICE_NOT_CONFIGURED` reanudable con `{}`, `meta.language` en `RemotionManifest`, todo en `openapi.json` (AC 3.22, 3.51 fila `VOICE_NOT_CONFIGURED`, 3.67, 3.78). **Lo entrega la sección 13** (pasos 3, 4, 6 y 7); se marca hecho cuando esos cuatro pasos lo estén.
 - [ ] **API-5** — schema de respuesta de `listNotifications`, `markNotificationRead` y `markAllNotificationsRead` en `openapi.json` (AC 3.10-3.14)
 - [ ] **API-12** — `pipelineActive: boolean` en `getEpisodeDetail`; `streamEpisodeEvents` completa enseguida si el pipeline no está activo (AC 3.32, 3.35, 3.38, 3.39)
 - [ ] **API-13** — evento SSE `heartbeat` cada 15 s mientras el pipeline está activo, como séptimo DTO SSE en `openapi.json`, + `Cache-Control: no-transform` en el stream (AC 3.33; ADR 0001 punto 6)
+- [ ] **API-10b** — no bloqueante según la spec, pero **prerrequisito de API-19** (en la práctica, ruta crítica de F2): `BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED` y errores de proveedor → `503 PROVIDER_QUOTA_EXCEEDED` en `regenerate` (`episode-actions.service.ts:99,109`) y `regenerate-audio` (`:131`) (AC 3.50, 3.62). No en paralelo con la sección 13, paso 5a (mismo archivo).
+
+**API-19 — `regenerate-verdict` (D17) — bloqueante (AC 3.81-3.85)**. Requiere API-10b y la extracción de `EpisodeContextService` (sección 13, paso 5a); si la F2 llega antes que la spec 004, esa extracción es el **primer commit** de API-19. Nunca una tercera copia de `buildDebateContext`.
+- [ ] (Si 13.5a no está hecho) Extraer `EpisodeContextService.build(episodeId)` sin cambio de comportamiento, como primer commit (ver 13.5a)
+- [ ] Tabla `VerdictHistory` (migración aditiva, aplicada con `migrate deploy`; segunda de la cola de migraciones, después de API-7a y antes de la de la sección 13). Si tiene FK a `Agent`, anotarlo para la reconstrucción de `Agent` de 13.4
+- [ ] `DebateService.replaceVerdict`: en una transacción, archiva el `Verdict` actual en `VerdictHistory`, lo borra y crea el nuevo (AC 3.82)
+- [ ] `EpisodeActionsService.regenerateVerdict`: sincrónica, llama al juez con los argumentos OFFICIAL actuales dentro de `withLlmCall` (1 llamada LLM del presupuesto; AC 3.82, 3.83) y hace una segunda verificación de `PENDING_REVIEW` antes de escribir; fuera de `PENDING_REVIEW` → `409 INVALID_STATE_TRANSITION`; sin presupuesto → `409 USAGE_LIMIT_EXCEEDED`; error del proveedor → `503 PROVIDER_QUOTA_EXCEEDED`, con el veredicto anterior intacto (AC 3.85)
+- [ ] `regenerate-verdict` en `ActionNameSchema` + case en el controller
+- [ ] `debate.verdict.stale` calculado en `getEpisodeDetail` y en el mapper (`ArgumentHistory.createdAt > verdict.createdAt`), sin columna nueva (AC 3.81)
+- [ ] Fila de `regenerate-verdict` (solo `PENDING_REVIEW`) en `api-contract.md` §5
+- [ ] `VerdictHistory` en `architecture.md` §6
+- [ ] Tests: reemplazo transaccional con archivo en `VerdictHistory`; `stale` verdadero tras `edit`/`regenerate` y falso tras `regenerate-verdict`; `409` fuera de `PENDING_REVIEW`, incluida la segunda verificación (estado que cambia durante la llamada al juez); presupuesto agotado y error de proveedor sin tocar el veredicto
+- [ ] `openapi.json` regenerado e idempotente
 
 **No bloqueantes**
-- [ ] **API-10** (recomendado antes de F2) — bodies y respuestas por acción de `runEpisodeAction` y envelope de error con sus códigos en `openapi.json`, incluido `VOICE_NOT_CONFIGURED` (`@ZodResponse` en acciones, DTO de `ResumeActionBodySchema`, pendientes de la spec 001). El código `VOICE_NOT_CONFIGURED` existe recién tras la sección 13, paso 6.
+- [ ] **API-10** (recomendado antes de F2) — bodies y respuestas por acción de `runEpisodeAction` (incluida `regenerate-verdict`) y envelope de error con sus códigos en `openapi.json`, incluido `VOICE_NOT_CONFIGURED` (`@ZodResponse` en acciones, DTO de `ResumeActionBodySchema`, pendientes de la spec 001). El código `VOICE_NOT_CONFIGURED` existe recién tras la sección 13, paso 6.
 - [ ] **API-10** — corregir en `features.md`/`api-contract.md` la documentación de `argument.approved` (no lleva `sequenceIndex`)
-- [ ] **API-10b** — `BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED` y errores de proveedor → `503 PROVIDER_QUOTA_EXCEEDED` en `regenerate` (`episode-actions.service.ts:99,109`) y `regenerate-audio` (`:131`) (AC 3.50, 3.62). No en paralelo con la sección 13, paso 5a (mismo archivo).
-- [ ] **API-14** — `edit`/`regenerate` validan que el `argumentId` pertenezca al episodio → `404 NOT_FOUND` (`episode-actions.service.ts:56,73`) (AC 3.50, importante por integridad). No en paralelo con la sección 13, paso 5a.
+- [ ] **API-14** — `edit`/`regenerate` validan que el `argumentId` pertenezca al episodio → `404 NOT_FOUND` (`episode-actions.service.ts:56,73`) (AC 3.50, importante por integridad). No en paralelo con la sección 13, paso 5a, ni con API-19.
 - [ ] **API-16** — aceptar `maxTtsSegments` en `UsageLimitResumeSchema` (parte de AC 3.51)
 - [ ] **API-18** — exponer qué agentes no tienen voz en un `VOICE_NOT_CONFIGURED` (parte de AC 3.51, fila `VOICE_NOT_CONFIGURED`; sin fase en la spec). Requiere la sección 13, paso 6. **Antes de implementarlo, `architect` define el mecanismo** (la spec no lo fija; ver `roadmap.md`, "Decisiones abiertas")
 - [ ] **API-15** (menor) — `resume` valida el estado antes de aplicar límites nuevos (`episode-actions.service.ts:151` vs. `:153`)
@@ -342,13 +355,13 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 - [ ] `showcase.controller.ts` en `EpisodesModule`, `@Controller("showcase")` + `@Public()` (AC 3.66-3.68)
 - [ ] `GET /showcase/episodes` (`listShowcaseEpisodes` → `{ id, title, createdAt, durationSec, language }[]`) filtrado por `publishedAt` no nulo y `SHOWCASE_STATUSES` (AC 3.66; AC 4.23)
 - [ ] `GET /showcase/episodes/:id` (`getShowcaseEpisode` → `{ id, title, createdAt, manifest }`, idioma en `manifest.meta.language`); inexistente o no público → `404 NOT_FOUND`, sin usar `MANIFEST_NOT_READY` para decidir (AC 3.67, 3.68)
-- [ ] Respuestas públicas sin `usage`, `limits`, `checkpoints`, `pipelineActive`, `publishedAt`, notificaciones ni origen de argumentos; `language` sí es público (AC 3.69)
+- [ ] Respuestas públicas sin `usage`, `limits`, `checkpoints`, `pipelineActive`, `publishedAt`, notificaciones ni origen de argumentos (D18); `language` sí es público (AC 3.69)
 - [ ] Test de AC 4.3 extendido a `publish`/`unpublish`: no aceptan ni modifican `language` (spec 004, AC 4.3)
 - [ ] Tests + verificación con curl sin sesión: showcase `200`, no publicado/despublicado `404`, acciones `401`
 
 **Resto**
 - [ ] Ajustar `coding-rules.md` §1: varios controllers por módulo cuando la política de acceso es distinta (spec, "Dependencias"; F4)
-- [ ] Producción: `AUDIO_URL_TTL_SECONDS=3600` (D12) y API-8 activo con `Secure` en la cookie
+- [ ] Producción: `AUDIO_URL_TTL_SECONDS=3600` (D12), API-8 activo con `Secure` en la cookie y `/docs` no montado (D20)
 
 ### 12.5. No MVP — nice-to-have (no se implementan sin pedirlo)
 
@@ -384,25 +397,25 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 - [ ] `packages/video/fixtures/debate.sample.json` con `"language": "ES"`; `pnpm video:studio` sigue renderizando sin `.env` ni base (AC 4.19)
 - [ ] `check-boundaries` pasa: `packages/video` sigue sin importar nada de `apps/api` (AC 4.19)
 
-### 13.4. Paso 4 — Schema y migración (requiere 13.1 para el seed `EN`/`PT` y API-7a ya aplicada)
+### 13.4. Paso 4 — Schema y migración (requiere 13.1 para el seed `EN`/`PT`, y las migraciones de API-7a y `VerdictHistory` ya aplicadas)
 
 - [ ] Revisar los episodios existentes en `dev.db` (`SELECT id, title, status FROM Episode`) por si alguno quedó mal etiquetado como español (Edge cases, "Episodio en curso durante la migración")
 - [ ] `schema.prisma`: enum `DebateLanguage`, modelo `AgentVoice` con `@@id([agentId, language, provider])` y `onDelete: Cascade`, sin `Agent.voiceId`, `Episode.language @default(ES)`, `AudioAsset.voiceId String?`, `CheckpointReason.VOICE_NOT_CONFIGURED` (ADR 0002 puntos 1, 2, 4, 6)
-- [ ] Migración manual (ADR 0002 punto 7): crear `AgentVoice`; copiar las voces actuales como `ES` con `json_each`, excluyendo `'TBD'`; completar `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente, **antes** de reconstruir `Agent` (pregunta B; AC 4.16); reconstruir `Agent` sin `voiceId` con el patrón `PRAGMA` de `20260909120000_agent_voiceid_json_add_openrouter` (FKs de `Argument`, `Verdict`, `EpisodeParticipant`); `Episode.language NOT NULL DEFAULT 'ES'`. Aplicada con `migrate deploy` (#21)
+- [ ] Migración manual (ADR 0002 punto 7): crear `AgentVoice`; copiar las voces actuales como `ES` con `json_each`, excluyendo `'TBD'`; completar `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente, **antes** de reconstruir `Agent` (pregunta B; AC 4.16); reconstruir `Agent` sin `voiceId` con el patrón `PRAGMA` de `20260909120000_agent_voiceid_json_add_openrouter` (FKs de `Argument`, `Verdict`, `EpisodeParticipant` y, si la tiene, `VerdictHistory`); `Episode.language NOT NULL DEFAULT 'ES'`. Aplicada con `migrate deploy` (#21)
 - [ ] Seed: upsert por `(agentId, language, provider)`: `ES` con las 5 voces actuales, `EN` y `PT` con las de 13.1; sin `"TBD"` ni filas `OPENROUTER`; idempotente; corregir el comentario obsoleto de `seed.ts:49-51` sobre `Agent.name` (AC 4.25)
 - [ ] Consulta directa: todos los episodios existentes en `ES` (AC 4.5); 5 agentes × 3 idiomas con una fila `LOCAL` cada uno, sin `TBD` ni `OPENROUTER`, y el seed corrido dos veces no cambia nada (AC 4.25); los `AudioAsset` anteriores a la migración tienen `voiceId` no nulo (pregunta B)
 - [ ] Ajustar los tests que crean agentes con `voiceId` (por ejemplo, `episodes.integration.spec.ts:46`)
 
 ### 13.5. Paso 5 — Pipeline
 
-**5a. `EpisodeContextService` — sin cambio de comportamiento (sin bloqueo)**
-- [ ] Extraer `EpisodeContextService.build(episodeId)` en `modules/episodes/`, reemplazando las copias de `buildDebateContext` del orquestador (`:496`) y de acciones (`:219`) (prepara AC 4.12)
-- [ ] Tests existentes en verde **antes** de tocar el idioma; no en paralelo con API-10b/API-14/API-15 (mismo `episode-actions.service.ts`)
+**5a. `EpisodeContextService` — sin cambio de comportamiento (sin bloqueo; prerrequisito de API-19)**
+- [ ] Extraer `EpisodeContextService.build(episodeId)` en `modules/episodes/`, reemplazando las copias de `buildDebateContext` del orquestador (`:496`) y de acciones (`:219`) (prepara AC 4.12). Si API-19 (12.2) arranca antes, esta extracción es su primer commit; nunca una tercera copia
+- [ ] Tests existentes en verde **antes** de tocar el idioma; no en paralelo con API-10b/API-14/API-15/API-19 (mismo `episode-actions.service.ts`)
 
 **5b. Prompts (requiere 5a y 13.4)**
 - [ ] Reescribir sin voseo, a español neutro con tuteo: `agents.personas.ts` (incluido `ROUND_FRAMING` `:155-159` y `:168,184`), `agents.service.ts`, `fact-check.service.ts`, `research.service.ts` y el `debaterSummary` del seed (AC 4.26)
 - [ ] `buildLanguageInstruction(language)` en `shared/personas`: una línea por idioma, redactada en el idioma de destino; la de `ES` nombra la variante (neutro latinoamericano, tuteo, sin regionalismos) (AC 4.27; D11)
-- [ ] Instrucción como regla del system prompt y como última línea del prompt de usuario en `argue`, `respond`, `amend`, `regenerate` y `judge`; tests que inspeccionan el prompt para `ES`, `EN` y `PT` (AC 4.6)
+- [ ] Instrucción como regla del system prompt y como última línea del prompt de usuario en `argue`, `respond`, `amend`, `regenerate` y `judge` (incluido el `judge` de `regenerate-verdict`, API-19); tests que inspeccionan el prompt para `ES`, `EN` y `PT` (AC 4.6)
 - [ ] En las evaluadoras (claims, fact-check, filtro editorial) y en la extracción de hechos del research: idioma del texto evaluado y de los campos libres (`statement`, `analysis`, `violatedRule`, `reason`, hechos); tests del prompt (AC 4.7; D7, D9)
 - [ ] Texto de respaldo `"Violación de reglas editoriales."` (`episode-orchestrator.service.ts:371`) en el idioma del episodio (D7)
 - [ ] `CONTRARIAN.voice` (`agents.personas.ts:67`) sin la frase literal en español; reemplazo por descripción neutra (AC 4.9)
@@ -430,7 +443,7 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 ### 13.7. Paso 7 — API (requiere 13.3, 13.4 y 13.6)
 
 - [ ] `CreateEpisodeSchema = { topic, language: DebateLanguageSchema.default("ES") }.strict()`; valor inválido → `400 VALIDATION_ERROR` sin crear `Topic`/`Debate`/`Episode`/`EpisodeUsage`; omitido → `ES` (AC 4.1, 4.2)
-- [ ] `language` en `EpisodeSchema`, `EpisodeListItemSchema` (y en el `select` de `episodes.service.ts:60`), `EpisodeDetailSchema`/`mapEpisodeDetail` y `BuildManifestInput` (AC 4.18). **Cierra API-1 parte 2**
+- [ ] `language` en `EpisodeSchema`, `EpisodeListItemSchema` (y en el `select` de `episodes.service.ts:60`), `EpisodeDetailSchema`/`mapEpisodeDetail` y `BuildManifestInput` (AC 4.18). **Cierra API-1 parte 2**. Mismo mapper que `debate.verdict.stale` de API-19: mergear en serie
 - [ ] `CheckpointReasonSchema` suma `VOICE_NOT_CONFIGURED` (AC 4.18)
 - [ ] Ninguna acción acepta ni modifica `language`; un `resume` con `language` → `400 VALIDATION_ERROR` por `.strict()` (AC 4.3; `publish`/`unpublish` se cubren en 12.4 cuando existan)
 - [ ] `pnpm openapi:generate`: enum `DebateLanguage` en `createEpisode`, `EpisodeDto`, detalle, listado y manifest; verificar si nestjs-zod genera `DebateLanguage_Output` además; dos corridas sin diff (AC 4.18). **Con esto, API-17 queda cumplido**
