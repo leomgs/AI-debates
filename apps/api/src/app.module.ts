@@ -12,6 +12,7 @@ import { ResearchModule } from './modules/research/research.module';
 import { DebateModule } from './modules/debate/debate.module';
 import { FactCheckModule } from './modules/fact-check/fact-check.module';
 import { EpisodesModule } from './modules/episodes/episodes.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -26,6 +27,9 @@ import { EpisodesModule } from './modules/episodes/episodes.module';
     // importa para inyectar NotificationsService en EpisodeStateService) —
     // no hace falta importarlo acá aparte.
     EpisodesModule,
+    // API-8 (ADR 0001): registra el SessionGuard global (APP_GUARD), que
+    // protege los controllers de todos los módulos salvo los @Public().
+    AuthModule,
   ],
   controllers: [AppController],
   // spec 001 (docs/product/001-openapi-contract-zod.md) — reemplaza el pipe

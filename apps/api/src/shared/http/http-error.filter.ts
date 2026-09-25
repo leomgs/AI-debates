@@ -6,6 +6,7 @@ import { ZodValidationException } from "nestjs-zod";
 import { InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
 import { SequenceIndexOutOfRangeError } from "../../modules/tts/tts.errors";
 import { ManifestNotReadyError } from "../../modules/render/render.errors";
+import { InvalidCredentialsError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
 
 // Reusado por los dos branches que terminan en 400 VALIDATION_ERROR: el
 // ZodError "crudo" del pipe propio (path param `action`) y el que envuelve
@@ -29,16 +30,17 @@ export class HttpErrorFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
-    const { status, code, message } = this.resolve(exception);
+    const { status, code, message, headers } = this.resolve(exception);
 
     if (status >= 500) {
       this.logger.error(message, exception instanceof Error ? exception.stack : exception);
     }
 
+    for (const [name, value] of Object.entries(headers ?? {})) response.setHeader(name, value);
     response.status(status).json({ error: { code, message } });
   }
 
-  private resolve(exception: unknown): { status: number; code: string; message: string } {
+  private resolve(exception: unknown): { status: number; code: string; message: string; headers?: Record<string, string> } {
     if (exception instanceof InvalidEpisodeTransitionError) {
       return { status: 409, code: "INVALID_STATE_TRANSITION", message: exception.message };
     }
@@ -55,6 +57,23 @@ export class HttpErrorFilter implements ExceptionFilter {
     // datos, no un payload inválido (mismo status class que INVALID_STATE_TRANSITION).
     if (exception instanceof ManifestNotReadyError) {
       return { status: 409, code: "MANIFEST_NOT_READY", message: exception.message };
+    }
+
+    // API-8 (spec 003, AC 3.2/3.8) — login rechazado. La falta de sesión en
+    // el resto de la API no pasa por acá: el SessionGuard lanza
+    // UnauthorizedException, que el branch genérico de HttpException de
+    // abajo convierte en 401 UNAUTHORIZED.
+    if (exception instanceof InvalidCredentialsError) {
+      return { status: 401, code: "INVALID_CREDENTIALS", message: exception.message };
+    }
+
+    if (exception instanceof TooManyLoginAttemptsError) {
+      return {
+        status: 429,
+        code: "TOO_MANY_ATTEMPTS",
+        message: exception.message,
+        headers: { "Retry-After": String(exception.retryAfterSeconds) },
+      };
     }
 
     if (exception instanceof ZodError) {

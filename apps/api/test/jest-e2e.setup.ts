@@ -30,6 +30,9 @@ process.env.SESSION_SECRET = E2E_SESSION_SECRET;
 // episodes.integration.spec.ts: archivo temporal, migrada con `prisma
 // migrate deploy` antes de bootstrapear, recreada desde cero en cada corrida
 // para no depender de estado de una corrida anterior).
+// setupFiles corre antes de CADA archivo e2e: con más de un archivo (API-8
+// sumó auth.e2e-spec.ts), dos workers en paralelo borrarían y migrarían la
+// misma DB a la vez. Por eso jest-e2e.json fija maxWorkers: 1.
 const TEST_DB_PATH = join(__dirname, "tmp-e2e.db");
 for (const suffix of ["", "-journal", "-wal", "-shm"]) {
   const path = TEST_DB_PATH + suffix;
