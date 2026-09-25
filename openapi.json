@@ -383,7 +383,17 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationDto_Output"
+                  }
+                }
+              }
+            }
           },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
@@ -422,7 +432,14 @@
         ],
         "responses": {
           "201": {
-            "description": ""
+            "description": "La notificación, con `readAt` ya seteado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDto_Output"
+                }
+              }
+            }
           },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
@@ -452,7 +469,14 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": ""
+            "description": "Cantidad de notificaciones no leídas que se marcaron como leídas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllNotificationsReadDto_Output"
+                }
+              }
+            }
           },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
@@ -1451,6 +1475,67 @@
         "required": [
           "type"
         ]
+      },
+      "NotificationDto_Output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "episodeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "EPISODE_COMPLETED",
+              "EPISODE_PENDING_REVIEW",
+              "EPISODE_REQUIRES_REVIEW",
+              "EPISODE_FAILED"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "readAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "episodeId",
+          "type",
+          "message",
+          "readAt",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "MarkAllNotificationsReadDto_Output": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "additionalProperties": false
       },
       "LoginDto": {
         "type": "object",

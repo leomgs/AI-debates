@@ -12,6 +12,8 @@ import { configureApp } from './../src/configure-app';
 import type { Env } from './../src/shared/config/env.schema';
 import { PrismaService } from './../src/shared/prisma/prisma.service';
 import { EpisodeEventsService } from './../src/modules/episodes/episode-events.service';
+import { NotificationSchema } from './../src/modules/notifications/dto/notification.schema';
+import { z } from 'zod';
 import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 
 // Spec 003, dependencias de backend de la F2 (API-12 y siguientes) contra
@@ -127,6 +129,41 @@ describe('Episodes (e2e)', () => {
       // transforme o bufferee el stream. Lo pone Nest, no este proyecto.
       expect(res.headers['cache-control']).toMatch(/\bno-transform\b/);
       expect(body).toMatch(/event: research\.started/);
+    });
+  });
+
+  describe('API-5: respuestas de /notifications', () => {
+    it('listar, marcar una y marcar todas responden con el shape documentado', async () => {
+      const { episode } = await seedEpisode(prisma, 'PENDING_REVIEW');
+      const first = await prisma.notification.create({
+        data: { episodeId: episode.id, type: 'EPISODE_PENDING_REVIEW', message: 'El episodio está listo para revisión.' },
+      });
+      await prisma.notification.create({
+        data: { episodeId: episode.id, type: 'EPISODE_REQUIRES_REVIEW', message: 'El episodio requiere revisión: X.' },
+      });
+
+      const list = await request(app.getHttpServer()).get('/notifications').set('Cookie', cookie).expect(200);
+      expect(z.array(NotificationSchema).parse(list.body)).toHaveLength(2);
+      expect(list.body[0]).toEqual({
+        id: expect.any(String),
+        episodeId: episode.id,
+        type: expect.any(String),
+        message: expect.any(String),
+        readAt: null,
+        createdAt: expect.any(String),
+      });
+
+      const read = await request(app.getHttpServer())
+        .post(`/notifications/${first.id}/read`)
+        .set('Cookie', cookie)
+        .expect(201);
+      expect(NotificationSchema.parse(read.body)).toMatchObject({ id: first.id, readAt: expect.any(String) });
+
+      const readAll = await request(app.getHttpServer()).post('/notifications/read-all').set('Cookie', cookie).expect(201);
+      expect(readAll.body).toEqual({ count: 1 });
+
+      const unread = await request(app.getHttpServer()).get('/notifications').set('Cookie', cookie).expect(200);
+      expect(unread.body).toEqual([]);
     });
   });
 });

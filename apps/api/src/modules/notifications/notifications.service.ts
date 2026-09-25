@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Notification, NotificationType } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
+import type { MarkAllNotificationsReadResponse, SerializedNotification } from "./dto/notification.schema";
 
 // Mensajes legibles por tipo — se arman UNA vez al crear la fila (no se
 // derivan en el frontend a partir de `type`), decision-log.md 2026-09-08 #9.
@@ -36,18 +37,34 @@ export class NotificationsService {
     });
   }
 
-  async list(unreadOnly: boolean): Promise<Notification[]> {
-    return this.prisma.notification.findMany({
+  async list(unreadOnly: boolean): Promise<SerializedNotification[]> {
+    const rows = await this.prisma.notification.findMany({
       where: unreadOnly ? { readAt: null } : undefined,
       orderBy: { createdAt: "desc" },
     });
+    return rows.map(serialize);
   }
 
-  async markRead(id: string): Promise<Notification> {
-    return this.prisma.notification.update({ where: { id }, data: { readAt: new Date() } });
+  async markRead(id: string): Promise<SerializedNotification> {
+    return serialize(await this.prisma.notification.update({ where: { id }, data: { readAt: new Date() } }));
   }
 
-  async markAllRead(): Promise<void> {
-    await this.prisma.notification.updateMany({ where: { readAt: null }, data: { readAt: new Date() } });
+  async markAllRead(): Promise<MarkAllNotificationsReadResponse> {
+    const { count } = await this.prisma.notification.updateMany({ where: { readAt: null }, data: { readAt: new Date() } });
+    return { count };
   }
+}
+
+// Borde HTTP (API-5): fechas a ISO, igual que EpisodesService con Episode.
+// notify() sigue devolviendo la fila de Prisma: su caller es interno
+// (EpisodeStateService), no un controller.
+function serialize(n: Notification): SerializedNotification {
+  return {
+    id: n.id,
+    episodeId: n.episodeId,
+    type: n.type,
+    message: n.message,
+    readAt: n.readAt ? n.readAt.toISOString() : null,
+    createdAt: n.createdAt.toISOString(),
+  };
 }
