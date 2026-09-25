@@ -30,6 +30,10 @@ import { EpisodeRecoveryService } from "./episode-recovery.service";
 // por PrismaClient — una DB en memoria no sobreviviría el $connect()
 // implícito de PrismaService si algo la reabriera.
 const TEST_DB_PATH = join(__dirname, "tmp-episodes-integration.db");
+// Hash scrypt válido (formato de shared/crypto/scrypt-password.ts) de una
+// contraseña cualquiera: solo tiene que pasar la validación de EnvSchema.
+const DUMMY_CURATOR_PASSWORD_HASH =
+  "scrypt:16384:8:1:_9YJqs4PlFzDq1FBH0ZrMw:YU4EDvCZx4gNmnpcMxmlvdEbIz694zQ7qmQcgAYqQtCl4ndZ8h6_X67Yb_1s6kxIjr8FGM9HvDxyTMUGz4_mGA";
 const TEST_DB_URL = `file:${TEST_DB_PATH.replace(/\\/g, "/")}`;
 
 function fakeArgentAgent(content = "Contenido de prueba generado por el agente.") {
@@ -117,6 +121,12 @@ describe("EpisodesModule (integración)", () => {
     process.env.DATABASE_URL = TEST_DB_URL;
     process.env.GOOGLE_API_KEY ??= "test-google-api-key";
     process.env.TAVILY_API_KEY ??= "test-tavily-api-key";
+    // API-8: EnvSchema exige la credencial del curador (sin defaults). Este
+    // test no pasa por HTTP ni por el SessionGuard, así que alcanza con
+    // valores dummy válidos.
+    process.env.CURATOR_USERNAME ??= "curador-test";
+    process.env.CURATOR_PASSWORD_HASH ??= DUMMY_CURATOR_PASSWORD_HASH;
+    process.env.SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 
     execSync("npx prisma migrate deploy", {
       cwd: join(__dirname, "..", "..", ".."),

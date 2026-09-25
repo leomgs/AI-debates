@@ -1,61 +1,96 @@
 import { z } from "zod";
+import { isValidPasswordHash } from "../crypto/scrypt-password";
+
+// Default de desarrollo de AUDIO_SIGNING_SECRET. Exportado para que el
+// superRefine de abajo lo compare: en producción no se acepta (ADR 0001
+// punto 5 — /audio-files queda fuera del SessionGuard y su única protección
+// es esta firma).
+export const DEFAULT_AUDIO_SIGNING_SECRET = "dev-audio-signing-secret-change-me";
 
 // Única fuente de verdad de qué env vars existen. Nadie lee process.env.X
 // directo en ningún otro archivo — todo pasa por ConfigService, que valida
 // contra esto al arrancar (ver AppModule).
-export const EnvSchema = z.object({
-  DATABASE_URL: z.string().min(1), // sqlite: "file:./dev.db"
+export const EnvSchema = z
+  .object({
+    // "production" activa las reglas de despliegue: cookie de sesión Secure,
+    // Swagger (/docs) sin montar (spec 003, D20) y AUDIO_SIGNING_SECRET
+    // obligatorio distinto del default. Jest setea "test" solo.
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
-  // Única requerida: es la única con la que hay acceso gratuito hoy.
-  // Las demás quedan opcionales hasta contratar una suscripción adecuada —
-  // ModelProviderFactory tira error recién si algo intenta resolver un
-  // provider cuya key falta, no al arrancar el proceso.
-  GOOGLE_API_KEY: z.string().min(1),
-  OPENAI_API_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  XAI_API_KEY: z.string().optional(),
-  OPENROUTER_API_KEY: z.string().optional(),
+    DATABASE_URL: z.string().min(1), // sqlite: "file:./dev.db"
 
-  GOOGLE_TTS_API_KEY: z.string().optional(), // según el wrapper de google-tts-api que termines usando
+    // Única requerida: es la única con la que hay acceso gratuito hoy.
+    // Las demás quedan opcionales hasta contratar una suscripción adecuada —
+    // ModelProviderFactory tira error recién si algo intenta resolver un
+    // provider cuya key falta, no al arrancar el proceso.
+    GOOGLE_API_KEY: z.string().min(1),
+    OPENAI_API_KEY: z.string().optional(),
+    ANTHROPIC_API_KEY: z.string().optional(),
+    XAI_API_KEY: z.string().optional(),
+    OPENROUTER_API_KEY: z.string().optional(),
 
-  // Requerida: proveedor de búsqueda web decidido para ResearchModule
-  // (free tier: 1000 créditos/mes sin tarjeta — ver tasks.md sección 1).
-  // A diferencia de OPENAI/ANTHROPIC/XAI, Research es P0 y no tiene sentido
-  // arrancar el proceso sin poder ejecutar una research real.
-  TAVILY_API_KEY: z.string().min(1),
+    GOOGLE_TTS_API_KEY: z.string().optional(), // según el wrapper de google-tts-api que termines usando
 
-  // Límites de free tier de Google para LlmRateLimiterService (decision-log.md
-  // 2026-09-08, #8) — opcionales con default al valor vigente hoy. Ya
-  // cambiaron una vez en la historia del proyecto (ver ModelProviderFactory),
-  // así que conviene poder ajustarlos sin recompilar.
-  GOOGLE_RPM_LIMIT: z.coerce.number().default(15),
-  GOOGLE_RPD_LIMIT: z.coerce.number().default(500),
+    // Requerida: proveedor de búsqueda web decidido para ResearchModule
+    // (free tier: 1000 créditos/mes sin tarjeta — ver tasks.md sección 1).
+    // A diferencia de OPENAI/ANTHROPIC/XAI, Research es P0 y no tiene sentido
+    // arrancar el proceso sin poder ejecutar una research real.
+    TAVILY_API_KEY: z.string().min(1),
 
-  // Límites reales del free tier de OpenRouter (validado 2026-09-08, ver
-  // decision-log.md): 20 RPM fijo; RPD depende de si la cuenta compró
-  // créditos alguna vez (50/día sin créditos, 1000/día si compró $10+) — se
-  // asume el caso conservador (sin créditos) como default.
-  OPENROUTER_RPM_LIMIT: z.coerce.number().default(20),
-  OPENROUTER_RPD_LIMIT: z.coerce.number().default(50),
+    // Límites de free tier de Google para LlmRateLimiterService (decision-log.md
+    // 2026-09-08, #8) — opcionales con default al valor vigente hoy. Ya
+    // cambiaron una vez en la historia del proyecto (ver ModelProviderFactory),
+    // así que conviene poder ajustarlos sin recompilar.
+    GOOGLE_RPM_LIMIT: z.coerce.number().default(15),
+    GOOGLE_RPD_LIMIT: z.coerce.number().default(500),
 
-  // TtsModule (decision-log.md 2026-09-09, #19/#20) — motor activo para todo
-  // el proceso (no por llamada, a diferencia de ModelProviderFactory: los
-  // catálogos de voz de los 3 motores son incompatibles entre sí). Default
-  // LOCAL: sin key, sin costo, sin riesgo de discontinuación.
-  TTS_PROVIDER: z.enum(["LOCAL", "GOOGLE_TTS", "OPENROUTER"]).default("LOCAL"),
-  // AC 6.1 (features.md Feature 6) — carpeta base de LocalDiskStorageProvider.
-  // Gitignoreada (binarios generados, regenerables desde AudioAsset).
-  AUDIO_STORAGE_DIR: z.string().min(1).default("./outputs/audios"),
-  // Etapa 3 de TTS (tasks.md sección 5, AC 6.1): secreto HMAC para firmar las
-  // URLs temporales de LocalDiskStorageProvider.getSignedUrl(). Bajo el
-  // criterio de seguridad ya documentado en api-contract.md §1 ("sin
-  // autenticación, herramienta de uso local/personal") alcanza con un
-  // default de desarrollo — cambiarlo si el backend se expone más allá de eso.
-  AUDIO_SIGNING_SECRET: z.string().min(1).default("dev-audio-signing-secret-change-me"),
-  AUDIO_URL_TTL_SECONDS: z.coerce.number().default(300),
+    // Límites reales del free tier de OpenRouter (validado 2026-09-08, ver
+    // decision-log.md): 20 RPM fijo; RPD depende de si la cuenta compró
+    // créditos alguna vez (50/día sin créditos, 1000/día si compró $10+) — se
+    // asume el caso conservador (sin créditos) como default.
+    OPENROUTER_RPM_LIMIT: z.coerce.number().default(20),
+    OPENROUTER_RPD_LIMIT: z.coerce.number().default(50),
 
-  PORT: z.coerce.number().default(3000),
-});
+    // TtsModule (decision-log.md 2026-09-09, #19/#20) — motor activo para todo
+    // el proceso (no por llamada, a diferencia de ModelProviderFactory: los
+    // catálogos de voz de los 3 motores son incompatibles entre sí). Default
+    // LOCAL: sin key, sin costo, sin riesgo de discontinuación.
+    TTS_PROVIDER: z.enum(["LOCAL", "GOOGLE_TTS", "OPENROUTER"]).default("LOCAL"),
+    // AC 6.1 (features.md Feature 6) — carpeta base de LocalDiskStorageProvider.
+    // Gitignoreada (binarios generados, regenerables desde AudioAsset).
+    AUDIO_STORAGE_DIR: z.string().min(1).default("./outputs/audios"),
+    // Etapa 3 de TTS (tasks.md sección 5, AC 6.1): secreto HMAC para firmar las
+    // URLs temporales de LocalDiskStorageProvider.getSignedUrl(). En local
+    // alcanza con el default de desarrollo; con NODE_ENV=production el
+    // superRefine de abajo exige uno propio (ADR 0001 punto 5).
+    AUDIO_SIGNING_SECRET: z.string().min(1).default(DEFAULT_AUDIO_SIGNING_SECRET),
+    AUDIO_URL_TTL_SECONDS: z.coerce.number().default(300),
+
+    PORT: z.coerce.number().default(3000),
+
+    // Auth del curador (ADR 0001 punto 2, spec 003 API-8). Las tres sin
+    // default a propósito: sin credencial configurada el proceso no arranca,
+    // en vez de levantar con una contraseña conocida.
+    CURATOR_USERNAME: z.string().min(1),
+    // Formato scrypt:<N>:<r>:<p>:<sal>:<hash> (shared/crypto/scrypt-password.ts).
+    // Generarlo con `pnpm --filter @ai-trend-debates/api auth:hash-password`.
+    CURATOR_PASSWORD_HASH: z.string().refine(isValidPasswordHash, {
+      message:
+        "debe tener el formato scrypt:<N>:<r>:<p>:<sal>:<hash> (generarlo con el script auth:hash-password, ver setup.md)",
+    }),
+    // Secreto HMAC del token de sesión. Rotarlo invalida todas las sesiones
+    // abiertas (la única forma de revocarlas, ADR 0001 "Consecuencias").
+    SESSION_SECRET: z.string().min(32, "debe tener al menos 32 caracteres (ver setup.md para generarlo)"),
+  })
+  .superRefine((env, ctx) => {
+    if (env.NODE_ENV === "production" && env.AUDIO_SIGNING_SECRET === DEFAULT_AUDIO_SIGNING_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AUDIO_SIGNING_SECRET"],
+        message: "en producción no puede conservar el valor por defecto (ADR 0001 punto 5)",
+      });
+    }
+  });
 
 export type Env = z.infer<typeof EnvSchema>;
 

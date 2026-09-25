@@ -33,10 +33,15 @@ Copiá `.env.example` a `.env` y completá lo de abajo. La validación vive en `
 | `TTS_PROVIDER` | No (default `LOCAL`) | Motor de TTS activo para todo el proceso — `LOCAL`\|`GOOGLE_TTS`\|`OPENROUTER` (`decision-log.md` entradas 19-20). Solo `LOCAL` está implementado hoy | — |
 | `AUDIO_STORAGE_DIR` | No (default `./outputs/audios`) | Carpeta donde `LocalDiskStorageProvider` escribe el audio generado (AC 6.1). Gitignoreada — binarios regenerables, nunca se versionan | — |
 | `PORT` | No (default `3000`) | Puerto HTTP del server Nest | — |
+| `NODE_ENV` | No (default `development`) | `development`\|`test`\|`production`. En `production`: cookie de sesión `Secure`, Swagger (`/docs`) sin montar (spec 003, D20) y `AUDIO_SIGNING_SECRET` obligatorio distinto del default | — |
+| `AUDIO_SIGNING_SECRET` | No en local (default de desarrollo); **sí en producción** | Firma HMAC de las URLs temporales de `/audio-files` (AC 6.1), su única protección (queda fuera del login, ADR 0001 punto 5). Con `NODE_ENV=production` el proceso no arranca si conserva el default | Cualquier string aleatorio largo (mismo comando que `SESSION_SECRET`) |
+| `CURATOR_USERNAME` | **Sí** | Usuario del único curador (login del dashboard, ADR 0001) | Lo elegís vos |
+| `CURATOR_PASSWORD_HASH` | **Sí** | Hash scrypt de la contraseña del curador. **Nunca** la contraseña en texto plano | `pnpm --filter api auth:hash-password` (ver §3.2) |
+| `SESSION_SECRET` | **Sí** (mínimo 32 caracteres) | Secreto HMAC del token de sesión. Cambiarlo cierra todas las sesiones abiertas | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 
-**Las que importan para arrancar ya mismo**: `GOOGLE_API_KEY` y `TAVILY_API_KEY`. Las de OPENAI/ANTHROPIC/XAI/OPENROUTER se pueden dejar vacías — el proceso arranca igual, y `ModelProviderFactory` recién tira error si algo intenta resolver ese provider puntual sin key. Sumar `OPENROUTER_API_KEY` (gratis, sin tarjeta) es la forma más simple de que el Judge tenga un provider realmente distinto al de los debatientes (arquitectura §7.1) sin depender de una suscripción paga a OpenAI/Anthropic/XAI.
+**Las que importan para arrancar ya mismo**: `GOOGLE_API_KEY`, `TAVILY_API_KEY` y las tres de auth (`CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH`, `SESSION_SECRET`, ver §3.2). Sin estas últimas el proceso no arranca, y tampoco `pnpm openapi:generate` ni los smoke scripts (todos bootstrapean `AppModule`, que valida el entorno completo). Las de OPENAI/ANTHROPIC/XAI/OPENROUTER se pueden dejar vacías — el proceso arranca igual, y `ModelProviderFactory` recién tira error si algo intenta resolver ese provider puntual sin key. Sumar `OPENROUTER_API_KEY` (gratis, sin tarjeta) es la forma más simple de que el Judge tenga un provider realmente distinto al de los debatientes (arquitectura §7.1) sin depender de una suscripción paga a OpenAI/Anthropic/XAI.
 
-Los tests (`npm run test`, `npm run test:e2e`) **no necesitan ninguna key real** — usan valores dummy (`test/jest-e2e.setup.ts` para el e2e, con su propia DB de test aislada de `dev.db`; los `*.spec.ts` mockean el LLM/proveedor de búsqueda directo, nunca llaman a nada real).
+Los tests (`npm run test`, `npm run test:e2e`) **no necesitan ninguna key real ni la credencial del curador** — usan valores dummy (`test/jest-e2e.setup.ts` para el e2e, con su propia DB de test aislada de `dev.db`; los `*.spec.ts` mockean el LLM/proveedor de búsqueda directo, nunca llaman a nada real).
 
 ### 3.1 Límites de rate limiting (`LlmRateLimiterService`)
 
@@ -48,6 +53,34 @@ Opcionales, con default al valor real del free tier vigente hoy (ver `decision-l
 | `OPENROUTER_RPM_LIMIT` / `OPENROUTER_RPD_LIMIT` | `20` / `50` | OPENROUTER (`50` es el caso conservador — sube a `1000`/día si la cuenta compró $10+ de créditos alguna vez) |
 
 OPENAI/ANTHROPIC/XAI no tienen límite proactivo configurado (`null` en `LlmRateLimiterService` — no hay uso real hoy, se agregan cuando haga falta).
+
+### 3.2 Credencial del curador (auth, API-8)
+
+Toda la API salvo `POST /auth/login`, `POST /auth/logout` y `GET /` exige la cookie de sesión (ADR 0001, `api-contract.md` §1.1). Para completar el `.env`:
+
+```bash
+# 1. Hash de la contraseña (la pide dos veces, sin eco; imprime la línea lista para el .env)
+pnpm --filter api auth:hash-password
+
+# En terminales donde stdin no es una TTY (Git Bash/mintty sin winpty, o un pipe),
+# el script lee la primera línea de stdin. Ojo: así la contraseña queda en el historial del shell.
+echo "mi-contraseña" | pnpm --filter api auth:hash-password
+
+# 2. Secreto de sesión
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+El formato del hash es `scrypt:<N>:<r>:<p>:<sal base64url>:<hash base64url>` (`src/shared/crypto/scrypt-password.ts`): lleva sal y parámetros, así que no hace falta configurar nada más. Usa `:` y no `$` como separador para no chocar con la expansión de variables de shells y de `docker-compose`. Si el valor no respeta el formato, el proceso no arranca.
+
+Probar el login con curl (la API escucha en el puerto 3000):
+
+```bash
+curl -i -c cookies.txt -H "Content-Type: application/json" \
+  -d '{"username":"<usuario>","password":"<contraseña>"}' http://localhost:3000/auth/login
+curl -b cookies.txt http://localhost:3000/episodes
+```
+
+Los tests no usan tu credencial: el e2e fija una propia (`test/e2e-auth.fixture.ts`), que tiene prioridad sobre `.env`.
 
 ## 4. Correr el proyecto
 

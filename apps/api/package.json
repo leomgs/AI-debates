@@ -22,7 +22,8 @@
     "smoke:argument": "ts-node scripts/smoke-test-argument.ts",
     "smoke:episode": "ts-node scripts/smoke-test-episode.ts",
     "smoke:tts": "ts-node scripts/smoke-test-tts.ts",
-    "openapi:generate": "ts-node scripts/generate-openapi.ts"
+    "openapi:generate": "ts-node scripts/generate-openapi.ts",
+    "auth:hash-password": "ts-node scripts/hash-password.ts"
   },
   "dependencies": {
     "@ai-trend-debates/contracts": "workspace:*",
