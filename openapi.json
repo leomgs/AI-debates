@@ -1168,6 +1168,14 @@
         ],
         "additionalProperties": false
       },
+      "DebateLanguage_Output": {
+        "type": "string",
+        "enum": [
+          "ES",
+          "EN",
+          "PT"
+        ]
+      },
       "RemotionManifestDto_Output": {
         "type": "object",
         "properties": {
@@ -1182,6 +1190,9 @@
               "topic": {
                 "type": "string"
               },
+              "language": {
+                "$ref": "#/components/schemas/DebateLanguage_Output"
+              },
               "durationEstimatedSec": {
                 "type": "number",
                 "minimum": 0
@@ -1189,6 +1200,7 @@
             },
             "required": [
               "topic",
+              "language",
               "durationEstimatedSec"
             ],
             "additionalProperties": false

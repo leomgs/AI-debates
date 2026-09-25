@@ -268,7 +268,7 @@ describe("EpisodesService", () => {
       ]);
       render.buildManifest.mockReturnValue({
         episodeId: EPISODE_ID,
-        meta: { topic: "¿La IA reemplaza programadores?", durationEstimatedSec: 4 },
+        meta: { topic: "¿La IA reemplaza programadores?", language: "ES", durationEstimatedSec: 4 },
         agents: [{ id: "agent-1", name: "Analyst", avatarUrl: null, voiceId: "es_ES-davefx-medium" }],
         timeline: [
           { sequenceIndex: 1, agentId: "agent-1", text: "Primer argumento.", audioAssetId: "audio-1", durationMs: 4000, subtitles: [] },
@@ -304,7 +304,7 @@ describe("EpisodesService", () => {
       tts.getOrderedOfficialArguments.mockResolvedValue([]);
       render.buildManifest.mockReturnValue({
         episodeId: EPISODE_ID,
-        meta: { topic: "Tema", durationEstimatedSec: 0 },
+        meta: { topic: "Tema", language: "ES", durationEstimatedSec: 0 },
         agents: [],
         timeline: [],
         verdict: { winnerAgentId: null, summary: "" },

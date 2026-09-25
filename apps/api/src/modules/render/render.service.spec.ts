@@ -1,5 +1,6 @@
 import { RenderService, BuildManifestInput } from './render.service';
 import { ManifestNotReadyError } from './render.errors';
+import { RemotionManifestSchema } from '@ai-trend-debates/contracts';
 
 const EPISODE_ID = '11111111-1111-4111-8111-111111111111';
 const AGENT_A = 'agent-a';
@@ -45,7 +46,8 @@ describe('RenderService.buildManifest (Feature 7)', () => {
     const manifest = service.buildManifest(baseInput());
 
     expect(manifest.episodeId).toBe(EPISODE_ID);
-    expect(manifest.meta).toEqual({ topic: baseInput().topic, durationEstimatedSec: 7 }); // (4000+3000)/1000
+    // language: "ES" fijo hasta la spec 004, paso 7 (ver render.service.ts).
+    expect(manifest.meta).toEqual({ topic: baseInput().topic, language: 'ES', durationEstimatedSec: 7 }); // (4000+3000)/1000
     expect(manifest.agents).toEqual([
       { id: AGENT_A, name: 'Analyst', avatarUrl: 'https://cdn/analyst.png', voiceId: 'es_ES-davefx-medium' },
       { id: AGENT_B, name: 'Contrarian', avatarUrl: null, voiceId: 'es_MX-ald-medium' },
@@ -91,5 +93,16 @@ describe('RenderService.buildManifest (Feature 7)', () => {
   it('verdict.winnerAgentId es null si el debate no tuvo ganador (Verdict.winnerId opcional)', () => {
     const manifest = service.buildManifest(baseInput({ verdict: { winnerId: null, content: 'Empate técnico.' } }));
     expect(manifest.verdict.winnerAgentId).toBeNull();
+  });
+
+  // Spec 004, AC 4.18/4.19: meta.language es obligatorio en el contrato.
+  it('meta cumple el contrato, que exige language (un meta sin language no valida)', () => {
+    const manifest = service.buildManifest(baseInput());
+    const MetaSchema = RemotionManifestSchema.shape.meta;
+
+    expect(MetaSchema.safeParse(manifest.meta).success).toBe(true);
+    const { language: _language, ...withoutLanguage } = manifest.meta;
+    expect(MetaSchema.safeParse(withoutLanguage).success).toBe(false);
+    expect(MetaSchema.safeParse({ ...manifest.meta, language: 'FR' }).success).toBe(false);
   });
 });

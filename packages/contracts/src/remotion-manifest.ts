@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DebateLanguageSchema } from "./debate-language";
 
 // spec 002 (docs/product/002-workspace-restructure.md) — vive en
 // packages/contracts porque es el contrato entre apps/api y packages/video,
@@ -56,6 +57,11 @@ export const RemotionManifestSchema = z.object({
   episodeId: z.string().uuid(),
   meta: z.object({
     topic: z.string(),
+    // Spec 004 (AC 4.18, 4.19): idioma del debate, obligatorio. Extensión
+    // documentada de Feature 7 (features.md, congelado, no lo lista), mismo
+    // precedente que `audioUrl` (decision-log.md #27). El showcase lo lee de
+    // acá (API-7, AC 3.67).
+    language: DebateLanguageSchema,
     durationEstimatedSec: z.number().nonnegative(),
   }),
   agents: z.array(RemotionManifestAgentSchema),

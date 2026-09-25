@@ -2,6 +2,7 @@
   "episodeId": "00000000-0000-4000-8000-000000000001",
   "meta": {
     "topic": "¿Debería la IA reemplazar a los desarrolladores de software?",
+    "language": "ES",
     "durationEstimatedSec": 9
   },
   "agents": [

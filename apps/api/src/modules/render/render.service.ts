@@ -1,7 +1,16 @@
 import { Injectable } from "@nestjs/common";
 import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { ManifestNotReadyError } from "./render.errors";
-import type { RemotionManifest } from "@ai-trend-debates/contracts";
+import type { DebateLanguage, RemotionManifest } from "@ai-trend-debates/contracts";
+
+// PROVISORIO (spec 004, paso 3 antes del paso 7): el contrato ya exige
+// `meta.language` (tasks.md §13.3), pero la columna Episode.language recién
+// nace en la migración del paso 4 (§13.4). Hasta entonces todo episodio es
+// español, que es lo que produce el pipeline hoy, y la migración va a
+// etiquetar como ES a los episodios existentes (AC 4.5). En §13 paso 7
+// (tasks.md §13.7) `language` entra a BuildManifestInput, leído de
+// Episode.language por EpisodesService, y esta constante se borra.
+const MANIFEST_LANGUAGE_UNTIL_EPISODE_LANGUAGE: DebateLanguage = "ES";
 
 export interface RenderManifestParticipant {
   agentId: string;
@@ -75,7 +84,7 @@ export class RenderService {
 
     return {
       episodeId: input.episodeId,
-      meta: { topic: input.topic, durationEstimatedSec },
+      meta: { topic: input.topic, language: MANIFEST_LANGUAGE_UNTIL_EPISODE_LANGUAGE, durationEstimatedSec },
       agents: input.participants.map((p) => ({
         id: p.agentId,
         name: p.name,
