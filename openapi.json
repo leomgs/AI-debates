@@ -40,11 +40,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       },
       "get": {
@@ -72,11 +87,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -103,11 +133,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -135,11 +180,26 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -166,11 +226,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -198,11 +273,26 @@
         "responses": {
           "201": {
             "description": ""
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -248,11 +338,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -276,11 +381,26 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "notifications"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -300,11 +420,26 @@
         "responses": {
           "201": {
             "description": ""
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "notifications"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     },
@@ -315,11 +450,138 @@
         "responses": {
           "201": {
             "description": ""
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
         "tags": [
           "notifications"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credencial correcta: emite la cookie de sesión (7 días).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDto_Output"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`INVALID_CREDENTIALS`: usuario o contraseña incorrectos (no indica cuál).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`TOO_MANY_ATTEMPTS`: demasiados intentos fallidos; reintentar después de `Retry-After` segundos.",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos hasta que se vuelve a aceptar un intento.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Cookie de sesión borrada."
+          }
+        },
+        "summary": "",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "operationId": "getSession",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Hay sesión válida.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDto_Output"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "session": []
+          }
         ]
       }
     }
@@ -332,6 +594,10 @@
   },
   "tags": [
     {
+      "name": "auth",
+      "description": "Sesión del curador (ADR 0001, spec 003 API-8)"
+    },
+    {
       "name": "episodes",
       "description": "Orquestación del pipeline y curaduría humana (api-contract.md §2/§3)"
     },
@@ -342,6 +608,14 @@
   ],
   "servers": [],
   "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "atd_session",
+        "description": "Cookie httpOnly que emite POST /auth/login (7 días)."
+      }
+    },
     "schemas": {
       "CreateEpisodeDto": {
         "type": "object",
@@ -1155,6 +1429,70 @@
         "required": [
           "type",
           "data"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "SessionDto_Output": {
+        "type": "object",
+        "properties": {
+          "authenticated": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "authenticated",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorResponseDto": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
         ]
       }
     }
