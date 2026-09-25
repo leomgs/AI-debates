@@ -35,7 +35,7 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
   - Con 5 intentos fallidos (o en curso) del mismo cliente (`req.ip`), o 20 en total entre todos los clientes, responde `429 TOO_MANY_ATTEMPTS` con `Retry-After` hasta que el intento más viejo salga de la ventana (hasta 900 s).
   - Si ya hay 2 verificaciones de contraseña en curso, responde `429 LOGIN_BUSY` con `Retry-After: 1` y el mensaje "Hay otro intento de inicio de sesión en curso. Reintentá en un momento.", sin contarlo como fallo. Tiene `code` propio para que el dashboard elija el mensaje por el `code`, como con el resto de los errores: `TOO_MANY_ATTEMPTS` es "esperá unos minutos" (AC 3.8) y `LOGIN_BUSY` es "reintentá ya", sin tener que interpretar `Retry-After`. Protege el threadpool de libuv, donde corre scrypt (unos 225 ms por verificación).
   - Mientras dura un bloqueo, **tampoco entra la contraseña correcta**.
-  - Un login exitoso borra los fallos de ese cliente y saca de la cuenta global solo su propio intento; los fallos globales de otros clientes siguen contando.
+  - Un login exitoso saca de las dos cuentas (cliente y global) **solo su propio intento**: no ocupa cupo, pero tampoco perdona fallos anteriores ni intentos en curso con la misma clave. Detrás del rewrite de Next el curador y un atacante pueden compartir `req.ip`, así que borrar la cuenta del cliente le perdonaría fallos al atacante. Consecuencia: los tipeos previos del propio curador siguen contando hasta salir de la ventana.
   - Ejemplo real: 50 logins incorrectos simultáneos del mismo cliente dan 5 `401` y 45 `429` (`LOGIN_BUSY` o `TOO_MANY_ATTEMPTS`, según el momento en que llega cada uno).
 
 #### `POST /auth/logout` (público)

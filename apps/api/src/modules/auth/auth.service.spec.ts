@@ -61,16 +61,34 @@ describe("AuthService", () => {
     await expect(service.login("curador", "contraseña-correcta", "ip-b")).resolves.toHaveProperty("token");
   });
 
-  it("4 fallos, 1 acierto y 4 fallos más no bloquean: el acierto perdona los fallos del cliente", async () => {
+  it("los aciertos no gastan cupo, pero no perdonan fallos: 4 fallos, 2 aciertos, el 5.º fallo, y después 429", async () => {
     const almostFull = LOGIN_RATE_LIMIT.maxFailuresPerClient - 1;
     for (let i = 0; i < almostFull; i++) {
       await expect(service.login("curador", "mal", "ip-a")).rejects.toBeInstanceOf(InvalidCredentialsError);
     }
     await expect(service.login("curador", "contraseña-correcta", "ip-a")).resolves.toHaveProperty("token");
-    for (let i = 0; i < almostFull; i++) {
-      await expect(service.login("curador", "mal", "ip-a")).rejects.toBeInstanceOf(InvalidCredentialsError);
-    }
     await expect(service.login("curador", "contraseña-correcta", "ip-a")).resolves.toHaveProperty("token");
+    await expect(service.login("curador", "mal", "ip-a")).rejects.toBeInstanceOf(InvalidCredentialsError);
+    await expect(service.login("curador", "contraseña-correcta", "ip-a")).rejects.toBeInstanceOf(TooManyLoginAttemptsError);
+  });
+
+  it("ataque con la clave compartida: un acierto concurrente del curador no perdona los fallos del atacante", async () => {
+    // Detrás del rewrite de Next, curador y atacante pueden compartir req.ip.
+    for (let i = 0; i < 3; i++) {
+      await expect(service.login("curador", `mal-${i}`, "ip-next")).rejects.toBeInstanceOf(InvalidCredentialsError);
+    }
+    // Atacante y curador verifican a la vez (el tope de concurrencia admite 2).
+    const [attacker, curator] = await Promise.allSettled([
+      service.login("curador", "mal-concurrente", "ip-next"),
+      service.login("curador", "contraseña-correcta", "ip-next"),
+    ]);
+    expect(attacker.status === "rejected" && attacker.reason instanceof InvalidCredentialsError).toBe(true);
+    expect(curator.status).toBe("fulfilled");
+
+    // 4 fallos siguen contando: entra uno más y el siguiente ya es 429. Si el
+    // acierto hubiera borrado la cubeta, el atacante tendría 5 intentos nuevos.
+    await expect(service.login("curador", "mal-4", "ip-next")).rejects.toBeInstanceOf(InvalidCredentialsError);
+    await expect(service.login("curador", "mal-5", "ip-next")).rejects.toBeInstanceOf(TooManyLoginAttemptsError);
   });
 
   it("50 logins incorrectos concurrentes: a lo sumo 5 llegan a verificarse (401), el resto se rechaza (429)", async () => {

@@ -69,11 +69,35 @@ describe("LoginRateLimiterService", () => {
     expect(() => limiter.beginAttempt("ip-a", T0 + windowMs)).not.toThrow();
   });
 
-  it("4 fallos, 1 acierto y 4 fallos más no bloquean al cliente", () => {
+  it("un acierto no ocupa cupo: 4 fallos y cualquier cantidad de aciertos no bloquean", () => {
+    fail(limiter, "ip-a", maxFailuresPerClient - 1);
+    for (let i = 0; i < 10; i++) succeed(limiter, "ip-a");
+    expect(() => {
+      limiter.beginAttempt("ip-a", T0);
+      limiter.release();
+    }).not.toThrow();
+  });
+
+  it("un acierto no perdona los fallos previos de la misma clave: 4 fallos, 1 acierto y el 5.º fallo bloquea", () => {
     fail(limiter, "ip-a", maxFailuresPerClient - 1);
     succeed(limiter, "ip-a");
-    fail(limiter, "ip-a", maxFailuresPerClient - 1);
-    expect(() => limiter.beginAttempt("ip-a", T0)).not.toThrow();
+    fail(limiter, "ip-a", 1);
+    expect(() => limiter.beginAttempt("ip-a", T0)).toThrow(TooManyLoginAttemptsError);
+  });
+
+  it("ataque con clave compartida: el acierto del curador no borra los intentos concurrentes del atacante", () => {
+    // Detrás del rewrite de Next, curador y atacante pueden tener la misma clave.
+    fail(limiter, "ip-next", 3);
+    const attacker = limiter.beginAttempt("ip-next", T0); // en curso
+    const curator = limiter.beginAttempt("ip-next", T0); // en curso, misma clave y mismo instante
+    limiter.recordSuccess(curator);
+    limiter.release();
+    limiter.release(); // el del atacante falla: su registro provisorio queda como fallo
+    expect(attacker.clientKey).toBe("ip-next");
+
+    // 3 fallos + el del atacante = 4: entra uno más y después se bloquea.
+    fail(limiter, "ip-next", 1);
+    expect(() => limiter.beginAttempt("ip-next", T0)).toThrow(TooManyLoginAttemptsError);
   });
 
   it("un acierto saca de la cubeta global solo su propio intento", () => {

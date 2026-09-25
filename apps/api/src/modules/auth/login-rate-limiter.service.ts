@@ -97,11 +97,19 @@ export class LoginRateLimiterService {
     return { clientKey, at: now };
   }
 
-  // Login correcto: borra la cubeta del cliente (sus fallos previos quedan
-  // perdonados) y saca de la global solo el registro provisorio de este
-  // intento; los fallos globales de otros siguen contando.
+  // Login correcto: saca, de las dos cubetas, SOLO el registro provisorio de
+  // este intento. Los demás registros de la misma clave (fallos ya cerrados u
+  // otros intentos todavía en curso) siguen contando: detrás del rewrite de
+  // Next todos los clientes pueden compartir la clave, y borrar la cubeta
+  // entera dejaba que un acierto del curador le perdonara hasta 4 fallos a un
+  // atacante (re-review de API-8). Costo: un acierto tampoco perdona los
+  // tipeos previos del propio curador; salen de la ventana a los 15 minutos.
   recordSuccess(attempt: LoginAttempt): void {
-    this.failuresByClient.delete(attempt.clientKey);
+    const clientFailures = this.failuresByClient.get(attempt.clientKey);
+    if (clientFailures) {
+      removeOne(clientFailures, attempt.at);
+      this.store(attempt.clientKey, clientFailures);
+    }
     removeOne(this.globalFailures, attempt.at);
   }
 
