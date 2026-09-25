@@ -69,7 +69,10 @@ export const EnvSchema = z
     AUDIO_SIGNING_SECRET: z.string().min(1).default(DEFAULT_AUDIO_SIGNING_SECRET),
     AUDIO_URL_TTL_SECONDS: z.coerce.number().default(300),
 
-    PORT: z.coerce.number().default(3000),
+    // Dónde escucha la API (main.ts). HOST por defecto solo loopback: la API
+    // no se expone directo, la alcanza el rewrite de Next (ADR 0001 punto 3).
+    HOST: z.string().min(1).default("127.0.0.1"),
+    PORT: z.coerce.number().int().min(1).max(65535).default(3000),
 
     // Auth del curador (ADR 0001 punto 2, spec 003 API-8). Las tres sin
     // default a propósito: sin credencial configurada el proceso no arranca,
