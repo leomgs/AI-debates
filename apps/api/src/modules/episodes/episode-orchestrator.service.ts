@@ -132,7 +132,13 @@ export class EpisodeOrchestratorService {
   // SSE de este episodio (EpisodeEventsService.complete) al terminar la
   // "sesión" de ejecución, haya sido éxito o error — evita que el Map interno
   // de EpisodeEventsService crezca sin límite.
+  //
+  // begin() va antes del primer await a propósito (API-12): los callers
+  // disparan runPipeline sin await, y el marcado tiene que quedar hecho en
+  // el mismo tick, antes de que respondan. Así un GET /episodes/:id o un SSE
+  // pedidos apenas después de createEpisode/resume ya ven pipelineActive.
   async runPipeline(episodeId: string, opts?: { manualSources?: ManualSource[] }): Promise<void> {
+    this.events.begin(episodeId);
     try {
       await this.runResearchPhase(episodeId, opts?.manualSources);
       await this.runDebatePhase(episodeId);
@@ -244,6 +250,7 @@ export class EpisodeOrchestratorService {
   // diferencia de research/debate/judging, que se encadenan solos. Mismo
   // try/catch/finally que runPipeline (etapa 2 de TTS, tasks.md sección 5).
   async runAudioPipeline(episodeId: string): Promise<void> {
+    this.events.begin(episodeId); // síncrono, mismo motivo que en runPipeline
     try {
       await this.runAudioPhase(episodeId);
     } catch (err) {

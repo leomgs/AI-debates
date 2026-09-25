@@ -804,6 +804,9 @@
               "REQUIRES_HUMAN_REVIEW"
             ]
           },
+          "pipelineActive": {
+            "type": "boolean"
+          },
           "usage": {
             "type": "object",
             "properties": {
@@ -1051,6 +1054,7 @@
         "required": [
           "id",
           "status",
+          "pipelineActive",
           "usage",
           "limits",
           "checkpoints",

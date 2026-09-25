@@ -7,6 +7,7 @@ import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { TtsService } from "../tts/tts.service";
 import { RenderService } from "../render/render.service";
 import { EpisodesService } from "./episodes.service";
+import { EpisodeEventsService } from "./episode-events.service";
 
 const TOPIC_ID = "11111111-1111-4111-8111-111111111111";
 const DEBATE_ID = "22222222-2222-4222-8222-222222222222";
@@ -24,6 +25,7 @@ describe("EpisodesService", () => {
   let orchestrator: { runPipeline: jest.Mock };
   let tts: { getOrderedOfficialArguments: jest.Mock; getSignedAudioUrl: jest.Mock; resolveVoiceId: jest.Mock };
   let render: { buildManifest: jest.Mock };
+  let events: EpisodeEventsService;
 
   beforeEach(async () => {
     prisma = {
@@ -46,10 +48,13 @@ describe("EpisodesService", () => {
         { provide: EpisodeOrchestratorService, useValue: orchestrator },
         { provide: TtsService, useValue: tts },
         { provide: RenderService, useValue: render },
+        // Real: no tiene dependencias y es la fuente de pipelineActive.
+        EpisodeEventsService,
       ],
     }).compile();
 
     service = module.get(EpisodesService);
+    events = module.get(EpisodeEventsService);
   });
 
   describe("createEpisode", () => {
@@ -127,8 +132,8 @@ describe("EpisodesService", () => {
   });
 
   describe("getEpisodeDetail", () => {
-    it("mapea el episodio y solo expone arguments OFFICIAL", async () => {
-      prisma.episode.findUniqueOrThrow.mockResolvedValue({
+    function detailRow() {
+      return {
         id: EPISODE_ID,
         status: "DEBATING",
         maxLlmCalls: 25,
@@ -150,12 +155,37 @@ describe("EpisodesService", () => {
           ],
           verdict: null,
         },
-      });
+      };
+    }
+
+    it("mapea el episodio y solo expone arguments OFFICIAL", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
 
       const detail = await service.getEpisodeDetail(EPISODE_ID);
 
       expect(detail.debate.rounds[0].arguments).toHaveLength(1);
       expect(detail.debate.rounds[0].arguments[0].id).toBe("a1");
+    });
+
+    // API-12 (AC 3.39): un estado activo sin pipeline en curso es un
+    // episodio trabado; el dato sale de EpisodeEventsService, no de la base.
+    it("pipelineActive refleja si hay una corrida del pipeline en curso para ese episodio", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
+
+      expect((await service.getEpisodeDetail(EPISODE_ID)).pipelineActive).toBe(false);
+
+      events.begin(EPISODE_ID);
+      expect((await service.getEpisodeDetail(EPISODE_ID)).pipelineActive).toBe(true);
+
+      events.complete(EPISODE_ID);
+      expect((await service.getEpisodeDetail(EPISODE_ID)).pipelineActive).toBe(false);
+    });
+
+    it("pipelineActive es por episodio: una corrida de otro episodio no cuenta", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
+      events.begin("otro-episodio");
+
+      expect((await service.getEpisodeDetail(EPISODE_ID)).pipelineActive).toBe(false);
     });
   });
 

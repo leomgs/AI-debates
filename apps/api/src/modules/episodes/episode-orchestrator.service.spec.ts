@@ -90,7 +90,7 @@ describe("EpisodeOrchestratorService", () => {
     markReadyForRender: jest.Mock;
   };
   let budgetService: { withLlmCall: jest.Mock; withSearchRequest: jest.Mock; withTtsCall: jest.Mock };
-  let eventsService: { emit: jest.Mock; complete: jest.Mock };
+  let eventsService: { begin: jest.Mock; emit: jest.Mock; complete: jest.Mock };
   let ttsService: { getOrderedOfficialArguments: jest.Mock; synthesizeSegment: jest.Mock };
   let contextService: { build: jest.Mock };
 
@@ -140,7 +140,7 @@ describe("EpisodeOrchestratorService", () => {
       withSearchRequest: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
       withTtsCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
     };
-    eventsService = { emit: jest.fn(), complete: jest.fn() };
+    eventsService = { begin: jest.fn(), emit: jest.fn(), complete: jest.fn() };
     ttsService = { getOrderedOfficialArguments: jest.fn().mockResolvedValue([]), synthesizeSegment: jest.fn() };
     contextService = {
       build: jest.fn().mockResolvedValue({
@@ -460,6 +460,36 @@ describe("EpisodeOrchestratorService", () => {
       await service.runAudioPipeline(EPISODE_ID);
 
       expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "PROVIDER_QUOTA_EXCEEDED");
+      expect(eventsService.complete).toHaveBeenCalledWith(EPISODE_ID);
+    });
+  });
+
+  // API-12: EpisodesService/EpisodeActionsService disparan el pipeline sin
+  // await y responden enseguida; si begin() quedara después del primer
+  // await, un GET del detalle justo después vería pipelineActive=false.
+  describe("marcado de pipeline activo (API-12)", () => {
+    it("runPipeline llama a begin() de forma síncrona, antes de su primer await, y complete() al terminar", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeRow("PENDING_REVIEW"));
+      prisma.evidenceFact.count.mockResolvedValue(3);
+      prisma.verdict.findUnique.mockResolvedValue({ id: "verdict-1" });
+
+      const running = service.runPipeline(EPISODE_ID);
+
+      expect(eventsService.begin).toHaveBeenCalledWith(EPISODE_ID);
+      expect(eventsService.complete).not.toHaveBeenCalled();
+      await running;
+      expect(eventsService.complete).toHaveBeenCalledWith(EPISODE_ID);
+      expect(eventsService.begin).toHaveBeenCalledTimes(1);
+      expect(eventsService.complete).toHaveBeenCalledTimes(1);
+    });
+
+    it("runAudioPipeline llama a begin() de forma síncrona y complete() aunque la fase falle", async () => {
+      prisma.episode.findUniqueOrThrow.mockRejectedValue(new Error("se cayó la base"));
+
+      const running = service.runAudioPipeline(EPISODE_ID);
+
+      expect(eventsService.begin).toHaveBeenCalledWith(EPISODE_ID);
+      await running;
       expect(eventsService.complete).toHaveBeenCalledWith(EPISODE_ID);
     });
   });

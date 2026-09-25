@@ -31,6 +31,10 @@ type EpisodeWithDetail = Prisma.EpisodeGetPayload<{ include: typeof EPISODE_DETA
 export const EpisodeDetailSchema = z.object({
   id: z.string().uuid(),
   status: EpisodeStatusSchema,
+  // API-12 (spec 003): hay una ejecución del pipeline en curso en este
+  // proceso. Con un estado activo y esto en false, el episodio está trabado
+  // hasta que EpisodeRecoveryService lo retome al reiniciar (AC 3.39).
+  pipelineActive: z.boolean(),
   usage: z
     .object({
       llmCalls: z.number().int(),
@@ -93,10 +97,14 @@ export class EpisodeDetailDto extends createZodDto(EpisodeDetailSchema) {}
 // (features.md Feature 2: "los borradores están estrictamente aislados del
 // contexto del oponente"), nunca se exponen vía API. Se filtra acá, no se
 // confía en que el caller ya haya filtrado.
-export function mapEpisodeDetail(episode: EpisodeWithDetail): EpisodeDetailResponse {
+//
+// `pipelineActive` no sale de la base: es estado en memoria del proceso
+// (EpisodeEventsService), así que lo resuelve el caller.
+export function mapEpisodeDetail(episode: EpisodeWithDetail, runtime: { pipelineActive: boolean }): EpisodeDetailResponse {
   return {
     id: episode.id,
     status: episode.status,
+    pipelineActive: runtime.pipelineActive,
     usage: episode.usage
       ? {
           llmCalls: episode.usage.llmCalls,

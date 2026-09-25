@@ -8,6 +8,7 @@ import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { RenderService } from "../render/render.service";
 import type { RemotionManifest } from "@ai-trend-debates/contracts";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
+import { EpisodeEventsService } from "./episode-events.service";
 import { EPISODE_DETAIL_INCLUDE, mapEpisodeDetail, EpisodeDetailResponse } from "./episode-detail.mapper";
 import type { SerializedEpisode, SerializedEpisodeListItem } from "./dto/episode.schema";
 
@@ -23,7 +24,8 @@ export class EpisodesService {
     private readonly debateService: DebateService,
     private readonly orchestrator: EpisodeOrchestratorService,
     private readonly tts: TtsService,
-    private readonly render: RenderService
+    private readonly render: RenderService,
+    private readonly events: EpisodeEventsService
   ) {}
 
   // Orden: Topic (le pertenece a ResearchModule) -> Debate (requiere
@@ -68,7 +70,7 @@ export class EpisodesService {
       where: { id },
       include: EPISODE_DETAIL_INCLUDE,
     });
-    return mapEpisodeDetail(episode);
+    return mapEpisodeDetail(episode, { pipelineActive: this.events.isPipelineActive(id) });
   }
 
   // Feature 7 (features.md, P0) — GET /episodes/:id/manifest. Orquesta 3
