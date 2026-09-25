@@ -10,6 +10,7 @@ import { HttpErrorFilter } from './shared/http/http-error.filter';
 import type { Env } from './shared/config/env.schema';
 import { verifyAudioUrlSignature } from './modules/tts/audio-url-signer';
 import { buildOpenApiDocument } from './shared/http/openapi-document';
+import { SESSION_COOKIE_NAME } from './modules/auth/session-cookie';
 
 async function bootstrap() {
   // Cambiamos a NestExpressApplication para acceder a usar Static Assets
@@ -67,7 +68,7 @@ async function bootstrap() {
   // contrato ya vive commiteado en openapi.json, que no depende de este
   // montaje.
   if (config.get('NODE_ENV', { infer: true }) !== 'production') {
-    SwaggerModule.setup('docs', app, buildOpenApiDocument(app));
+    SwaggerModule.setup('docs', app, buildOpenApiDocument(app, SESSION_COOKIE_NAME));
   }
 
   await app.listen(3000);

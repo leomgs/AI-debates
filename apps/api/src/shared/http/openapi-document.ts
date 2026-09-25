@@ -1,7 +1,6 @@
 import type { INestApplication } from "@nestjs/common";
 import { DocumentBuilder, OpenAPIObject, SwaggerModule, type OperationObject } from "@nestjs/swagger";
 import { cleanupOpenApiDoc } from "nestjs-zod";
-import { SESSION_COOKIE_NAME } from "../../modules/auth/session-cookie";
 import { ErrorResponseDto } from "./error-response.dto";
 import { OPENAPI_PUBLIC_EXTENSION } from "./public.decorator";
 
@@ -39,7 +38,10 @@ function documentSessionRequirement(document: OpenAPIObject, errorSchemaRef: str
 // main.ts (sirve /docs en vivo, solo fuera de producción) y
 // scripts/generate-openapi.ts (escribe openapi.json) para que ambos
 // documenten exactamente lo mismo, sin posibilidad de desincronizarse.
-export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
+// El nombre de la cookie de sesión llega como parámetro (lo define
+// modules/auth/session-cookie.ts), para no sumar otro import de modules/ a
+// shared/ (review de API-8).
+export function buildOpenApiDocument(app: INestApplication, sessionCookieName: string): OpenAPIObject {
   const config = new DocumentBuilder()
     .setTitle("AI Trend Debates API")
     .setDescription("Pipeline automatizado que convierte un trend en un debate verificado entre agentes de IA.")
@@ -48,7 +50,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag("episodes", "Orquestación del pipeline y curaduría humana (api-contract.md §2/§3)")
     .addTag("notifications", "Inbox interno de notificaciones (Feature 4)")
     .addCookieAuth(
-      SESSION_COOKIE_NAME,
+      sessionCookieName,
       { type: "apiKey", in: "cookie", description: "Cookie httpOnly que emite POST /auth/login (7 días)." },
       SESSION_SECURITY_SCHEME
     )

@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AppModule } from '../src/app.module';
 import { buildOpenApiDocument } from '../src/shared/http/openapi-document';
+import { SESSION_COOKIE_NAME } from '../src/modules/auth/session-cookie';
 
 // spec 001 (docs/product/001-openapi-contract-zod.md) — genera openapi.json
 // en la raíz del MONOREPO (no de apps/api/) a partir del mismo documento
@@ -13,7 +14,7 @@ import { buildOpenApiDocument } from '../src/shared/http/openapi-document';
 // niveles down de donde vive openapi.json ahora.
 async function main() {
   const app = await NestFactory.create(AppModule, { logger: false });
-  const document = buildOpenApiDocument(app);
+  const document = buildOpenApiDocument(app, SESSION_COOKIE_NAME);
 
   const outputPath = resolve(__dirname, '..', '..', '..', 'openapi.json');
   writeFileSync(outputPath, JSON.stringify(document, null, 2) + '\n', 'utf-8');
