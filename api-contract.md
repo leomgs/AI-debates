@@ -71,13 +71,37 @@ Lista episodios. Filtrable por estado (útil para que la interfaz de curaduría 
 GET /episodes?status=PENDING_REVIEW,REQUIRES_HUMAN_REVIEW
 ```
 
+```json
+// Response 200, ordenado por createdAt descendente
+[
+  {
+    "id": "uuid",
+    "status": "PENDING_REVIEW",
+    "title": "¿Debería la IA reemplazar a los desarrolladores de software?",
+    "createdAt": "2026-09-09T00:32:30.528Z",
+    "publishedAt": null
+  }
+]
+```
+
+`publishedAt` (spec 003, API-7a): fecha de publicación en el showcase, o `null` si no está publicado. Hoy siempre es `null`, porque las acciones `publish`/`unpublish` (API-7) todavía no existen. El `language` de cada episodio llega con la spec 004 (`tasks.md` §13.7).
+
 ### `GET /episodes/:id`
-Detalle completo: estado, uso acumulado, checkpoints, y el debate asociado (rounds, arguments oficiales, verdict si existe).
+Detalle completo: estado, si hay una ejecución del pipeline en curso, tópico, participantes, uso acumulado, checkpoints, y el debate asociado (rounds, arguments oficiales, verdict si existe).
 
 ```json
 {
   "id": "uuid",
   "status": "DEBATING",
+  "pipelineActive": true,
+  "topic": { "id": "uuid", "title": "¿Debería la IA reemplazar a los desarrolladores de software?" },
+  "createdAt": "2026-09-09T00:32:30.528Z",
+  "publishedAt": null,
+  "participants": [
+    { "agentId": "uuid", "name": "Contrarian", "role": "CONTRARIAN", "isJudge": false },
+    { "agentId": "uuid", "name": "Provocateur", "role": "PROVOCATEUR", "isJudge": false },
+    { "agentId": "uuid", "name": "Judge", "role": "JUDGE", "isJudge": true }
+  ],
   "usage": { "llmCalls": 12, "searchRequests": 2, "ttsRequests": 0, "executionTime": 340000 },
   "limits": { "maxLlmCalls": 25, "maxSearchQueries": 5, "maxTtsSegments": 40 },
   "checkpoints": [
@@ -94,8 +118,18 @@ Detalle completo: estado, uso acumulado, checkpoints, y el debate asociado (roun
 
 Nota: `arguments` en este endpoint solo devuelve `status: OFFICIAL` — los `DRAFT` son estado interno de orquestación, no se exponen vía API (consistente con "los borradores están estrictamente aislados del contexto del oponente", Feature 2).
 
+Campos agregados por la spec 003 (2026-09-25, `decision-log.md` entrada 34):
+
+- `pipelineActive` (API-12): hay una ejecución del pipeline en curso para este episodio **en este proceso** (`runPipeline` o `runAudioPipeline`). Es estado en memoria, no una columna. Con un estado activo (`RESEARCHING`, `DEBATING`, `JUDGING`, `GENERATING_AUDIO`, ...) y `pipelineActive: false`, el episodio está trabado hasta que `EpisodeRecoveryService` lo retome al reiniciar la API (AC 3.39). Es `true` desde el mismo momento en que responden `POST /episodes`, `approve` y `resume`.
+- `topic` y `createdAt` (API-1, parte 1): cabecera del detalle (AC 3.26).
+- `publishedAt` (API-7a): igual que en el listado; `null` hasta que exista `publish`.
+- `participants` (API-1, parte 1): los agentes del episodio, debatientes primero y el juez al final. `agentId` es el mismo que usan `arguments[].agentId`, `verdict.judgeId` y `verdict.winnerId`, así que alcanza para poner nombres en el timeline y el veredicto (AC 3.27, 3.29) e identificar al agente sin argumento aprobado en un `VALIDATION_INCONSISTENCY` (cierra API-9). `role` es la persona (`ANALYST`, `CONTRARIAN`, `DIPLOMAT`, `PROVOCATEUR`) o `JUDGE`, y `name` su nombre visible. Está vacío mientras el episodio sigue en `CREATED` (los participantes se eligen al pasar a `RESEARCHING`).
+- `language` (resto de API-1) llega con la spec 004 (`tasks.md` §13.7).
+
 ### `GET /episodes/:id/manifest` (P0 — implementado 2026-09-24, `decision-log.md` entrada 27)
 Devuelve el `RemotionManifest` (Feature 7, **P0** en `features.md` — a diferencia del worker que lo consume para producir el `.mp4`, que sí es P1/Feature 9) con URLs firmadas resueltas para cada `AudioAsset` (campo `audioUrl` en cada `timeline[]`, adicional a `audioAssetId` — no está en el JSON de ejemplo de `features.md`, que es el contrato congelado, pero sí en esta promesa de la superficie HTTP). Se genera al vuelo en cada `GET`, no se persiste. Antes de que exista audio/veredicto para todos los `Argument` OFFICIAL, devuelve `409` con `code: MANIFEST_NOT_READY` (mismo criterio: solo tiene contenido significativo desde `READY_FOR_RENDER` en adelante). El consumo vía `@remotion/player` en el frontend es la parte P1 de Feature 9, no este endpoint.
+
+`meta.language` (spec 004, AC 4.18/4.19) es obligatorio en el contrato (`DebateLanguage`: `ES`, `EN` o `PT`; en `openapi.json`, `DebateLanguage_Output`). Hasta que exista la columna `Episode.language` (`tasks.md` §13.4) sale siempre `"ES"`; desde §13.7 sale del episodio. Ejemplo: `"meta": { "topic": "...", "language": "ES", "durationEstimatedSec": 106 }`.
 
 ### `GET /episodes/:id/audio/:audioAssetId/url`
 Genera una presigned URL de corta duración para un `AudioAsset` puntual (AC 6.1) — el backend nunca devuelve `storageKey` crudo. El `audioAssetId` se scopea al episodio (`404 NOT_FOUND` si no le pertenece).
@@ -174,9 +208,17 @@ event: fact_check.completed    data: { status, errorsDetected }
 event: argument.approved       data: { sequenceIndex, agentId, text }
 event: episode.pending_review
 event: episode.requires_review data: { reason, checkpoint }
+event: heartbeat               (spec 003, API-13; sin payload)
 ```
 
 El MVP transmite bloques de texto consolidado (no streaming palabra por palabra) — ver alcance definido en Feature 8.
+
+Ciclo de vida del stream (spec 003, API-12 y API-13, implementado 2026-09-25):
+
+- **Sin pipeline activo** (`pipelineActive: false` en `GET /episodes/:id`, lo que incluye un id inexistente): responde `200` y cierra enseguida, sin eventos. Como el stream termina antes de que Nest escriba las cabeceras del SSE, la respuesta sale vacía y **sin** `Content-Type: text/event-stream`. Para `EventSource` es un error fatal: dispara `error`, queda en `CLOSED` y no reconecta solo, que es lo que pide AC 3.38 (cerrar, refrescar el detalle y reconectar solo si `pipelineActive` sigue en `true`). Un id inexistente no da `404` acá; el `404` lo da el refetch del detalle.
+- **Con pipeline activo**: entrega los eventos de negocio y además un `event: heartbeat` cada 15 s, para que el rewrite de Next (que corta a los 30 s sin bytes) no cierre la conexión (AC 3.33). El heartbeat no es un evento de negocio: la UI no lo muestra en el feed ni refresca el detalle con él. Cuando termina la ejecución (éxito, checkpoint o error), el stream se cierra.
+- **Cabeceras**: `Content-Type: text/event-stream`, `Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0, no-transform` y `X-Accel-Buffering: no`. Las pone Nest 11 en todo `@Sse`; `no-transform` es lo que pide API-13, para que ningún proxy comprima o bufferee el stream.
+- **Limitación conocida, sin resolver**: los eventos sin payload (`research.started`, `episode.pending_review`, `heartbeat`) viajan sin línea `data:`, y según el estándar de SSE `EventSource` no dispara un evento con el buffer de datos vacío. Por eso hoy el navegador no recibe `research.started` ni `episode.pending_review` (el `heartbeat` igual mantiene viva la conexión). Pendiente en `tasks.md` §12.2.
 
 ## 5. Tabla de estados válidos por acción
 
@@ -190,3 +232,42 @@ El MVP transmite bloques de texto consolidado (no streaming palabra por palabra)
 | `regenerate-audio` | `READY_FOR_RENDER` |
 
 Cualquier llamada fuera de esta tabla → `409 Conflict` con `code: INVALID_STATE_TRANSITION`.
+## 6. Notificaciones (inbox)
+
+Inbox persistente del curador, complementario al SSE (`decision-log.md` entrada 9): el dashboard lo consulta por polling (spec 003, D6). Todas exigen sesión. Respuestas documentadas en `openapi.json` desde el 2026-09-25 (spec 003, API-5).
+
+### `GET /notifications?unreadOnly=true`
+
+`unreadOnly` es `true` por defecto; con `false` trae también las leídas. Ordenadas por `createdAt` descendente, sin paginación.
+
+```json
+// Response 200
+[
+  {
+    "id": "uuid",
+    "episodeId": "uuid",
+    "type": "EPISODE_PENDING_REVIEW",
+    "message": "El episodio está listo para revisión.",
+    "readAt": null,
+    "createdAt": "2026-09-09T14:29:48.129Z"
+  }
+]
+```
+
+- `type`: `EPISODE_COMPLETED`, `EPISODE_PENDING_REVIEW`, `EPISODE_REQUIRES_REVIEW` o `EPISODE_FAILED`.
+- `message`: texto ya armado al crear la notificación; el front no lo deriva de `type`.
+- `readAt`: `null` si no está leída.
+
+### `POST /notifications/:id/read`
+
+Marca una notificación como leída. Responde `201` con la notificación completa (mismo shape que un ítem del listado), con `readAt` ya seteado. Un `id` inexistente da `404 NOT_FOUND`.
+
+### `POST /notifications/read-all`
+
+Marca como leídas todas las no leídas. Responde `201` con la cantidad que marcó:
+
+```json
+{ "count": 3 }
+```
+
+Hasta el 2026-09-25 respondía `201` sin body; el `{ count }` se agregó para que la respuesta tenga un schema (API-5).

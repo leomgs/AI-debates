@@ -284,7 +284,7 @@ Post-MVP, fuera de `features.md` (congelado). Requería la sección 10 (001) mer
 - [x] `turbo.json` con pipeline `build`/`test`/`lint`/`dev` — verificado con caché real (`FULL TURBO`, 46ms en corridas repetidas)
 - [x] `scripts/check-boundaries.mjs` — probado en ambas direcciones (falla con un import de prueba insertado a mano, pasa limpio en el estado real)
 
-## 12. Dependencias de backend del dashboard (`docs/product/003-dashboard-ui.md`) — en curso (API-8 hecha)
+## 12. Dependencias de backend del dashboard (`docs/product/003-dashboard-ui.md`) — en curso (API-8 hecha; de F2: API-1 parte 1, API-5, API-7a, API-12 y API-13 hechas)
 
 Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `architect` el 2026-09-25, ajustada el mismo día por la spec 004 (API-7a, API-17, API-18, AC 3.78/3.79, 6 motivos de `REQUIRES_HUMAN_REVIEW`) y por el cierre de sus preguntas abiertas (D17-D20, API-19, AC 3.81-3.86); auth según `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Cada ítem sale de "Cambios requeridos en la API" (API-n), "Restricciones técnicas" o el plan F1-F4 de la spec, con los AC 3.x que desbloquea. Ordenado por la fase del front que desbloquea (`apps/dashboard/docs/roadmap.md`); la secuencia, la clasificación bloqueante/no bloqueante y el **orden respecto de la sección 13 (spec 004)** están en `roadmap.md` Fases 6 y 7 ("Orden crítico entre la Fase 6 y la Fase 7"). El trabajo del front en sí no se trackea acá (`apps/dashboard/docs/tasks.md`).
 
@@ -314,18 +314,22 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 
 ### 12.2. Antes de F2 — panel de curación
 
-**Bloqueantes** (recomendados en paralelo con F1)
-- [ ] **API-1 (parte 1)** — `getEpisodeDetail` trae tópico, `createdAt` y participantes (id, nombre/persona, `isJudge`) (AC 3.26-3.29, 3.32, 3.51 — agente afectado en `VALIDATION_INCONSISTENCY`, participantes en `VOICE_NOT_CONFIGURED`). Cierra API-9. Hacerla junto con API-7a (mismo mapeo de detalle y listado).
+**Bloqueantes** (recomendados en paralelo con F1). Primer bloque (API-1 parte 1, API-5, API-7a, API-12, API-13, más 13.3 y 13.5a) **hecho 2026-09-25** en la rama `feat/backend-bloque-f2-1`; proceso y hallazgos en `decision-log.md` entrada 34.
+- [x] **API-1 (parte 1)** — `getEpisodeDetail` trae tópico, `createdAt` y participantes (id, nombre/persona, `isJudge`) (AC 3.26-3.29, 3.32, 3.51 — agente afectado en `VALIDATION_INCONSISTENCY`, participantes en `VOICE_NOT_CONFIGURED`). Cierra API-9. Hacerla junto con API-7a (mismo mapeo de detalle y listado). Hecho: `topic { id, title }`, `createdAt` y `participants[] { agentId, name, role, isJudge }` (debatientes primero, juez al final); `role` es la persona (`ANALYST`, ...) o `JUDGE`
 - [ ] **API-1 (parte 2)** — `language` en `getEpisodeDetail` y en `listEpisodes` (AC 3.17 idioma, 3.26 idioma). **Lo entrega la sección 13, paso 7** (AC 4.18), porque la columna nace en la migración de la spec 004; no se implementa por separado acá.
-- [ ] **API-7a** — columna `Episode.publishedAt` (nullable, `null` hasta que exista `publish`) + migración aplicada con `migrate deploy` (`decision-log.md` #21) + exposición en `getEpisodeDetail` y `listEpisodes` (AC 3.17, 3.26 distintivo "Publicado"; D10). Primera de la cola de migraciones: API-7a → `VerdictHistory` (API-19) → sección 13, paso 4.
+- [x] **API-7a** — columna `Episode.publishedAt` (nullable, `null` hasta que exista `publish`) + migración aplicada con `migrate deploy` (`decision-log.md` #21) + exposición en `getEpisodeDetail` y `listEpisodes` (AC 3.17, 3.26 distintivo "Publicado"; D10). Primera de la cola de migraciones: API-7a → `VerdictHistory` (API-19) → sección 13, paso 4. Hecho: migración `20260925120000_add_episode_published_at` (solo `ADD COLUMN`), aplicada sobre `dev.db` con los datos intactos; también en `EpisodeSchema` (la fila que devuelven `createEpisode` y las acciones)
 - [ ] **API-17** — idioma del debate: `language` en `CreateEpisodeDto` (default `ES`), `409 VOICE_NOT_CONFIGURED` en `createEpisode`, `CheckpointReason.VOICE_NOT_CONFIGURED` reanudable con `{}`, `meta.language` en `RemotionManifest`, todo en `openapi.json` (AC 3.22, 3.51 fila `VOICE_NOT_CONFIGURED`, 3.67, 3.78). **Lo entrega la sección 13** (pasos 3, 4, 6 y 7); se marca hecho cuando esos cuatro pasos lo estén.
-- [ ] **API-5** — schema de respuesta de `listNotifications`, `markNotificationRead` y `markAllNotificationsRead` en `openapi.json` (AC 3.10-3.14)
-- [ ] **API-12** — `pipelineActive: boolean` en `getEpisodeDetail`; `streamEpisodeEvents` completa enseguida si el pipeline no está activo (AC 3.32, 3.35, 3.38, 3.39)
-- [ ] **API-13** — evento SSE `heartbeat` cada 15 s mientras el pipeline está activo, como séptimo DTO SSE en `openapi.json`, + `Cache-Control: no-transform` en el stream (AC 3.33; ADR 0001 punto 6)
+- [x] **API-5** — schema de respuesta de `listNotifications`, `markNotificationRead` y `markAllNotificationsRead` en `openapi.json` (AC 3.10-3.14). Hecho: `NotificationDto` (fechas ISO, `readAt` nullable); `markAllNotificationsRead` pasó de responder sin body a `{ count }` (los dos POST siguen en `201`)
+- [x] **API-12** — `pipelineActive: boolean` en `getEpisodeDetail`; `streamEpisodeEvents` completa enseguida si el pipeline no está activo (AC 3.32, 3.35, 3.38, 3.39). Hecho: contador en memoria por episodio en `EpisodeEventsService` (`begin` síncrono al entrar a `runPipeline`/`runAudioPipeline`, `complete` en el `finally`); ya no queda un `Subject` colgado por pedir el SSE de un episodio frenado
+- [x] **API-13** — evento SSE `heartbeat` cada 15 s mientras el pipeline está activo, como séptimo DTO SSE en `openapi.json`, + `Cache-Control: no-transform` en el stream (AC 3.33; ADR 0001 punto 6). `no-transform` ya lo manda Nest 11 en todo `@Sse` (no hizo falta código; lo cubre un e2e)
 - [ ] **API-10b** — no bloqueante según la spec, pero **prerrequisito de API-19** (en la práctica, ruta crítica de F2): `BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED` y errores de proveedor → `503 PROVIDER_QUOTA_EXCEEDED` en `regenerate` (`episode-actions.service.ts:99,109`) y `regenerate-audio` (`:131`) (AC 3.50, 3.62). No en paralelo con la sección 13, paso 5a (mismo archivo).
 
+**Hallazgos del primer bloque, sin resolver** (`decision-log.md` entrada 34; necesitan una decisión antes de tocarlos):
+- [ ] **Eventos SSE sin `data:` no llegan al navegador**: `research.started`, `episode.pending_review` y `heartbeat` se emiten sin payload, y Nest no escribe la línea `data:`. Según el estándar de SSE, `EventSource` descarta un evento con el buffer de datos vacío, así que el feed de AC 3.32 nunca vería "Empezó la investigación" ni `episode.pending_review`. El `heartbeat` cumple igual su función (los bytes llegan al rewrite). Arreglo probable: emitir `data: {}` (o un payload mínimo) y ajustar los 3 DTOs; cambia el contrato documentado, así que se decide antes
+- [ ] **SSE de un episodio inexistente**: responde `200` vacío y cierra (no hay pipeline activo), en vez de `404 NOT_FOUND` como `GET /episodes/:id` (AC 3.41). La spec de API-12 no lo pide; el dashboard igual detecta el 404 por el refetch del detalle (AC 3.38)
+
 **API-19 — `regenerate-verdict` (D17) — bloqueante (AC 3.81-3.85)**. Requiere API-10b y la extracción de `EpisodeContextService` (sección 13, paso 5a); si la F2 llega antes que la spec 004, esa extracción es el **primer commit** de API-19. Nunca una tercera copia de `buildDebateContext`.
-- [ ] (Si 13.5a no está hecho) Extraer `EpisodeContextService.build(episodeId)` sin cambio de comportamiento, como primer commit (ver 13.5a)
+- [x] (Si 13.5a no está hecho) Extraer `EpisodeContextService.build(episodeId)` sin cambio de comportamiento, como primer commit (ver 13.5a). Ya no hace falta: 13.5a quedó hecho (2026-09-25)
 - [ ] Tabla `VerdictHistory` (migración aditiva, aplicada con `migrate deploy`; segunda de la cola de migraciones, después de API-7a y antes de la de la sección 13). Si tiene FK a `Agent`, anotarlo para la reconstrucción de `Agent` de 13.4
 - [ ] `DebateService.replaceVerdict`: en una transacción, archiva el `Verdict` actual en `VerdictHistory`, lo borra y crea el nuevo (AC 3.82)
 - [ ] `EpisodeActionsService.regenerateVerdict`: sincrónica, llama al juez con los argumentos OFFICIAL actuales dentro de `withLlmCall` (1 llamada LLM del presupuesto; AC 3.82, 3.83) y hace una segunda verificación de `PENDING_REVIEW` antes de escribir; fuera de `PENDING_REVIEW` → `409 INVALID_STATE_TRANSITION`; sin presupuesto → `409 USAGE_LIMIT_EXCEEDED`; error del proveedor → `503 PROVIDER_QUOTA_EXCEEDED`, con el veredicto anterior intacto (AC 3.85)
@@ -378,7 +382,7 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 
 API-9 está cerrado vía API-1 (no requiere trabajo propio).
 
-## 13. Idioma del debate por episodio (`docs/product/004-debate-language.md`) — sin empezar
+## 13. Idioma del debate por episodio (`docs/product/004-debate-language.md`) — en curso (13.3 y 13.5a hechos)
 
 Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan incompletas respecto de esta spec). Spec escrita por `product-analyst` y revisada por `architect` el 2026-09-25, con sus preguntas abiertas A y B resueltas por el usuario el mismo día; voces según `docs/adr/0002-voces-por-agente-e-idioma.md` (aceptado, reemplaza el punto 1 de `decision-log.md` #20). Una subsección por paso del "Plan de implementación" de la spec, con los AC 4.x que cubre. **Entrega API-17 (y el `language` de API-1) de la sección 12, bloqueante de la F2 del dashboard**; el orden respecto de la sección 12 está en `roadmap.md`, Fase 7, "Orden crítico entre la Fase 6 y la Fase 7". Ningún paso depende ya de decisiones del usuario. Los AC de backend se verifican con LLM y TTS mockeados; la salida real, con smoke tests.
 
@@ -397,12 +401,12 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 - [x] Pregunta B: la migración completa `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente (resuelta 2026-09-25, decisión del usuario; aplicada en 13.4)
 - [x] Registradas en la spec 004 y en el ADR 0002
 
-### 13.3. Paso 3 — Contratos (sin bloqueo)
+### 13.3. Paso 3 — Contratos (sin bloqueo) — HECHO 2026-09-25 (`decision-log.md` entrada 34)
 
-- [ ] `DebateLanguageSchema = z.enum(["ES","EN","PT"]).meta({ id: "DebateLanguage" })` en `packages/contracts` (AC 4.19)
-- [ ] `RemotionManifestSchema.meta.language` obligatorio (AC 4.18, 4.19)
-- [ ] `packages/video/fixtures/debate.sample.json` con `"language": "ES"`; `pnpm video:studio` sigue renderizando sin `.env` ni base (AC 4.19)
-- [ ] `check-boundaries` pasa: `packages/video` sigue sin importar nada de `apps/api` (AC 4.19)
+- [x] `DebateLanguageSchema = z.enum(["ES","EN","PT"]).meta({ id: "DebateLanguage" })` en `packages/contracts` (AC 4.19), exportado junto con el tipo `DebateLanguage`
+- [x] `RemotionManifestSchema.meta.language` obligatorio (AC 4.18, 4.19). Mientras no exista `Episode.language` (13.4), `RenderService` lo completa con `"ES"` fijo (constante `MANIFEST_LANGUAGE_UNTIL_EPISODE_LANGUAGE`, a borrar en 13.7). En `openapi.json` sale como `DebateLanguage_Output`, porque por ahora solo aparece en respuestas
+- [x] `packages/video/fixtures/debate.sample.json` con `"language": "ES"`; `pnpm video:studio` sigue renderizando sin `.env` ni base (AC 4.19). Verificado con `remotion compositions` y un render real de un frame (`remotion still`)
+- [x] `check-boundaries` pasa: `packages/video` sigue sin importar nada de `apps/api` (AC 4.19)
 
 ### 13.4. Paso 4 — Schema y migración (requiere 13.1 para el seed `EN`/`PT`, y las migraciones de API-7a y `VerdictHistory` ya aplicadas)
 
@@ -415,9 +419,9 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 
 ### 13.5. Paso 5 — Pipeline
 
-**5a. `EpisodeContextService` — sin cambio de comportamiento (sin bloqueo; prerrequisito de API-19)**
-- [ ] Extraer `EpisodeContextService.build(episodeId)` en `modules/episodes/`, reemplazando las copias de `buildDebateContext` del orquestador (`:496`) y de acciones (`:219`) (prepara AC 4.12). Si API-19 (12.2) arranca antes, esta extracción es su primer commit; nunca una tercera copia
-- [ ] Tests existentes en verde **antes** de tocar el idioma; no en paralelo con API-10b/API-14/API-15/API-19 (mismo `episode-actions.service.ts`)
+**5a. `EpisodeContextService` — sin cambio de comportamiento (sin bloqueo; prerrequisito de API-19)** — HECHO 2026-09-25
+- [x] Extraer `EpisodeContextService.build(episodeId)` en `modules/episodes/`, reemplazando las copias de `buildDebateContext` del orquestador (`:496`) y de acciones (`:219`) (prepara AC 4.12). Si API-19 (12.2) arranca antes, esta extracción es su primer commit; nunca una tercera copia
+- [x] Tests existentes en verde **antes** de tocar el idioma, sin cambiar ninguna aserción (solo el setup: stub del servicio en el spec del orquestador, servicio real en el de acciones); spec propio `episode-context.service.spec.ts`; no en paralelo con API-10b/API-14/API-15/API-19 (mismo `episode-actions.service.ts`)
 
 **5b. Prompts (requiere 5a y 13.4)**
 - [ ] Reescribir sin voseo, a español neutro con tuteo: `agents.personas.ts` (incluido `ROUND_FRAMING` `:155-159` y `:168,184`), `agents.service.ts`, `fact-check.service.ts`, `research.service.ts` y el `debaterSummary` del seed (AC 4.26)
