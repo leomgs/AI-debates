@@ -413,3 +413,37 @@ Orden de build: Etapa 0 (sin código, levantar el sidecar vía Docker y verifica
 **Proceso**: 4 decisiones del usuario antes de escribir (auth de un solo usuario, showcase con `@remotion/player` sobre el manifest, gaps de API como dependencias de backend, stack Tailwind + shadcn/ui + TanStack Query + openapi-fetch). `product-analyst` escribió la spec contra `openapi.json` real; `architect` la revisó contra el código y encontró 4 bloqueantes no anticipados: (1) topología de auth sin definir — resuelta en ADR 0001 (Nest emite/valida, Next único origen con rewrites, CORS eliminado); (2) un error no clasificado no lleva a `FAILED`, deja el episodio trabado en fase activa con un SSE mudo — se agrega `pipelineActive` (API-12); (3) el proxy de rewrites de Next corta el SSE tras 30 s de inactividad — `heartbeat` cada 15 s (API-13); (4) `packages/video` no es importable desde el dashboard (`registerRoot()` al importar, dos Reacts en el lockfile). También bugs reales de backend: `edit`/`regenerate` no validan que el `argumentId` sea del episodio (API-14), `BudgetExceededError` sale como 500 (API-10b), `resume` no acepta `maxTtsSegments` (API-16). Tras la revisión el usuario sumó un paso explícito de publicación (`Episode.publishedAt`) para que nada llegue al showcase sin previsualizarse. `roadmap-planner` bajó todo a fases F1-F4 del dashboard y a la sección 12 de `tasks.md`.
 
 **Resultado**: `docs/product/003-dashboard-ui.md`, `docs/adr/0001-auth-sesion-nest-mismo-origen.md`, planning actualizado en raíz y `apps/dashboard/docs/`. Corregida la resolución de `VALIDATION_INCONSISTENCY` que figuraba en `tasks.md` §7 y `frontend-notes.md` (`regenerate` no aplica; solo `reject`). Preguntas abiertas para el usuario: 4, 5, 7, 8 y 10 de la spec, más si `publishedAt` se adelanta a F2 (AC 3.17/3.26 lo muestran en F2 pero API-7 está en F4).
+
+### 32. Spec 004 (idioma del debate) escrita, revisada por `architect`, con ADR 0002 de voces; ajustes a la spec 003
+
+**Contexto**: el usuario quiso poder producir debates en inglés, español y portugués, y preguntó si alcanzaba con un parámetro en los agentes o si había que tocar el schema.
+
+**Respuesta**: hay que tocar el schema. El pipeline se retoma en 6 lugares que reconstruyen el contexto desde la base (resume, recovery al reiniciar, `regenerate`, `regenerate-audio`, resume de `INSUFFICIENT_EVIDENCE`, manifest); un idioma que viaje solo como parámetro se pierde en el primer corte. Por eso se agrega `Episode.language` (enum `ES|EN|PT`, default `ES`, inmutable).
+
+**Proceso**: `product-analyst` escribió la spec y `architect` la revisó contra el código. Lo que encontró:
+- `resolveVoiceId` castea el Json de voces sin validar, y con `voice: undefined` Echogarden elige otra voz sin avisar.
+- Toda falla de TTS se reporta como `PROVIDER_QUOTA_EXCEEDED`.
+- Con `TTS_PROVIDER=GOOGLE_TTS`, Echogarden matchea `"es"` por prefijo sin dar error.
+- Hay dos copias de `buildDebateContext`.
+- El voseo aparece en casi todos los prompts.
+
+**Decisiones del usuario**:
+- ADR 0002: tabla `AgentVoice` en lugar de un Json anidado.
+- `CheckpointReason` nuevo, `VOICE_NOT_CONFIGURED`.
+- El arranque falla si `TTS_PROVIDER !== LOCAL`.
+- Se persiste `AudioAsset.voiceId`.
+- `ES` es español neutro latinoamericano, con tuteo.
+- Mismos personajes en los 3 idiomas.
+- Research sin restricción de idioma.
+
+Consultado el catálogo real de Echogarden vits (`es` 7 voces, de las cuales solo 2 `es_MX`; `en` 35; `pt` 3, todas masculinas), el usuario decidió:
+- `ES` mantiene las voces actuales hasta que haya un segundo motor de TTS.
+- `PT` repite voces, con un spike de tono.
+- La migración completa `AudioAsset.voiceId` de los assets existentes.
+
+**Spec 003, ajustes**:
+- `publishedAt` se adelanta a F2 (API-7a).
+- Selector y distintivos de idioma; sexto motivo `VOICE_NOT_CONFIGURED`.
+- i18n completo del showcase (`/es`, `/en`, `/pt`) como nice-to-have. F4 sale en español bajo `/[locale]`, con dos layouts raíz.
+
+**Resultado**: `docs/product/004-debate-language.md`, `docs/adr/0002-voces-por-agente-e-idioma.md` y el planning (Fase 7 en `roadmap.md`, §13 en `tasks.md`). La spec 004 es bloqueante de la F2 del dashboard a través de API-17.

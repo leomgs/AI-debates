@@ -2,7 +2,7 @@
 
 Documento de secuenciación. No repite el detalle de cada ítem (eso vive en `tasks.md`) — organiza y prioriza lo que `tasks.md` ya trackea, en el orden en que técnicamente conviene implementarlo, respetando las dependencias de `architecture.md` (sección 3, dirección de dependencias) y las prioridades P0/P1 de `features.md`. No agrega alcance nuevo: cada tarea referencia su ítem equivalente en `tasks.md`.
 
-Última revisión: 2026-09-25 (spec 003 escrita y revisada por `architect`, ADR 0001 aceptado; nueva Fase 6 con las dependencias de backend de la spec 003). Revisión previa: 2026-09-24 (Feature 7 completa — MVP P0 cerrado; Fase 5 completa — specs 001 y 002 implementadas, ver `decision-log.md` entradas 28-30).
+Última revisión: 2026-09-25, tercera pasada (preguntas A y B de la spec 004 resueltas por el usuario tras consultar el catálogo real de voces: la Fase 7 ya no tiene pasos bloqueados; pregunta 7 de la spec 003 cerrada con D16 — showcase con interfaz en español bajo `/[locale]` —, que solo cambia el front). Segunda pasada del mismo día: spec 004 — idioma del debate — escrita y revisada por `architect`, ADR 0002 aceptado; spec 003 ajustada (API-7a, API-17, API-18, AC 3.78/3.79, 6 motivos de `REQUIRES_HUMAN_REVIEW`); nueva Fase 7 con la spec 004, intercalada con la Fase 6 (ver "Orden crítico"). Revisión previa: 2026-09-25 (spec 003 escrita y revisada por `architect`, ADR 0001 aceptado; nueva Fase 6 con las dependencias de backend de la spec 003). Antes: 2026-09-24 (Feature 7 completa — MVP P0 cerrado; Fase 5 completa — specs 001 y 002 implementadas, ver `decision-log.md` entradas 28-30).
 
 ## Objetivo
 
@@ -13,12 +13,17 @@ Llevar el backend desde su estado actual (schema, contratos y factory de modelos
 **MVP P0 completo (2026-09-24, `decision-log.md` entrada 27)**: con Feature 7 (Remotion Manifest) implementada y verificada contra el servidor y el motor reales, **todo lo marcado P0 en `features.md` queda cubierto de punta a punta**: `POST /episodes` → research → debate (OPENING/REBUTTAL/CROSS_EXAMINATION) con fact-check/enmienda → veredicto → `PENDING_REVIEW` → curaduría humana → TTS (URLs firmadas + regeneración atómica) → `GET /episodes/:id/manifest` con subtítulos reales y audio firmado, listo para que un worker de Remotion lo consuma. Ver `tasks.md` §0-4/6/7 y `decision-log.md` entradas 1-27 para el detalle y el proceso de cada decisión no obvia.
 
 **Próximo paso real**: no queda ningún ítem P0 pendiente, y la Fase 5 completa (specs 001 y 002, `decision-log.md` #29-30) — el repo ya es un monorepo `pnpm`+Turborepo real (`apps/api`+`packages/contracts`+`packages/video`+`apps/dashboard`), con `packages/video` verificado con un render real. Lo que sigue:
-- **Spec 003 (UI real del dashboard) — escrita y revisada por `architect` (2026-09-25)**: `docs/product/003-dashboard-ui.md`, con la topología de auth en `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Panel de curación privado bajo `/studio` + showcase público de episodios publicados. El tracking del front vive en `apps/dashboard/docs/roadmap.md` (fases F1-F4); **las dependencias de backend que pide la spec (API-1..API-16, auth, showcase, refactor de `packages/video`) son la Fase 6 de este roadmap** (`tasks.md` §12).
+- **Spec 003 (UI real del dashboard) — escrita y revisada por `architect` (2026-09-25)**: `docs/product/003-dashboard-ui.md`, con la topología de auth en `docs/adr/0001-auth-sesion-nest-mismo-origen.md` (aceptado). Panel de curación privado bajo `/studio` + showcase público de episodios publicados. El tracking del front vive en `apps/dashboard/docs/roadmap.md` (fases F1-F4); **las dependencias de backend que pide la spec (API-1..API-18, auth, showcase, refactor de `packages/video`) son la Fase 6 de este roadmap** (`tasks.md` §12).
+- **Spec 004 (idioma del debate ES/EN/PT) — escrita y revisada por `architect`, con sus preguntas abiertas resueltas (2026-09-25)**: `docs/product/004-debate-language.md`, con el modelo de voces en `docs/adr/0002-voces-por-agente-e-idioma.md` (aceptado). Es la **Fase 7** de este roadmap (`tasks.md` §13). **Entrega API-17, que es bloqueante de la F2 del dashboard**, así que está en la ruta crítica de la spec 003 aunque tenga número de fase posterior.
 - **Feature 9 (Fase 4 más arriba)** — worker que ejecuta Remotion sobre el manifest y produce el `.mp4`. Ya no depende de nada nuevo: `packages/video` existe y sabe renderizar.
-- **Backlog de TTS** (`tasks.md` §5) — Google/OpenRouter como proveedores adicionales, Chatterbox (motor GPU) para mejorar la calidad de voz de Piper.
+- **Backlog de TTS** (`tasks.md` §5) — Google/OpenRouter como proveedores adicionales, Chatterbox (motor GPU) para mejorar la calidad de voz de Piper. Ojo: con la spec 004, mientras no exista un segundo `AudioProvider` enlazado el backend no arranca con `TTS_PROVIDER` distinto de `LOCAL` (D16, ADR 0002 punto 5); implementar cualquiera de estos proveedores tiene que levantar esa restricción y cargar sus voces en `AgentVoice`. Es también lo que habilita pasar las voces `ES` a `es_MX`/latinoamericanas (spec 004, D5 y pregunta A).
 - **Housekeeping menor** (`tasks.md` §9) — `04-development/testing-strategy.md`, estrategia de fixtures de Research para dev.
 
-De estos, **la spec 003 es la continuación más directa** si el objetivo es tener una interfaz usable — es lo único que falta para poder curar episodios sin pegarle a la API a mano. Su primer paso es backend: **API-8 (auth, ADR 0001) antes de la F1 del front**, y API-1/API-5/API-12/API-13 antes de la F2 (Fase 6, más abajo). Feature 9 puede avanzar en paralelo, ya desbloqueada.
+De estos, **la spec 003 es la continuación más directa** si el objetivo es tener una interfaz usable, y la spec 004 va dentro de su ruta crítica. La ruta crítica de la F2 ya no tiene decisiones del usuario en el medio. Orden concreto (detalle en "Orden crítico entre la Fase 6 y la Fase 7"):
+1. **Ya, sin esperar nada**: API-8 (auth, bloqueante de F1). En paralelo: API-5, API-12, API-13, API-1 (sin `language`) + API-7a, y de la 004 los pasos 1 (elegir las 5 voces `en_US` y la asignación `PT`), 3 (contratos) y 5a (`EpisodeContextService`, sin cambio de comportamiento).
+2. **Después, en serie**: pasos 4 (migración, sobre API-7a ya aplicada), 6 (TTS) y 7 (API) de la Fase 7, que cierran API-17 y el `language` de API-1. Los pasos 5b, 5c, 8 y 9 cierran la spec 004 pero no bloquean la F2.
+
+Feature 9 puede avanzar en paralelo, ya desbloqueada.
 
 ## Fase 0 — Fundaciones de runtime — COMPLETA
 
@@ -63,7 +68,7 @@ Cerrada esta fase, el backend completa un episodio de punta a punta hasta `PENDI
 Objetivo: completar lo que falta para que un episodio `APPROVED` pueda llegar a `READY_FOR_RENDER` (Feature 6 es P0). El real-time (Feature 8, también P0) ya está resuelto. **No cierra el MVP P0 por sí sola** — Feature 7 (Fase 4) también es P0, ver corrección de prioridades arriba.
 
 - [x] `GET /episodes/:id/events` (SSE) + los 6 eventos definidos (`tasks.md` §8) — COMPLETA
-- [x] TTS: `AudioProvider` seleccionables vía env var (`tasks.md` §5, `decision-log.md` entradas 19-25). **Local (`echogarden`+Piper) completo y verificado contra el motor real** — `AudioStorageProvider`/`LocalDiskStorageProvider`, migración `Agent.voiceId` a `Json`, wiring completo en `EpisodeBudgetService`/`EpisodeStateService`/`EpisodeOrchestratorService`/`EpisodeRecoveryService`, smoke test real (`npm run smoke:tts`) en verde. **AC 6.1 (URLs firmadas) y AC 6.2 (regeneración atómica de `sequenceIndex`) completos y verificados contra el servidor real** (decision-log #25) — `GET /episodes/:id/audio/:audioAssetId/url` + `POST /episodes/:id/actions/regenerate-audio`. En backlog, no P0: Google (`google-tts-api`), OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por spike de validación), y un 4to proveedor GPU (`CHATTERBOX`, plan aprobado en decision-log #23, aislado a backlog en la entrada 24 — bloqueado por infraestructura local, Docker Desktop, ver `tasks.md` §5 "Backlog / mejoras futuras").
+- [x] TTS: `AudioProvider` seleccionables vía env var (`tasks.md` §5, `decision-log.md` entradas 19-25). **Local (`echogarden`+Piper) completo y verificado contra el motor real** — `AudioStorageProvider`/`LocalDiskStorageProvider`, migración `Agent.voiceId` a `Json`, wiring completo en `EpisodeBudgetService`/`EpisodeStateService`/`EpisodeOrchestratorService`/`EpisodeRecoveryService`, smoke test real (`npm run smoke:tts`) en verde. **AC 6.1 (URLs firmadas) y AC 6.2 (regeneración atómica de `sequenceIndex`) completos y verificados contra el servidor real** (decision-log #25) — `GET /episodes/:id/audio/:audioAssetId/url` + `POST /episodes/:id/actions/regenerate-audio`. En backlog, no P0: Google (`google-tts-api`), OpenRouter (`fish-audio/s2.1-pro-free:free`, gateado por spike de validación), y un 4to proveedor GPU (`CHATTERBOX`, plan aprobado en decision-log #23, aislado a backlog en la entrada 24 — bloqueado por infraestructura local, Docker Desktop, ver `tasks.md` §5 "Backlog / mejoras futuras"). Nota: el `Json` de `Agent.voiceId` queda reemplazado por la tabla `AgentVoice` en la Fase 7 (ADR 0002).
 - [x] Transición `GENERATING_AUDIO → READY_FOR_RENDER` wireada en `EpisodeStateService`/orquestación (etapa 2 de TTS, decision-log #22)
 - [ ] `README.md` real (`tasks.md` §9) — housekeeping menor, no bloquea el MVP P0
 - [ ] `04-development/testing-strategy.md` (`tasks.md` §9) — ya hay módulos implementados para documentar el patrón real usado
@@ -93,13 +98,13 @@ Objetivo: preparar el terreno para que exista un frontend. `features.md` sigue c
 - [x] **`docs/product/001-openapi-contract-zod.md`** — COMPLETA (2026-09-24). `openapi.json` generado desde los contratos Zod ya existentes (`@nestjs/swagger` + `nestjs-zod`), `/docs` navegable. `RemotionManifest`/`EpisodeDetailResponse` migrados a schemas Zod, 6 schemas de eventos SSE (Feature 8) escritos contra los payloads reales. Verificado contra el servidor real. Detalle en `tasks.md` §10.
 - [x] **`docs/product/002-workspace-restructure.md`** — COMPLETA (2026-09-24). Monorepo `pnpm` + Turborepo real: `apps/api` (este backend, movido intacto — `dev.db`/`outputs/` preservados), `packages/contracts` (`RemotionManifest` compartido), `packages/video` (Remotion desde cero, **verificado con un render real** contra el fixture, sin DB ni `.env`), `apps/dashboard` (scaffold Next.js vacío). Bloqueante real encontrado en el camino: `better-sqlite3@13.x` no publica binarios precompilados, bajado a `^12.11.1`. Detalle en `tasks.md` §11.
 
-El tracking del dashboard en sí (framework, UI, autenticación) **no vive acá** — es `apps/dashboard/docs/roadmap.md`. La UI real del dashboard ya tiene su spec escrita (`docs/product/003-dashboard-ui.md`); lo que esa spec le pide al backend es la Fase 6.
+El tracking del dashboard en sí (framework, UI, autenticación) **no vive acá** — es `apps/dashboard/docs/roadmap.md`. La UI real del dashboard ya tiene su spec escrita (`docs/product/003-dashboard-ui.md`); lo que esa spec le pide al backend es la Fase 6, más la Fase 7 (spec 004), que entrega API-17.
 
 ## Fase 6 — Dependencias de backend de la spec 003 (dashboard)
 
 Objetivo: dejar la API y el workspace en condiciones de que el dashboard (`apps/dashboard/docs/roadmap.md`, fases F1-F4) cumpla la spec `docs/product/003-dashboard-ui.md` sin duplicar tipos ni lógica de backend (D3, D5). Post-MVP, fuera de `features.md` (congelado). Cada ítem cita su API-n de la spec ("Cambios requeridos en la API") y los AC que desbloquea; la topología de auth es la del ADR 0001. Detalle ítem por ítem en `tasks.md` §12.
 
-Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es la clasificación de la propia spec.
+Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es la clasificación de la propia spec. **Se implementa intercalada con la Fase 7** (spec 004): ver "Orden crítico entre la Fase 6 y la Fase 7" al final de la Fase 7.
 
 **6.1 — Antes de F1 (base del dashboard)**
 - [ ] **API-8 — Módulo auth (ADR 0001)** — bloqueante (AC 3.1-3.9). `modules/auth` (`POST /auth/login`, `POST /auth/logout`, `GET /auth/session`), `SessionGuard` global que niega por defecto, `@Public()`, credenciales en `.env` sin defaults, rate-limit en login, `trust proxy`, `401` documentado en OpenAPI, sin `enableCors()`, `AUDIO_SIGNING_SECRET` obligatorio en producción. Es el primer paso de toda la spec: sin él la F1 no puede cumplir su criterio.
@@ -107,14 +112,17 @@ Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es l
 - [ ] **Workspace: `dev.dependsOn: ["^build"]` en el `turbo.json` raíz** (spec, "Turborepo y tipos").
 
 **6.2 — Antes de F2 (panel de curación)** — recomendados en paralelo con F1 (spec, plan F1)
-- [ ] **API-1** — bloqueante (AC 3.26-3.29, 3.32, 3.51): tópico, `createdAt` y participantes en `getEpisodeDetail`. Cierra también API-9.
+- [ ] **API-1** — bloqueante (AC 3.17 idioma, 3.26-3.29, 3.32, 3.51): tópico, `createdAt`, `language` y participantes en `getEpisodeDetail`; `language` en `listEpisodes`. Cierra también API-9. **Se entrega en dos partes**: tópico/`createdAt`/participantes ya (no depende de nada); `language` en detalle y listado lo entrega la Fase 7, paso 7 (spec 004, AC 4.18), porque la columna `Episode.language` nace en su migración.
+- [ ] **API-7a** — bloqueante (AC 3.17, 3.26, distintivo "Publicado"): columna `Episode.publishedAt` (nullable, `null` hasta que exista `publish`) + exposición en `getEpisodeDetail` y `listEpisodes`. Separada de API-7 para construir el distintivo en F2 (D10, decisión del usuario). Migración chica, sin dependencias: conviene hacerla **antes** de la migración de la Fase 7 (ver "Orden crítico").
+- [ ] **API-17** — bloqueante (AC 3.22, 3.51 fila `VOICE_NOT_CONFIGURED`, 3.67, 3.78): **lo entrega la Fase 7 (spec 004)**, no se implementa acá. `language` en `createEpisode` (default `ES`), `409 VOICE_NOT_CONFIGURED`, `CheckpointReason.VOICE_NOT_CONFIGURED` reanudable con `{}`, `meta.language` en el manifest, todo en `openapi.json`. Se da por cumplido cuando cierran los pasos 3, 4, 6 y 7 de la Fase 7.
 - [ ] **API-5** — bloqueante (AC 3.10-3.14): schemas de respuesta de notificaciones en `openapi.json`.
 - [ ] **API-12** — bloqueante (AC 3.32, 3.35, 3.38, 3.39): `pipelineActive` en `getEpisodeDetail`; el SSE completa enseguida si el pipeline no está activo.
 - [ ] **API-13** — bloqueante (AC 3.33): evento SSE `heartbeat` cada 15 s + `Cache-Control: no-transform` (ADR 0001 punto 6).
-- [ ] **API-10** — no bloqueante, recomendado antes de F2: bodies, respuestas y códigos de error de `runEpisodeAction` en `openapi.json`; corrección de la documentación de `argument.approved`.
+- [ ] **API-10** — no bloqueante, recomendado antes de F2: bodies, respuestas y códigos de error de `runEpisodeAction` en `openapi.json` (incluido `VOICE_NOT_CONFIGURED`, que existe recién tras la Fase 7 paso 6); corrección de la documentación de `argument.approved`.
 - [ ] **API-10b** — no bloqueante (AC 3.50, 3.62): `BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED`, errores de proveedor → `503 PROVIDER_QUOTA_EXCEEDED` en `regenerate`/`regenerate-audio`. Sirve también a F3.
 - [ ] **API-14** — importante, no bloqueante: `edit`/`regenerate` validan que el `argumentId` pertenezca al episodio (`404`).
 - [ ] **API-16** — no bloqueante (parte de AC 3.51): `maxTtsSegments` en `UsageLimitResumeSchema`.
+- [ ] **API-18** — no bloqueante, sin fase asignada en la spec (parte de AC 3.51, fila `VOICE_NOT_CONFIGURED`): exponer qué agentes no tienen voz en un `VOICE_NOT_CONFIGURED` (hoy el checkpoint solo trae el motivo). Depende de la Fase 7 paso 6 (`VoiceNotConfiguredError`). **El mecanismo no está especificado** (ver "Decisiones abiertas"); sin API-18 el panel lista todos los participantes.
 - [ ] **API-15** — menor: `resume` valida el estado antes de aplicar límites nuevos.
 - [ ] **API-6** — mejora: filtro `status` de `listEpisodes` tipado; `VALIDATION_ERROR` en vez de `BADREQUEST`.
 - [ ] **API-11** — mejora, no necesaria (la spec la cubre con polling): eventos SSE para `APPROVED`/`GENERATING_AUDIO`.
@@ -124,7 +132,7 @@ Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es l
 - [ ] **Catálogo de pnpm** (punto 4): React `19.3.0` y Remotion `4.0.528` exactos; criterio `pnpm why react` con una sola versión.
 
 **6.4 — Antes de F4 (publicación y showcase)**
-- [ ] **API-7 — Showcase y publicación** — bloqueante para publicar (AC 3.17, 3.26, 3.64-3.72): `Episode.publishedAt` + acciones `publish`/`unpublish`, `publishedAt` en detalle y lista, `showcase.controller.ts` público (`GET /showcase/episodes`, `GET /showcase/episodes/:id`) filtrado por `publishedAt` y `SHOWCASE_STATUSES`. Nota: `publishedAt` también lo usan AC 3.17/3.26, que caen en F2 (ver `apps/dashboard/docs/roadmap.md`, "Preguntas abiertas").
+- [ ] **API-7 — Showcase y publicación** — bloqueante para publicar (AC 3.64-3.72): acciones `publish`/`unpublish` que escriben el `publishedAt` de API-7a, `showcase.controller.ts` público (`GET /showcase/episodes` con `{ id, title, createdAt, durationSec, language }[]`, `GET /showcase/episodes/:id` con el idioma en `manifest.meta.language`) filtrado por `publishedAt` y `SHOWCASE_STATUSES`. La columna y su exposición en el panel ya no son parte de API-7 (pasaron a API-7a, F2). Requiere la Fase 7 cerrada (el `language` de la lista pública sale de `Episode.language`).
 - [ ] **Ajuste de `coding-rules.md` §1** — varios controllers por módulo cuando la política de acceso es distinta (spec, "Dependencias"; F4).
 - [ ] **API-8 en producción con TTL de audio 3600 s** (D12).
 
@@ -132,17 +140,59 @@ Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es l
 
 **Criterio de completitud de la fase**: los criterios de cada fase del front que dependen de estos ítems (`apps/dashboard/docs/roadmap.md`) dan verde, y además: `pnpm openapi:generate && git diff --exit-code openapi.json` sigue en 0; sin sesión, las acciones de la API devuelven `401` con curl (spec, "Criterio de aceptación").
 
+## Fase 7 — Idioma del debate por episodio (spec 004)
+
+Objetivo: que el curador elija el idioma del debate (`ES` neutro latinoamericano, `EN`, `PT`) al crear el episodio, persistido e inmutable en `Episode.language`, y que todo el pipeline (research, debate, fact-check, veredicto, audio, manifest) lo respete también tras cortes y reanudaciones. Spec `docs/product/004-debate-language.md`; voces en `AgentVoice` según `docs/adr/0002-voces-por-agente-e-idioma.md`. Backend, contratos (`packages/contracts`) y fixture de `packages/video`; la UI va dentro de la spec 003. Detalle tarea por tarea en `tasks.md` §13.
+
+**Es bloqueante de la F2 del dashboard vía API-17** (y aporta el `language` de API-1). Aunque está numerada después, se intercala con la Fase 6.
+
+Sigue los pasos del "Plan de implementación" de la spec, que ya vienen en orden de dependencia:
+
+**7.0 — Voces y preguntas abiertas (resueltas el 2026-09-25)**
+- [~] **Paso 1 — Voces**: catálogo real ya consultado (2026-09-25: `es` 7 voces, solo 2 `es_MX` y ninguna de otra región latinoamericana; `en` 35; `pt` 3, todas masculinas). Pendiente: elegir 5 voces `en_US` distintas, fijar la asignación `PT` con repetición (juez con voz propia, debatientes compartiendo las dos `pt_BR`), spike de velocidad/tono para diferenciar los debatientes `PT` (sin verificar que Echogarden lo soporte en vits) y documentar todo en `tasks.md` §5. `ES` conserva las 5 voces actuales del seed (mezcla `es_ES`/`es_MX`) hasta que exista un segundo motor de TTS: D5 rige el texto, no el timbre. Base de AC 4.25. No depende de nada: se puede hacer ya.
+- [x] **Paso 2 — Preguntas abiertas A y B**: resueltas por el usuario (spec 004, "Preguntas abiertas"). A → voces como en el paso 1. B → la migración del paso 4 completa `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente.
+
+**7.1 — Sin dependencias, se puede hacer ya**
+- [ ] **Paso 3 — Contratos**: `DebateLanguageSchema` en `packages/contracts`, `meta.language` obligatorio en `RemotionManifestSchema`, fixture de `packages/video` con `"language": "ES"` (AC 4.19).
+- [ ] **Paso 5a — `EpisodeContextService.build(episodeId)`** reemplaza las dos copias de `buildDebateContext` (`episode-orchestrator.service.ts:496`, `episode-actions.service.ts:219`) **sin cambio de comportamiento**, tests en verde (prepara AC 4.12). Refactor puro: se puede adelantar, pero toca los mismos archivos que API-10b/API-14/API-15 (ver "Orden crítico").
+
+**7.2 — Pipeline, TTS y API**
+- [ ] **Paso 4 — Schema y migración manual** (ADR 0002 punto 7): `AgentVoice`, copia de voces `ES` con `json_each` sin `TBD`, `Agent` reconstruida sin `voiceId`, `Episode.language NOT NULL DEFAULT 'ES'`, `AudioAsset.voiceId` completado en los assets existentes con la voz `LOCAL` de su agente (pregunta B), aplicada con `migrate deploy`; revisión previa de `dev.db`; seed idempotente (AC 4.5, 4.16, 4.25). Requiere el paso 1 (voces `EN`/`PT` para el seed) y API-7a ya aplicada.
+- [ ] **Paso 5b — Prompts** sin voseo, `buildLanguageInstruction`, `CONTRARIAN.voice` neutralizado (AC 4.6, 4.7, 4.9, 4.26, 4.27). Requiere 5a y 4.
+- [ ] **Paso 5c — `language` por parámetro** a `FactCheckService`, `ResearchService` y `DebateContext` (AC 4.10-4.13). Requiere 5a y 4.
+- [ ] **Paso 6 — TTS**: `resolveVoiceId(agent, language)`, `assertVoicesConfigured`, `VoiceNotConfiguredError` (`409` + checkpoint), arranque solo con `LOCAL`, `AudioAsset.voiceId` (AC 4.4, 4.14-4.16, 4.24, 4.28). Requiere 4.
+- [ ] **Paso 7 — API**: DTOs, respuestas y `pnpm openapi:generate` (AC 4.18, 4.19). **Cierra API-17 y la parte `language` de API-1.** Requiere 3, 4 y 6.
+- [ ] **Paso 8 — Smoke tests reales** `ES`/`EN`/`PT` hasta `READY_FOR_RENDER`, resultados en `decision-log.md` (AC 4.7, 4.8, 4.17, 4.27). Requiere 5b, 5c, 6 y 7.
+- [ ] **Paso 9 — Docs**: `api-contract.md` §1-§2, `setup.md`, `decision-log.md` (nota de que el punto 1 de #20 queda reemplazado por el ADR 0002). `features.md` no se toca.
+
+**7.3 — Dashboard**
+- [ ] **Paso 10** — AC 4.20-4.23: se implementan dentro de la spec 003 (F2: AC 4.20-4.22 = AC 3.22, 3.78, 3.17, 3.26; F4: AC 4.23 = AC 3.66, 3.67). Se trackean en `apps/dashboard/docs/tasks.md`, no acá.
+
+**Criterio de completitud de la fase** (spec 004, "Criterio de aceptación"): `pnpm build` y tests en verde; `pnpm openapi:generate && git diff --exit-code openapi.json` en 0; `check-boundaries` pasa y `pnpm video:studio` renderiza el fixture sin `.env` ni base; tests de AC 4.1-4.7, 4.9-4.16, 4.18, 4.24 y 4.28 en verde; consulta directa para AC 4.5/4.25 y búsqueda en el código para AC 4.26; smoke test real en los 3 idiomas con resultados en `decision-log.md`; un episodio anterior a la migración sigue abriendo detalle y manifest como `ES`. AC 4.20-4.23 se verifican con las pantallas de la spec 003.
+
+### Orden crítico entre la Fase 6 y la Fase 7
+
+Las dos fases tocan los mismos puntos: `EpisodesService` (`getEpisodeDetail`, `listEpisodes` y su `select` de `episodes.service.ts:60`, `getManifest`), los schemas de DTO (`EpisodeDetailSchema`, `EpisodeListItemSchema`, `EpisodeSchema`), `schema.prisma` (migraciones sobre `Episode`), `episode-actions.service.ts` y `openapi.json`. Para no pisarse:
+
+1. **Una migración a la vez, en serie.** API-7a (`Episode.publishedAt`, trivial y sin bloqueos) va **antes** que la migración manual de la Fase 7 (paso 4, que reconstruye `Agent` y agrega `Episode.language`). Así la migración grande se escribe sobre el schema final y no hay dos migraciones abiertas en ramas paralelas.
+2. **API-1 en dos partes**: tópico/`createdAt`/participantes junto con API-7a (misma superficie: detalle + listado); `language` en el paso 7 de la Fase 7, sobre ese mismo mapeo (`mapEpisodeDetail` y el `select` del listado).
+3. **`EpisodeContextService` (paso 5a) antes de API-10b, API-14 y API-15**, o bien después de ellos, pero no en paralelo: los cuatro tocan `episode-actions.service.ts` (`regenerate` usa la copia de `buildDebateContext` de `:219`).
+4. **`openapi.json` se regenera y commitea en cada ítem**, y cada ítem arranca desde el anterior ya mergeado (criterio de idempotencia de la spec 001). No acumular cambios de contrato de las dos fases en ramas paralelas.
+5. **Ruta crítica de la F2 del dashboard**, sin decisiones del usuario en el medio: API-8 (F1) → { API-1 parte 1 + API-7a, API-5, API-12, API-13, paso 1, paso 3, paso 5a } → pasos 4, 6, 7 (cierra API-17 y API-1). Los pasos 5b, 5c, 8 y 9 no bloquean la F2 (API-17 no los necesita), pero sí el cierre de la spec 004. El spike de tono `PT` del paso 1 tampoco bloquea: la asignación con repetición alcanza para el seed.
+6. **API-10 y API-18 después del paso 6**: el código `VOICE_NOT_CONFIGURED` y `VoiceNotConfiguredError` nacen ahí.
+7. **API-7 (F4) después de la Fase 7**: `listShowcaseEpisodes` devuelve `language`.
+
 ## Decisiones abiertas (el usuario debe resolverlas, no se infieren)
 
 - **Estrategia de seed/fixtures de la Evidence Base para desarrollo local** (`tasks.md` §9) — research contra APIs reales tiene costo; hay que decidir si se graban fixtures de respuestas reales, se usa un proveedor de bajo costo en dev, o se mockea por completo mientras no se apunte a producción.
 - **Proveedor de storage para `AudioAsset`** — `features.md` (AC 6.1) exige abstraer disco local / S3 / R2 / GCS pero no fija cuál usar en el MVP.
 - **Spec 003, pregunta 4 — Origen `HUMAN_EDITED` en el showcase** (antes de F4; `docs/product/003-dashboard-ui.md`, "Preguntas abiertas") — ¿se le muestra al visitante qué partes editó el curador? Requeriría ampliar la respuesta pública de API-7.
 - **Spec 003, pregunta 5 — Veredicto tras editar/regenerar** (antes de F2; misma sección) — ¿alcanza con un aviso en la UI o se espera algo del backend (fuera del alcance de la spec)?
-- **Spec 003, pregunta 7 — Idioma del showcase** (antes de F4; misma sección) — español, inglés o el idioma de cada episodio.
 - **Spec 003, pregunta 8 — Intervalos de polling** (F2; misma sección) — propuestos 30 s inbox y 10 s detalle; ¿alguna restricción de costo de hosting?
 - **Spec 003, pregunta 10 — `/docs` en producción** (antes de F4; misma sección, y ADR 0001 "Consecuencias") — Swagger queda fuera del `SessionGuard`: ¿se desactiva, se protege o queda público?
+- **API-18 — cómo exponer los agentes sin voz** (no bloqueante; para `architect`) — la spec 003 pide el dato pero no el mecanismo (el checkpoint solo guarda el motivo). Antes de implementarlo hay que decidir dónde vive (campo nuevo en `EpisodeCheckpoint`, derivarlo al vuelo en `getEpisodeDetail` contra `AgentVoice`, etc.).
 
-**Resueltas**: proveedor de búsqueda web para Research → **Tavily** (`tasks.md` §1, decidido 2026-09-08). Auth del dashboard → **ADR 0001** (sesión emitida por Nest, Next como único origen, 2026-09-25).
+**Resueltas**: proveedor de búsqueda web para Research → **Tavily** (`tasks.md` §1, decidido 2026-09-08). Auth del dashboard → **ADR 0001** (sesión emitida por Nest, Next como único origen, 2026-09-25). `publishedAt` en F2 → **API-7a** (decisión del usuario, spec 003 D10, 2026-09-25). Voces por agente e idioma → **ADR 0002** (tabla `AgentVoice`, 2026-09-25). Spec 004, pregunta A (voces insuficientes) → **`ES` conserva la mezcla actual `es_ES`/`es_MX` hasta que haya otro motor; `EN` con 5 voces `en_US` distintas; `PT` con voces repetidas (juez con voz propia) y spike de tono** (decisión del usuario, 2026-09-25). Spec 004, pregunta B (voz de los episodios `ES` existentes) → **la migración completa `AudioAsset.voiceId` con la voz `LOCAL` que tenía cada agente** (decisión del usuario, 2026-09-25). Spec 003, pregunta 7 (idioma de la interfaz del showcase) → **D16: español en F4 bajo `/[locale]` con `es` como único valor; i18n completo (`/en`, `/pt`, selector) como nice-to-have** (decisión del usuario, 2026-09-25). No cambia nada del backend: API-7 sigue igual; el detalle vive en `apps/dashboard/docs/`.
 
 ## Referencias
 
@@ -152,5 +202,5 @@ Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es l
 - `api-contract.md` — superficie HTTP completa.
 - `coding-rules.md` — convenciones a respetar en cada tarea de este roadmap.
 - `docs/product/` — specs post-MVP (Fase 5 en adelante), un archivo por spec, numeradas.
-- `docs/adr/` — decisiones de arquitectura (ADR 0001: auth del dashboard).
+- `docs/adr/` — decisiones de arquitectura (ADR 0001: auth del dashboard; ADR 0002: voces por agente e idioma).
 - `apps/dashboard/docs/` — tracking propio del frontend (fases F1-F4 de la spec 003).
