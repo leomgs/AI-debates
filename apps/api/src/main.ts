@@ -18,8 +18,15 @@ async function bootstrap() {
   // tasks.md §9) — EpisodesModule es el primer módulo con superficie HTTP.
   app.useGlobalFilters(new HttpErrorFilter());
 
-  // Habilitar CORS para que tu frontend de Remotion pueda consultar el backend
-  app.enableCors();
+  // API-8 (ADR 0001 punto 3): la API queda detrás del rewrite de Next, único
+  // origen público, así que no hay CORS (el enableCors() abierto que había
+  // se quitó) y se confía en exactamente UN proxy delante: req.ip sale del
+  // último salto de X-Forwarded-For, no del primero (que con `true` quedaría
+  // en manos del cliente). Ojo: el rewrite de Next 16 no agrega
+  // X-Forwarded-For por su cuenta, así que req.ip no identifica al cliente de
+  // forma confiable; por eso el rate-limit del login tiene además un techo
+  // global (LoginRateLimiterService).
+  app.set('trust proxy', 1);
 
   // Servir la carpeta pública
   app.useStaticAssets(join(__dirname, '..', 'public'), {
@@ -49,7 +56,13 @@ async function bootstrap() {
 
   // spec 001 (docs/product/001-openapi-contract-zod.md) — /docs navegable,
   // mismo documento que escribe scripts/generate-openapi.ts a openapi.json.
-  SwaggerModule.setup('docs', app, buildOpenApiDocument(app));
+  // Solo fuera de producción (spec 003, D20): Swagger es middleware, queda
+  // fuera del SessionGuard y expondría la superficie completa de la API; el
+  // contrato ya vive commiteado en openapi.json, que no depende de este
+  // montaje.
+  if (config.get('NODE_ENV', { infer: true }) !== 'production') {
+    SwaggerModule.setup('docs', app, buildOpenApiDocument(app));
+  }
 
   await app.listen(3000);
 }
