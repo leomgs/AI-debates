@@ -40,6 +40,13 @@ describe('audio-url-signer', () => {
     expect(verifyAudioUrlSignature(SECRET, STORAGE_KEY, expiresAt, 'ab')).toBe(false);
   });
 
+  it('rechaza la firma con un sufijo no hex o en mayúsculas (Buffer.from(hex) lo toleraba)', () => {
+    const expiresAt = Date.now() + 60_000;
+    const sig = signAudioUrl(SECRET, STORAGE_KEY, expiresAt);
+    expect(verifyAudioUrlSignature(SECRET, STORAGE_KEY, expiresAt, `${sig}zz`)).toBe(false);
+    expect(verifyAudioUrlSignature(SECRET, STORAGE_KEY, expiresAt, sig.toUpperCase())).toBe(false);
+  });
+
   it('rechaza expiresAt no numérico (NaN) sin lanzar', () => {
     expect(verifyAudioUrlSignature(SECRET, STORAGE_KEY, NaN, 'cualquier-cosa')).toBe(false);
   });

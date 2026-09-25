@@ -38,7 +38,15 @@ describe("session-token", () => {
     expect(checkSessionToken("otro-secreto-0123456789abcdef0123", token, NOW)).toEqual({ valid: false });
   });
 
-  it.each(["", "sin-punto", "1.2.3", "abc.def", `${NOW}.`, `.${"a".repeat(64)}`, `-1.${"a".repeat(64)}`])(
+  it("rechaza sufijos, mayúsculas y ceros a la izquierda sobre un token por lo demás válido", () => {
+    const { token } = issueSessionToken(SECRET, NOW);
+    const [exp, signature] = token.split(".");
+    expect(checkSessionToken(SECRET, `${token}zz`, NOW)).toEqual({ valid: false });
+    expect(checkSessionToken(SECRET, `${exp}.${signature.toUpperCase()}`, NOW)).toEqual({ valid: false });
+    expect(checkSessionToken(SECRET, `0${exp}.${signature}`, NOW)).toEqual({ valid: false });
+  });
+
+  it.each(["", "sin-punto", "1.2.3", "abc.def", `${NOW}.`, `.${"a".repeat(64)}`, `-1.${"a".repeat(64)}`, `0.${"a".repeat(64)}`])(
     "rechaza un token mal formado sin lanzar: %p",
     (malformed) => {
       expect(checkSessionToken(SECRET, malformed, NOW)).toEqual({ valid: false });

@@ -19,4 +19,12 @@ describe("hmac-signature", () => {
     expect(verifyHmacSha256("secreto", "payload", sig.slice(0, 10))).toBe(false);
     expect(verifyHmacSha256("secreto", "payload", "")).toBe(false);
   });
+
+  it("rechaza sufijos no hex y mayúsculas (Buffer.from(hex) los ignoraría o aceptaría)", () => {
+    const sig = signHmacSha256("secreto", "payload");
+    expect(verifyHmacSha256("secreto", "payload", `${sig}zz`)).toBe(false);
+    expect(verifyHmacSha256("secreto", "payload", `${sig}0`)).toBe(false);
+    expect(verifyHmacSha256("secreto", "payload", sig.toUpperCase())).toBe(false);
+    expect(verifyHmacSha256("secreto", "payload", ` ${sig}`)).toBe(false);
+  });
 });

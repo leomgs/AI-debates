@@ -28,7 +28,9 @@ export function checkSessionToken(secret: string, token: string, now: number): S
   if (parts.length !== 2) return { valid: false };
 
   const [expRaw, signature] = parts;
-  if (!/^\d{1,16}$/.test(expRaw)) return { valid: false };
+  // Entero decimal positivo, sin ceros a la izquierda ni signos: una sola
+  // representación por valor (el payload firmado usa Number(expRaw)).
+  if (!/^[1-9]\d{0,15}$/.test(expRaw)) return { valid: false };
   const expiresAt = Number(expRaw);
 
   // La firma se verifica siempre, antes de mirar el vencimiento: el
