@@ -32,7 +32,7 @@ describe("scrypt-password", () => {
     expect(isValidPasswordHash(`scrypt:1000:8:1:${salt}:${key}`)).toBe(false); // N no es potencia de 2
     expect(isValidPasswordHash(`scrypt:${2 ** 21}:8:1:${salt}:${key}`)).toBe(false); // 128·N·r = 2 GiB
     expect(isValidPasswordHash(`scrypt:${2 ** 17}:32:1:${salt}:${key}`)).toBe(false); // 512 MiB: N y r juntos
-    expect(isValidPasswordHash(`scrypt:${2 ** 20}:4096:1:${salt}:${key}`)).toBe(false); // lo que antes llegaba a 4 GiB
+    expect(isValidPasswordHash(`scrypt:${2 ** 20}:32:1:${salt}:${key}`)).toBe(false); // 4 GiB: el máximo que aceptaban los techos viejos (N ≤ 2^20, r ≤ 32)
     expect(isValidPasswordHash(`scrypt:16384:8:17:${salt}:${key}`)).toBe(false); // p fuera de techo
     expect(isValidPasswordHash(`scrypt:${2 ** 18}:8:1:${salt}:${key}`)).toBe(true); // exactamente 256 MiB
     expect(isValidPasswordHash(`scrypt:16384:8:1:${salt}`)).toBe(false); // falta el hash

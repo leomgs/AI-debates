@@ -40,7 +40,7 @@ Copiá `.env.example` a `.env` y completá lo de abajo. La validación vive en `
 | `CURATOR_PASSWORD_HASH` | **Sí** | Hash scrypt de la contraseña del curador. **Nunca** la contraseña en texto plano | `pnpm --filter api auth:hash-password` (ver §3.2) |
 | `SESSION_SECRET` | **Sí** (mínimo 32 caracteres) | Secreto HMAC del token de sesión. Cambiarlo cierra todas las sesiones abiertas | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 
-**Las que importan para arrancar ya mismo**: `GOOGLE_API_KEY`, `TAVILY_API_KEY` `NODE_ENV` y las tres de auth (`CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH`, `SESSION_SECRET`, ver §3.2). Sin estas cuatro el proceso no arranca, y tampoco `pnpm openapi:generate` ni los smoke scripts (todos bootstrapean `AppModule`, que valida el entorno completo). Las de OPENAI/ANTHROPIC/XAI/OPENROUTER se pueden dejar vacías — el proceso arranca igual, y `ModelProviderFactory` recién tira error si algo intenta resolver ese provider puntual sin key. Sumar `OPENROUTER_API_KEY` (gratis, sin tarjeta) es la forma más simple de que el Judge tenga un provider realmente distinto al de los debatientes (arquitectura §7.1) sin depender de una suscripción paga a OpenAI/Anthropic/XAI.
+**Las que importan para arrancar ya mismo**: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `NODE_ENV` y las tres de auth (`CURATOR_USERNAME`, `CURATOR_PASSWORD_HASH`, `SESSION_SECRET`, ver §3.2). Si falta cualquiera de estas seis, el proceso no arranca, y tampoco `pnpm openapi:generate` ni los smoke scripts (todos bootstrapean `AppModule`, que valida el entorno completo). Las de OPENAI/ANTHROPIC/XAI/OPENROUTER se pueden dejar vacías — el proceso arranca igual, y `ModelProviderFactory` recién tira error si algo intenta resolver ese provider puntual sin key. Sumar `OPENROUTER_API_KEY` (gratis, sin tarjeta) es la forma más simple de que el Judge tenga un provider realmente distinto al de los debatientes (arquitectura §7.1) sin depender de una suscripción paga a OpenAI/Anthropic/XAI.
 
 Los tests (`npm run test`, `npm run test:e2e`) **no necesitan ninguna key real ni la credencial del curador** — usan valores dummy (`test/jest-e2e.setup.ts` para el e2e, con su propia DB de test aislada de `dev.db`; los `*.spec.ts` mockean el LLM/proveedor de búsqueda directo, nunca llaman a nada real).
 
@@ -95,6 +95,8 @@ La API confía en exactamente un proxy delante (`trust proxy` = 1): toma `req.ip
 2. Next **reenvía** ese header en el rewrite hacia la API. El rewrite de Next 16 no agrega `X-Forwarded-For` por su cuenta.
 
 Si no se cumplen, `req.ip` es la IP de Next para todos o un valor que controla el cliente, y el límite por cliente no sirve: lo único que protege el login es el límite global (20 intentos fallidos cada 15 minutos entre todos los clientes, `api-contract.md` §1.1). Además, `HOST` tiene que dejar la API alcanzable solo desde Next, nunca desde internet.
+
+**`API_INTERNAL_URL` del dashboard**: con el `HOST` por defecto, usar `http://127.0.0.1:<PORT>` y **no** `http://localhost:<PORT>`. La API escucha solo en el loopback IPv4, y `localhost` puede resolver primero a `::1` (IPv6, el default de Node 17+ en muchas máquinas), donde no hay nadie escuchando: el rewrite de Next fallaría con `ECONNREFUSED`.
 
 ## 4. Correr el proyecto
 
