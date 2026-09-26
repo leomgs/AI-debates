@@ -257,6 +257,24 @@ describe("EpisodeActionsService", () => {
   });
 
   describe("resume", () => {
+    // API-15: resume valida el estado antes de todo lo demás.
+    beforeEach(() => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("REQUIRES_HUMAN_REVIEW"));
+    });
+
+    it("fuera de REQUIRES_HUMAN_REVIEW tira 409 sin tocar los límites ni transicionar (API-15)", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("PENDING_REVIEW"));
+      // El último checkpoint puede ser un USAGE_LIMIT_EXCEEDED ya resuelto:
+      // con el orden viejo, el body válido escribía los límites antes del 409.
+      prisma.episodeCheckpoint.findFirst.mockResolvedValue({ reason: "USAGE_LIMIT_EXCEEDED", fromState: "DEBATING" });
+
+      await expect(service.resume(EPISODE_ID, { maxLlmCalls: 99 })).rejects.toThrow(InvalidEpisodeTransitionError);
+
+      expect(prisma.episode.update).not.toHaveBeenCalled();
+      expect(stateService.resumeFromCheckpoint).not.toHaveBeenCalled();
+      expect(orchestrator.runPipeline).not.toHaveBeenCalled();
+    });
+
     it("sin checkpoint activo tira InvalidEpisodeTransitionError", async () => {
       prisma.episodeCheckpoint.findFirst.mockResolvedValue(null);
       await expect(service.resume(EPISODE_ID, {})).rejects.toThrow(InvalidEpisodeTransitionError);

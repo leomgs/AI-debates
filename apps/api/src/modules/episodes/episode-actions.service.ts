@@ -138,7 +138,16 @@ export class EpisodeActionsService {
   // que necesita datos). Acá se re-valida contra el schema específico del
   // reason real — si no matchea, el ZodError resultante lo mapea
   // HttpErrorFilter a 400 VALIDATION_ERROR.
+  //
+  // API-15 (spec 003): el estado se valida ANTES de aplicar los límites
+  // nuevos. Antes, applyResumeBody escribía maxLlmCalls/maxSearchQueries y
+  // recién después resumeFromCheckpoint tiraba el 409, así que un resume
+  // inválido (por ejemplo, sobre un episodio en PENDING_REVIEW, cuyo último
+  // checkpoint puede ser un USAGE_LIMIT_EXCEEDED ya resuelto) dejaba los
+  // límites cambiados. resumeFromCheckpoint vuelve a validar al transicionar.
   async resume(episodeId: string, body: ResumeActionBody): Promise<Episode> {
+    await this.assertStatus(episodeId, ["REQUIRES_HUMAN_REVIEW"], "resume");
+
     const checkpoint = await this.prisma.episodeCheckpoint.findFirst({
       where: { episodeId },
       orderBy: { createdAt: "desc" },
