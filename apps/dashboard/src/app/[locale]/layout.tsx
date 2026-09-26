@@ -16,6 +16,13 @@ export const metadata: Metadata = {
 // 404 con app/global-not-found.tsx antes de renderizar este layout (/en, /xx).
 export const dynamicParams = false;
 
+// Sin prerender ni caché ISR: en un filesystem que no distingue mayúsculas,
+// el 404 de `/ES` se guardaba encima del HTML de `/es` (decision-log del
+// dashboard, entrada 6). La primera defensa es la canonicalización de
+// proxy.ts; esta es la segunda. F4 decide el caché del showcase (AC 3.72) y,
+// si vuelve a prerenderizar, depende de que la canonicalización siga activa.
+export const dynamic = "force-dynamic";
+
 export function generateStaticParams() {
   return SHOWCASE_LOCALES.map((locale) => ({ locale }));
 }
@@ -29,7 +36,7 @@ export default async function ShowcaseRootLayout({ children, params }: LayoutPro
   if (!isShowcaseLocale(locale)) notFound();
 
   return (
-    <html lang={locale}className={`${fontVariables} h-full antialiased`}>
+    <html lang={locale} className={`${fontVariables} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <header className="border-b">
           <div className="mx-auto flex w-full max-w-5xl items-center px-4 py-4">

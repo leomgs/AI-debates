@@ -1,6 +1,12 @@
 import { PanelNav } from "@/components/panel/panel-nav";
 import { SessionCheck } from "@/components/panel/session-check";
 
+// El panel no se prerenderiza: no tiene datos de servidor (D11) y un HTML
+// estático de /studio en disco es lo que un request a /Studio podía pisar en
+// un filesystem que no distingue mayúsculas (decision-log del dashboard,
+// entrada 6). La primera defensa es la canonicalización de proxy.ts.
+export const dynamic = "force-dynamic";
+
 // Layout de /studio/* (AC 3.15). La protección optimista la hace src/proxy.ts;
 // SessionCheck confirma la sesión contra la API para que una cookie vencida
 // o alterada lleve a /login aunque la pantalla todavía no consulte datos
