@@ -81,6 +81,21 @@ describe("EpisodeEventsService", () => {
       expect(subjects.has("ep-1")).toBe(false);
     });
 
+    it("decide al suscribirse, no al pedir el stream (defer)", () => {
+      const stream$ = service.stream("ep-1"); // pedido sin pipeline activo
+      service.begin("ep-1"); // la corrida arranca antes de la suscripción
+      let completed = false;
+      const received: unknown[] = [];
+      stream$.subscribe({ next: (e) => received.push(e), complete: () => (completed = true) });
+
+      service.emit("ep-1", "research.started");
+
+      expect(completed).toBe(false);
+      expect(received).toHaveLength(1);
+      service.complete("ep-1");
+      expect(completed).toBe(true);
+    });
+
     it("begin() lo marca activo y complete() lo marca inactivo", () => {
       service.begin("ep-1");
       expect(service.isPipelineActive("ep-1")).toBe(true);

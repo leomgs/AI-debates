@@ -1,5 +1,5 @@
 import { Injectable, MessageEvent } from "@nestjs/common";
-import { EMPTY, endWith, ignoreElements, interval, map, merge, Observable, Subject, takeUntil } from "rxjs";
+import { defer, EMPTY, endWith, ignoreElements, interval, map, merge, Observable, Subject, takeUntil } from "rxjs";
 import { HEARTBEAT_EVENT_TYPE } from "./dto/episode-sse-event.schema";
 
 // API-13 (spec 003): la mitad del corte por inactividad del rewrite de Next
@@ -50,15 +50,24 @@ export class EpisodeEventsService {
   // espera del limitador de RPM). El heartbeat vive lo mismo que el Subject:
   // termina cuando la corrida completa el stream, y su interval se libera
   // también si el cliente se desconecta antes (unsubscribe del merge).
+  //
+  // `defer` (review F2-1): la decisión (activo o no, qué Subject) se toma al
+  // suscribirse, no al pedir el Observable. Nest se suscribe un poco después
+  // de que el handler devuelve; sin defer, una corrida que arrancara en ese
+  // intervalo no se veía (el cliente recibía EMPTY), y una que terminara y
+  // fuera reemplazada por otra dejaba al cliente atado al Subject viejo, ya
+  // completado.
   stream(episodeId: string): Observable<MessageEvent> {
-    if (!this.isPipelineActive(episodeId)) return EMPTY;
-    const events$ = this.getOrCreate(episodeId).asObservable();
-    const pipelineDone$ = events$.pipe(ignoreElements(), endWith(true));
-    const heartbeat$ = interval(SSE_HEARTBEAT_INTERVAL_MS).pipe(
-      map(() => ({ type: HEARTBEAT_EVENT_TYPE }) as unknown as MessageEvent),
-      takeUntil(pipelineDone$)
-    );
-    return merge(events$, heartbeat$);
+    return defer(() => {
+      if (!this.isPipelineActive(episodeId)) return EMPTY;
+      const events$ = this.getOrCreate(episodeId).asObservable();
+      const pipelineDone$ = events$.pipe(ignoreElements(), endWith(true));
+      const heartbeat$ = interval(SSE_HEARTBEAT_INTERVAL_MS).pipe(
+        map(() => ({ type: HEARTBEAT_EVENT_TYPE }) as unknown as MessageEvent),
+        takeUntil(pipelineDone$)
+      );
+      return merge(events$, heartbeat$);
+    });
   }
 
   emit(episodeId: string, type: string, data?: unknown): void {
