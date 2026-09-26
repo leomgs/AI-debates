@@ -23,6 +23,10 @@ Los controllers no contienen lógica de negocio — parsean/validan el request y
 - Nunca `new PrismaClient()` fuera de `shared/prisma/prisma.service.ts`. Todo acceso a datos pasa por `PrismaService` inyectado.
 - Un módulo de dominio solo hace queries sobre las tablas que le pertenecen (ver `architecture.md` sección 6). Si `AgentsModule` necesita datos de `Debate`, eso es una señal de que la llamada debería venir de `EpisodesModule` orquestando, no de un import cruzado.
 - Migraciones: un commit = una migración con nombre descriptivo (`add_episode_checkpoint_history`, no `update_schema`).
+- `$transaction` con `@prisma/adapter-better-sqlite3` (Prisma 7, el adapter actual) da **atomicidad pero no aislamiento**. El adapter usa una sola conexión, y su mutex solo cubre el `BEGIN`: las queries de otras requests que llegan entre los `await` del callback corren dentro de la transacción abierta, y si esta hace rollback se las lleva (lo reprodujo el review de API-19, `decision-log.md` entrada 35). Por eso:
+  - no usar una transacción como lock ni para serializar requests concurrentes;
+  - no hacer trabajo lento adentro (llamadas a LLM, TTS, red o esperas): cuanto más dura, más queries ajenas atrapa;
+  - callback mínimo: solo las pocas escrituras que tienen que ser atómicas entre sí (ejemplo: `DebateService.replaceVerdict`, 4 queries).
 
 ## 3. Contratos Zod (`shared/contracts/`)
 

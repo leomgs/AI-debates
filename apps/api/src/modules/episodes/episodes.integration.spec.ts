@@ -463,6 +463,24 @@ describe("EpisodesModule (integración)", () => {
       expect((await episodesService.getEpisodeDetail(episode.id)).debate.verdict).toMatchObject({ id: replaced.id, stale: true });
     });
 
+    // Review F2-2: con @prisma/adapter-better-sqlite3 las transacciones
+    // interactivas comparten la única conexión (atomicidad sin aislamiento).
+    // Dos "Volver a juzgar" a la vez no pueden dejar dos veredictos ni perder
+    // el archivo: 1 Verdict y 2 filas en VerdictHistory.
+    it("dos regenerate-verdict en paralelo terminan con 1 veredicto y 2 archivados, sin errores", async () => {
+      const { episode } = await episodeInPendingReview();
+      agentsMock.judge
+        .mockResolvedValueOnce({ content: "Veredicto A.", winnerAgentId: null })
+        .mockResolvedValueOnce({ content: "Veredicto B.", winnerAgentId: null });
+
+      const results = await Promise.all([actions.regenerateVerdict(episode.id), actions.regenerateVerdict(episode.id)]);
+
+      const verdicts = await prisma.verdict.findMany({ where: { debateId: episode.debateId } });
+      expect(verdicts).toHaveLength(1);
+      expect(results.map((r) => r.id)).toContain(verdicts[0].id);
+      expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(2);
+    });
+
     it("replaceVerdict es atómico: si crear el nuevo falla, el vigente sigue y no queda archivo", async () => {
       const { episode } = await episodeInPendingReview();
       const verdictBefore = await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } });
