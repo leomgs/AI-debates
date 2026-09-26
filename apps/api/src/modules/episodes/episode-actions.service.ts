@@ -53,7 +53,8 @@ export class EpisodeActionsService {
   }
 
   async edit(episodeId: string, dto: EditActionDto): Promise<Argument> {
-    await this.assertStatus(episodeId, ["PENDING_REVIEW"], "edit");
+    const episode = await this.assertStatus(episodeId, ["PENDING_REVIEW"], "edit");
+    await this.findArgumentInEpisode(episode.debateId, dto.argumentId);
     return this.debate.editByHuman(dto.argumentId, dto.content);
   }
 
@@ -69,12 +70,9 @@ export class EpisodeActionsService {
   // a "regenerado por pedido editorial", y agregar uno nuevo es más de lo
   // que este alcance pide.
   async regenerate(episodeId: string, dto: RegenerateActionDto): Promise<Argument> {
-    await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate");
+    const episode = await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate");
 
-    const argument = await this.prisma.argument.findUniqueOrThrow({
-      where: { id: dto.argumentId },
-      include: { debateRound: true },
-    });
+    const argument = await this.findArgumentInEpisode(episode.debateId, dto.argumentId);
     const participant = await this.prisma.episodeParticipant.findFirstOrThrow({
       where: { episodeId, agentId: argument.agentId },
       include: { agent: true },
@@ -214,4 +212,14 @@ export class EpisodeActionsService {
     return episode;
   }
 
+  // API-14 (spec 003): el argumentId tiene que ser de un round del debate de
+  // ESTE episodio. Uno de otro episodio (o inexistente) no matchea el where,
+  // findFirstOrThrow tira P2025 y HttpErrorFilter responde 404 NOT_FOUND:
+  // mismo patrón que TtsService.getSignedAudioUrl con el audioAssetId.
+  private async findArgumentInEpisode(debateId: string, argumentId: string) {
+    return this.prisma.argument.findFirstOrThrow({
+      where: { id: argumentId, debateRound: { debateId } },
+      include: { debateRound: true },
+    });
+  }
 }
