@@ -32,16 +32,21 @@ describe('DebateService', () => {
     verdict: { create: jest.Mock };
     $transaction: jest.Mock;
   };
-  // Cliente de la transacción interactiva de replaceVerdict (API-19).
+  // Cliente de las transacciones interactivas (replaceVerdict, API-19;
+  // reviseDraft/editByHuman, review F2-2).
   let tx: {
     verdict: { findUnique: jest.Mock; delete: jest.Mock; create: jest.Mock };
     verdictHistory: { create: jest.Mock };
+    argument: { findUniqueOrThrow: jest.Mock; update: jest.Mock };
+    argumentHistory: { create: jest.Mock };
   };
 
   beforeEach(async () => {
     tx = {
       verdict: { findUnique: jest.fn(), delete: jest.fn(), create: jest.fn() },
       verdictHistory: { create: jest.fn() },
+      argument: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
+      argumentHistory: { create: jest.fn() },
     };
     prisma = {
       debate: { create: jest.fn() },
@@ -100,34 +105,59 @@ describe('DebateService', () => {
     expect(prisma.argument.update).toHaveBeenCalledWith({ where: { id: ARG_1 }, data: { status: 'REJECTED' } });
   });
 
+  // Review F2-2 (entrada 35): update ANTES que el historial, los dos dentro
+  // de la transacción. Ese orden es lo que cierra la ventana de stale.
+  function expectUpdateThenHistoryInsideTransaction() {
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.argument.update.mock.invocationCallOrder[0]).toBeLessThan(tx.argumentHistory.create.mock.invocationCallOrder[0]);
+    // Nada fuera de la transacción.
+    expect(prisma.argument.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.argument.update).not.toHaveBeenCalled();
+    expect(prisma.argumentHistory.create).not.toHaveBeenCalled();
+  }
+
   describe('reviseDraft (loop de enmienda, architecture.md §7.3)', () => {
-    it('archiva el content anterior en ArgumentHistory con status REJECTED antes de pisarlo', async () => {
-      prisma.argument.findUniqueOrThrow.mockResolvedValue(argumentRow({ content: 'versión rechazada por fact-check' }));
-      prisma.argument.update.mockResolvedValue(argumentRow({ content: 'versión enmendada' }));
+    it('pisa el content y después archiva el anterior en ArgumentHistory con status REJECTED y su origin', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow({ content: 'versión rechazada por fact-check' }));
+      tx.argument.update.mockResolvedValue(argumentRow({ content: 'versión enmendada' }));
 
-      await service.reviseDraft(ARG_1, 'versión enmendada');
+      const result = await service.reviseDraft(ARG_1, 'versión enmendada');
 
-      expect(prisma.argumentHistory.create).toHaveBeenCalledWith({
+      expect(tx.argument.update).toHaveBeenCalledWith({ where: { id: ARG_1 }, data: { content: 'versión enmendada' } });
+      expect(tx.argumentHistory.create).toHaveBeenCalledWith({
         data: { argumentId: ARG_1, content: 'versión rechazada por fact-check', origin: 'AI_GENERATED', status: 'REJECTED' },
       });
-      expect(prisma.argument.update).toHaveBeenCalledWith({ where: { id: ARG_1 }, data: { content: 'versión enmendada' } });
+      expectUpdateThenHistoryInsideTransaction();
+      // El orquestador sigue recibiendo el Argument actualizado.
+      expect(result).toEqual(argumentRow({ content: 'versión enmendada' }));
+    });
+
+    it('si falla el archivo, el error se propaga (la transacción no se confirma)', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow());
+      tx.argument.update.mockResolvedValue(argumentRow({ content: 'versión enmendada' }));
+      tx.argumentHistory.create.mockRejectedValue(new Error('FK'));
+
+      await expect(service.reviseDraft(ARG_1, 'versión enmendada')).rejects.toThrow('FK');
     });
   });
 
   describe('editByHuman (Feature 5, trazabilidad de mutación)', () => {
-    it('archiva la versión anterior con status SUPERSEDED y marca el argumento como HUMAN_EDITED', async () => {
-      prisma.argument.findUniqueOrThrow.mockResolvedValue(argumentRow({ content: 'versión IA original', origin: 'AI_GENERATED' }));
-      prisma.argument.update.mockResolvedValue(argumentRow({ content: 'versión editada a mano', origin: 'HUMAN_EDITED' }));
+    it('marca el argumento como HUMAN_EDITED y después archiva la versión anterior como SUPERSEDED con SU origin', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow({ content: 'versión IA original', origin: 'AI_GENERATED' }));
+      tx.argument.update.mockResolvedValue(argumentRow({ content: 'versión editada a mano', origin: 'HUMAN_EDITED' }));
 
-      await service.editByHuman(ARG_1, 'versión editada a mano');
+      const result = await service.editByHuman(ARG_1, 'versión editada a mano');
 
-      expect(prisma.argumentHistory.create).toHaveBeenCalledWith({
-        data: { argumentId: ARG_1, content: 'versión IA original', origin: 'AI_GENERATED', status: 'SUPERSEDED' },
-      });
-      expect(prisma.argument.update).toHaveBeenCalledWith({
+      expect(tx.argument.update).toHaveBeenCalledWith({
         where: { id: ARG_1 },
         data: { content: 'versión editada a mano', origin: 'HUMAN_EDITED' },
       });
+      // Origin PREVIO (AI_GENERATED), no el HUMAN_EDITED recién escrito.
+      expect(tx.argumentHistory.create).toHaveBeenCalledWith({
+        data: { argumentId: ARG_1, content: 'versión IA original', origin: 'AI_GENERATED', status: 'SUPERSEDED' },
+      });
+      expectUpdateThenHistoryInsideTransaction();
+      expect(result).toEqual(argumentRow({ content: 'versión editada a mano', origin: 'HUMAN_EDITED' }));
     });
   });
 

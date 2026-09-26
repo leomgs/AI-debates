@@ -463,6 +463,79 @@ describe("EpisodesModule (integración)", () => {
       expect((await episodesService.getEpisodeDetail(episode.id)).debate.verdict).toMatchObject({ id: replaced.id, stale: true });
     });
 
+    // Review F2-2 (entrada 35): la ventana que quedaba era un juez que toma
+    // su foto ENTRE las dos escrituras del edit. Se la fuerza sin sleeps:
+    // la transacción de editByHuman se frena antes de su segunda escritura
+    // hasta que el juez ya leyó el contexto, y el juez no contesta hasta que
+    // el edit terminó. Con update → historial, esa foto ya ve el texto nuevo
+    // y el historial es posterior a judgedFrom, así que sale stale: true
+    // (el lado seguro). Con el orden inverso, el juez leería el texto viejo
+    // y el veredicto saldría stale: false.
+    it("un juez que toma su foto entre las dos escrituras del edit nunca lee el texto viejo sin quedar desactualizado", async () => {
+      const { episode } = await episodeInPendingReview();
+      const detail = await episodesService.getEpisodeDetail(episode.id);
+      const argumentId = detail.debate.rounds[0].arguments[0].id;
+      const newText = "Editado justo mientras el juez tomaba su foto.";
+
+      let judgeSawContext!: (context: { officialArguments: Array<{ content: string }> }) => void;
+      const judgeContext = new Promise<{ officialArguments: Array<{ content: string }> }>((resolve) => (judgeSawContext = resolve));
+      let finishEdit!: () => void;
+      const editFinished = new Promise<void>((resolve) => (finishEdit = resolve));
+      agentsMock.judge.mockImplementationOnce(async (context: { officialArguments: Array<{ content: string }> }) => {
+        judgeSawContext(context);
+        await editFinished;
+        return { content: "Veredicto con foto en el medio del edit.", winnerAgentId: null };
+      });
+
+      let regenerating: Promise<Awaited<ReturnType<EpisodeActionsService["regenerateVerdict"]>>> | undefined;
+      const realTransaction = prisma.$transaction.bind(prisma) as (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
+      const spy = jest.spyOn(prisma, "$transaction").mockImplementationOnce(((fn: (tx: unknown) => Promise<unknown>) =>
+        realTransaction((tx) => {
+          // Cuenta las escrituras de Argument/ArgumentHistory del edit y,
+          // antes de la segunda, arranca regenerate-verdict y espera a que
+          // el juez tenga su contexto.
+          let writes = 0;
+          const pauseBeforeSecondWrite = (delegate: Record<string, unknown>) =>
+            new Proxy(delegate, {
+              get(target, prop) {
+                const value = target[prop as string];
+                if (typeof value !== "function") return value;
+                if (prop !== "update" && prop !== "create") return value.bind(target);
+                return async (args: unknown) => {
+                  writes += 1;
+                  if (writes === 2) {
+                    regenerating = actions.regenerateVerdict(episode.id);
+                    await judgeContext;
+                  }
+                  return value.call(target, args);
+                };
+              },
+            });
+          const client = tx as Record<string, Record<string, unknown>>;
+          return fn(
+            new Proxy(client, {
+              get(target, prop) {
+                if (prop === "argument" || prop === "argumentHistory") return pauseBeforeSecondWrite(target[prop]);
+                return target[prop as string];
+              },
+            })
+          );
+        })) as never);
+
+      try {
+        await actions.edit(episode.id, { argumentId, content: newText });
+      } finally {
+        spy.mockRestore();
+      }
+      finishEdit();
+      expect(regenerating).toBeDefined();
+      const replaced = await regenerating!;
+
+      const seen = (await judgeContext).officialArguments.map((a) => a.content);
+      expect(seen).toContain(newText);
+      expect(replaced.stale).toBe(true);
+    });
+
     // Review F2-2: con @prisma/adapter-better-sqlite3 las transacciones
     // interactivas comparten la única conexión (atomicidad sin aislamiento).
     // Dos "Volver a juzgar" a la vez no pueden dejar dos veredictos ni perder
