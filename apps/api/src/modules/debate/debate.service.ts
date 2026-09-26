@@ -103,4 +103,44 @@ export class DebateService {
       data: { debateId, judgeId, content: verdict.content, winnerId: verdict.winnerAgentId },
     });
   }
+
+  // Spec 003, API-19 (D17): "Volver a juzgar". Verdict sigue siendo 1:1 con
+  // Debate (debateId @unique), así que el reemplazo archiva el vigente en
+  // VerdictHistory, lo borra y crea el nuevo, todo en una transacción: si
+  // algo falla, el veredicto anterior queda intacto y no queda un archivo
+  // huérfano. Verdict.id cambia en cada vuelta. Sin veredicto vigente
+  // (no debería pasar: la acción solo es válida en PENDING_REVIEW, después
+  // de JUDGING), crea el nuevo sin archivar nada.
+  async replaceVerdict(debateId: string, judgeId: string, output: VerdictOutput): Promise<Verdict> {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.verdict.findUnique({ where: { debateId } });
+      if (current) {
+        await tx.verdictHistory.create({
+          data: {
+            debateId,
+            judgeId: current.judgeId,
+            content: current.content,
+            winnerId: current.winnerId,
+            issuedAt: current.createdAt,
+          },
+        });
+        await tx.verdict.delete({ where: { id: current.id } });
+      }
+      return tx.verdict.create({
+        data: { debateId, judgeId, content: output.content, winnerId: output.winnerAgentId },
+      });
+    });
+  }
+
+  // API-19: el veredicto está desactualizado si algún argumento del debate
+  // se archivó en ArgumentHistory DESPUÉS de emitido el veredicto (edit y
+  // regenerate siempre archivan la versión previa). Sin columna nueva. El
+  // historial del loop de enmienda es anterior al veredicto (JUDGING va
+  // después de DEBATING), así que no cuenta.
+  async isVerdictStale(debateId: string, verdictCreatedAt: Date): Promise<boolean> {
+    const newer = await this.prisma.argumentHistory.count({
+      where: { createdAt: { gt: verdictCreatedAt }, argument: { debateRound: { debateId } } },
+    });
+    return newer > 0;
+  }
 }

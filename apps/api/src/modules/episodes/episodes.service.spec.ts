@@ -21,7 +21,7 @@ describe("EpisodesService", () => {
     episodeParticipant: { findMany: jest.Mock };
   };
   let research: { createTopic: jest.Mock };
-  let debateService: { createDebate: jest.Mock };
+  let debateService: { createDebate: jest.Mock; isVerdictStale: jest.Mock };
   let orchestrator: { runPipeline: jest.Mock };
   let tts: { getOrderedOfficialArguments: jest.Mock; getSignedAudioUrl: jest.Mock; resolveVoiceId: jest.Mock };
   let render: { buildManifest: jest.Mock };
@@ -34,7 +34,7 @@ describe("EpisodesService", () => {
       episodeParticipant: { findMany: jest.fn() },
     };
     research = { createTopic: jest.fn() };
-    debateService = { createDebate: jest.fn() };
+    debateService = { createDebate: jest.fn(), isVerdictStale: jest.fn().mockResolvedValue(false) };
     orchestrator = { runPipeline: jest.fn().mockResolvedValue(undefined) };
     tts = { getOrderedOfficialArguments: jest.fn(), getSignedAudioUrl: jest.fn(), resolveVoiceId: jest.fn() };
     render = { buildManifest: jest.fn() };
@@ -153,6 +153,7 @@ describe("EpisodesService", () => {
     function detailRow() {
       return {
         id: EPISODE_ID,
+        debateId: DEBATE_ID,
         status: "DEBATING",
         createdAt: new Date("2026-09-25T10:00:00.000Z"),
         publishedAt: null as Date | null,
@@ -261,6 +262,42 @@ describe("EpisodesService", () => {
       events.begin("otro-episodio");
 
       expect((await service.getEpisodeDetail(EPISODE_ID)).pipelineActive).toBe(false);
+    });
+
+    // API-19 (D17, AC 3.81): verdict.stale sale de DebateService (dueño de
+    // ArgumentHistory), con la fecha del veredicto vigente.
+    it("verdict.stale es lo que calcula DebateService.isVerdictStale con la fecha del veredicto", async () => {
+      const verdictCreatedAt = new Date("2026-09-25T11:00:00.000Z");
+      const row = detailRow();
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({
+        ...row,
+        debate: {
+          ...row.debate,
+          verdict: { id: "v1", debateId: DEBATE_ID, judgeId: "judge-1", content: "Ganó Analyst.", winnerId: "agent-1", createdAt: verdictCreatedAt },
+        },
+      });
+
+      debateService.isVerdictStale.mockResolvedValue(true);
+      const stale = await service.getEpisodeDetail(EPISODE_ID);
+      expect(debateService.isVerdictStale).toHaveBeenCalledWith(DEBATE_ID, verdictCreatedAt);
+      expect(stale.debate.verdict).toEqual({
+        id: "v1",
+        judgeId: "judge-1",
+        content: "Ganó Analyst.",
+        winnerId: "agent-1",
+        createdAt: "2026-09-25T11:00:00.000Z",
+        stale: true,
+      });
+
+      debateService.isVerdictStale.mockResolvedValue(false);
+      expect((await service.getEpisodeDetail(EPISODE_ID)).debate.verdict?.stale).toBe(false);
+    });
+
+    it("sin veredicto no consulta el historial y verdict es null", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
+
+      expect((await service.getEpisodeDetail(EPISODE_ID)).debate.verdict).toBeNull();
+      expect(debateService.isVerdictStale).not.toHaveBeenCalled();
     });
   });
 

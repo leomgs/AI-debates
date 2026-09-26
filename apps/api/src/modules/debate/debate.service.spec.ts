@@ -28,17 +28,28 @@ describe('DebateService', () => {
     debate: { create: jest.Mock };
     debateRound: { create: jest.Mock };
     argument: { create: jest.Mock; update: jest.Mock; findUniqueOrThrow: jest.Mock; findMany: jest.Mock };
-    argumentHistory: { create: jest.Mock };
+    argumentHistory: { create: jest.Mock; count: jest.Mock };
     verdict: { create: jest.Mock };
+    $transaction: jest.Mock;
+  };
+  // Cliente de la transacción interactiva de replaceVerdict (API-19).
+  let tx: {
+    verdict: { findUnique: jest.Mock; delete: jest.Mock; create: jest.Mock };
+    verdictHistory: { create: jest.Mock };
   };
 
   beforeEach(async () => {
+    tx = {
+      verdict: { findUnique: jest.fn(), delete: jest.fn(), create: jest.fn() },
+      verdictHistory: { create: jest.fn() },
+    };
     prisma = {
       debate: { create: jest.fn() },
       debateRound: { create: jest.fn() },
       argument: { create: jest.fn(), update: jest.fn(), findUniqueOrThrow: jest.fn(), findMany: jest.fn() },
-      argumentHistory: { create: jest.fn() },
+      argumentHistory: { create: jest.fn(), count: jest.fn() },
       verdict: { create: jest.fn() },
+      $transaction: jest.fn((fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -155,6 +166,76 @@ describe('DebateService', () => {
 
     expect(prisma.verdict.create).toHaveBeenCalledWith({
       data: { debateId: DEBATE_ID, judgeId: AGENT_A, content: 'Ganó por solidez de evidencia', winnerId: AGENT_A },
+    });
+  });
+
+  // Spec 003, API-19 (D17). El comportamiento transaccional real (rollback
+  // incluido) contra SQLite está en episodes.integration.spec.ts.
+  describe('replaceVerdict', () => {
+    const JUDGE = '66666666-6666-4666-8666-666666666666';
+    const issuedAt = new Date('2026-09-25T10:00:00.000Z');
+    const current = { id: 'verdict-old', debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó A.', winnerId: AGENT_A, createdAt: issuedAt };
+
+    it('dentro de una transacción archiva el vigente en VerdictHistory, lo borra y crea el nuevo', async () => {
+      tx.verdict.findUnique.mockResolvedValue(current);
+      tx.verdict.create.mockResolvedValue({ id: 'verdict-new' });
+
+      const result = await service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'Ganó B.', winnerAgentId: AGENT_B });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.verdict.findUnique).toHaveBeenCalledWith({ where: { debateId: DEBATE_ID } });
+      expect(tx.verdictHistory.create).toHaveBeenCalledWith({
+        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó A.', winnerId: AGENT_A, issuedAt },
+      });
+      expect(tx.verdict.delete).toHaveBeenCalledWith({ where: { id: 'verdict-old' } });
+      expect(tx.verdict.create).toHaveBeenCalledWith({
+        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó B.', winnerId: AGENT_B },
+      });
+      // Orden: archivar y borrar antes de crear (debateId es @unique en Verdict).
+      expect(tx.verdictHistory.create.mock.invocationCallOrder[0]).toBeLessThan(tx.verdict.delete.mock.invocationCallOrder[0]);
+      expect(tx.verdict.delete.mock.invocationCallOrder[0]).toBeLessThan(tx.verdict.create.mock.invocationCallOrder[0]);
+      expect(result).toEqual({ id: 'verdict-new' });
+      // Nada fuera de la transacción.
+      expect(prisma.verdict.create).not.toHaveBeenCalled();
+    });
+
+    it('sin veredicto vigente crea el nuevo sin archivar nada', async () => {
+      tx.verdict.findUnique.mockResolvedValue(null);
+      tx.verdict.create.mockResolvedValue({ id: 'verdict-new' });
+
+      await service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'Ganó B.', winnerAgentId: null });
+
+      expect(tx.verdictHistory.create).not.toHaveBeenCalled();
+      expect(tx.verdict.delete).not.toHaveBeenCalled();
+      expect(tx.verdict.create).toHaveBeenCalledWith({
+        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó B.', winnerId: null },
+      });
+    });
+
+    it('si falla un paso, el error se propaga (la transacción no se confirma)', async () => {
+      tx.verdict.findUnique.mockResolvedValue(current);
+      tx.verdict.create.mockRejectedValue(new Error('FK'));
+
+      await expect(service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'x', winnerAgentId: null })).rejects.toThrow('FK');
+    });
+  });
+
+  describe('isVerdictStale', () => {
+    const verdictCreatedAt = new Date('2026-09-25T10:00:00.000Z');
+
+    it('cuenta el ArgumentHistory del debate posterior al veredicto', async () => {
+      prisma.argumentHistory.count.mockResolvedValue(1);
+
+      await expect(service.isVerdictStale(DEBATE_ID, verdictCreatedAt)).resolves.toBe(true);
+      expect(prisma.argumentHistory.count).toHaveBeenCalledWith({
+        where: { createdAt: { gt: verdictCreatedAt }, argument: { debateRound: { debateId: DEBATE_ID } } },
+      });
+    });
+
+    it('sin historial posterior (por ejemplo, solo el del loop de enmienda) no está desactualizado', async () => {
+      prisma.argumentHistory.count.mockResolvedValue(0);
+
+      await expect(service.isVerdictStale(DEBATE_ID, verdictCreatedAt)).resolves.toBe(false);
     });
   });
 });

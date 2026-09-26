@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, Verdict } from "@prisma/client";
 import { z } from "zod";
 import { createZodDto } from "nestjs-zod";
 import { EpisodeStatusSchema } from "./dto/episode-status.schema";
@@ -29,6 +29,33 @@ export const EPISODE_DETAIL_INCLUDE = {
 } satisfies Prisma.EpisodeInclude;
 
 type EpisodeWithDetail = Prisma.EpisodeGetPayload<{ include: typeof EPISODE_DETAIL_INCLUDE }>;
+
+// Shape de debate.verdict en el detalle y respuesta de la acción
+// regenerate-verdict (API-19), que devuelve el veredicto nuevo con este
+// mismo shape. `stale` (D17, AC 3.81) es derivado, no una columna:
+// DebateService.isVerdictStale lo calcula desde ArgumentHistory.
+export const EpisodeVerdictSchema = z.object({
+  id: z.string().uuid(),
+  judgeId: z.string().uuid(),
+  content: z.string(),
+  winnerId: z.string().uuid().nullable(),
+  createdAt: z.iso.datetime(),
+  // true si algún argumento del debate se editó o regeneró después de
+  // emitido este veredicto. Vuelve a false solo con regenerate-verdict.
+  stale: z.boolean(),
+});
+export type SerializedVerdict = z.infer<typeof EpisodeVerdictSchema>;
+
+export function serializeVerdict(verdict: Verdict, stale: boolean): SerializedVerdict {
+  return {
+    id: verdict.id,
+    judgeId: verdict.judgeId,
+    content: verdict.content,
+    winnerId: verdict.winnerId,
+    createdAt: verdict.createdAt.toISOString(),
+    stale,
+  };
+}
 
 // Zod, no interface plana (spec 001, docs/product/001-openapi-contract-zod.md)
 // — para que GET /episodes/:id tenga un @ZodResponse real. Mismo shape
@@ -107,15 +134,7 @@ export const EpisodeDetailSchema = z.object({
         ),
       })
     ),
-    verdict: z
-      .object({
-        id: z.string().uuid(),
-        judgeId: z.string().uuid(),
-        content: z.string(),
-        winnerId: z.string().uuid().nullable(),
-        createdAt: z.iso.datetime(),
-      })
-      .nullable(),
+    verdict: EpisodeVerdictSchema.nullable(),
   }),
 });
 
@@ -129,8 +148,14 @@ export class EpisodeDetailDto extends createZodDto(EpisodeDetailSchema) {}
 // confía en que el caller ya haya filtrado.
 //
 // `pipelineActive` no sale de la base: es estado en memoria del proceso
-// (EpisodeEventsService), así que lo resuelve el caller.
-export function mapEpisodeDetail(episode: EpisodeWithDetail, runtime: { pipelineActive: boolean }): EpisodeDetailResponse {
+// (EpisodeEventsService), así que lo resuelve el caller. `verdictStale`
+// tampoco sale del include: es una consulta aparte sobre ArgumentHistory
+// (DebateService.isVerdictStale) que también resuelve el caller; se ignora
+// si no hay veredicto.
+export function mapEpisodeDetail(
+  episode: EpisodeWithDetail,
+  runtime: { pipelineActive: boolean; verdictStale: boolean }
+): EpisodeDetailResponse {
   return {
     id: episode.id,
     status: episode.status,
@@ -179,15 +204,7 @@ export function mapEpisodeDetail(episode: EpisodeWithDetail, runtime: { pipeline
             createdAt: a.createdAt.toISOString(),
           })),
       })),
-      verdict: episode.debate.verdict
-        ? {
-            id: episode.debate.verdict.id,
-            judgeId: episode.debate.verdict.judgeId,
-            content: episode.debate.verdict.content,
-            winnerId: episode.debate.verdict.winnerId,
-            createdAt: episode.debate.verdict.createdAt.toISOString(),
-          }
-        : null,
+      verdict: episode.debate.verdict ? serializeVerdict(episode.debate.verdict, runtime.verdictStale) : null,
     },
   };
 }

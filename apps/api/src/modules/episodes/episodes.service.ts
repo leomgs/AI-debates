@@ -87,7 +87,11 @@ export class EpisodesService {
       where: { id },
       include: EPISODE_DETAIL_INCLUDE,
     });
-    return mapEpisodeDetail(episode, { pipelineActive });
+    // API-19 (D17, AC 3.81): veredicto desactualizado, derivado de
+    // ArgumentHistory (dueño: DebateModule), sin columna nueva.
+    const verdict = episode.debate.verdict;
+    const verdictStale = verdict ? await this.debateService.isVerdictStale(episode.debateId, verdict.createdAt) : false;
+    return mapEpisodeDetail(episode, { pipelineActive, verdictStale });
   }
 
   // GET /episodes/:id/events (decisión del usuario tras el review F2-1):
