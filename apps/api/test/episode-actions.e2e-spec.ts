@@ -10,7 +10,7 @@ import { configureApp } from './../src/configure-app';
 import type { Env } from './../src/shared/config/env.schema';
 import { PrismaService } from './../src/shared/prisma/prisma.service';
 import { AgentsService } from './../src/modules/agents/agents.service';
-import { TtsService } from './../src/modules/tts/tts.service';
+import { AUDIO_PROVIDER } from './../src/modules/tts/tts.tokens';
 import { DailyQuotaExceededError } from './../src/modules/ai/ai.errors';
 import { TtsProviderUnavailableError } from './../src/modules/tts/tts.errors';
 import {
@@ -23,10 +23,12 @@ import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 // (argumentId de otro episodio) y API-19 (regenerate-verdict y
 // verdict.stale) contra AppModule completo, con sesión real y la base de
 // test. El LLM se mockea en el borde (AgentsService entero, mismo criterio
-// que episodes.integration.spec.ts); TtsService también, solo para forzar
-// el error del proveedor de TTS en regenerate-audio.
+// que episodes.integration.spec.ts). Para regenerate-audio se mockea solo el
+// motor de TTS (AUDIO_PROVIDER), no TtsService: así el error recorre el
+// camino real (EpisodeActionsService → withTtsCall → TtsService →
+// provider.synthesize) hasta HttpErrorFilter (review F2-2).
 const agentsMock = { judge: jest.fn(), createDebateAgent: jest.fn() };
-const ttsMock = { regenerateSegmentByIndex: jest.fn() };
+const audioProviderMock = { synthesize: jest.fn() };
 
 async function createApp(): Promise<INestApplication<App>> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -34,8 +36,8 @@ async function createApp(): Promise<INestApplication<App>> {
   })
     .overrideProvider(AgentsService)
     .useValue(agentsMock)
-    .overrideProvider(TtsService)
-    .useValue(ttsMock)
+    .overrideProvider(AUDIO_PROVIDER)
+    .useValue(audioProviderMock)
     .compile();
   const app = moduleFixture.createNestApplication<NestExpressApplication>();
   configureApp(app, app.get<ConfigService<Env, true>>(ConfigService));
@@ -394,19 +396,34 @@ describe('Acciones de curaduría (e2e): API-10b, API-14 y API-19', () => {
       expect(res.body.error.code).toBe('PROVIDER_QUOTA_EXCEEDED');
     });
 
-    it('regenerate-audio con el TTS caído → 503 PROVIDER_QUOTA_EXCEEDED', async () => {
-      const { episode } = await seedReviewedEpisode(prisma, {
+    it('regenerate-audio con el motor de TTS caído → 503 PROVIDER_QUOTA_EXCEEDED, sin audio nuevo y con el cupo devuelto', async () => {
+      const { episode, argument } = await seedReviewedEpisode(prisma, {
         status: 'READY_FOR_RENDER',
       });
-      ttsMock.regenerateSegmentByIndex.mockRejectedValue(
+      // Lo que hace EchogardenAudioProvider cuando el motor falla.
+      audioProviderMock.synthesize.mockRejectedValue(
         new TtsProviderUnavailableError('LOCAL', new Error('echogarden')),
       );
+      const audioAssetsBefore = await prisma.audioAsset.count();
 
       const res = await action(episode.id, 'regenerate-audio', {
         sequenceIndex: 1,
       }).expect(503);
 
       expect(res.body.error.code).toBe('PROVIDER_QUOTA_EXCEEDED');
+      // Llegó al motor real con el texto del segmento 1 y la voz LOCAL del agente.
+      expect(audioProviderMock.synthesize).toHaveBeenCalledWith(
+        'Argumento original.',
+        'x',
+      );
+      expect(await prisma.audioAsset.count()).toBe(audioAssetsBefore);
+      expect(
+        await prisma.argument.findUniqueOrThrow({ where: { id: argument.id } }),
+      ).toMatchObject({ audioAssetId: null });
+      const usage = await prisma.episodeUsage.findUniqueOrThrow({
+        where: { episodeId: episode.id },
+      });
+      expect(usage.ttsRequests).toBe(0);
     });
   });
 });
