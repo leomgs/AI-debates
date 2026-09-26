@@ -9,6 +9,11 @@ import { SESSION_COOKIE } from "@/lib/auth/session-cookie";
 //    codificadas, `/%53tudio`) se redirige con 308 a su forma en minúsculas
 //    antes de llegar al routing. Ver src/lib/auth/canonical-path.ts. No es
 //    autorización: es normalización de URL.
+//    Consecuencia: todo lo que va en public/ tiene que tener nombre en
+//    minúsculas (carpetas incluidas). Un `public/Logo.png` nunca se serviría:
+//    `/Logo.png` redirige a `/logo.png`, que no existe. Como el 308 es
+//    permanente, los navegadores lo cachean aunque después se renombre el
+//    archivo.
 // 2. Chequeo optimista de la cookie (ADR 0001 punto 4; AC 3.1): sin cookie de
 //    sesión, /studio/* redirige a /login?next=<ruta>. No valida la firma ni el
 //    vencimiento: la autorización real es el 401 de la API (AC 3.7).
