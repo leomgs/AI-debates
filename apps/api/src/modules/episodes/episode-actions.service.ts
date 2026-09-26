@@ -130,14 +130,21 @@ export class EpisodeActionsService {
   async regenerateVerdict(episodeId: string): Promise<SerializedVerdict> {
     const episode = await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate-verdict");
     const judge = await this.prisma.episodeParticipant.findFirstOrThrow({ where: { episodeId, isJudge: true } });
+    // Review F2-2: el veredicto vale para la foto del debate que lee
+    // context.build(), no para el momento en que se escribe (la llamada
+    // puede esperar ~90 s al limitador de RPM). Esa foto es su createdAt: un
+    // edit/regenerate hecho durante la llamada queda después y lo marca
+    // como desactualizado. Se toma ANTES de leer el contexto para que un
+    // empate caiga del lado seguro (isVerdictStale usa >=).
+    const judgedFrom = new Date();
     const context = await this.context.build(episodeId);
 
     const output = await this.budget.withLlmCall(episodeId, () => this.agents.judge(context, judge.modelProvider));
 
     await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate-verdict");
-    const verdict = await this.debate.replaceVerdict(episode.debateId, judge.agentId, output);
-    // Recién emitido: ningún ArgumentHistory puede ser posterior.
-    return serializeVerdict(verdict, false);
+    const verdict = await this.debate.replaceVerdict(episode.debateId, judge.agentId, output, judgedFrom);
+    const stale = await this.debate.isVerdictStale(episode.debateId, verdict.createdAt);
+    return serializeVerdict(verdict, stale);
   }
 
   async reject(episodeId: string): Promise<Episode> {

@@ -111,7 +111,17 @@ export class DebateService {
   // huérfano. Verdict.id cambia en cada vuelta. Sin veredicto vigente
   // (no debería pasar: la acción solo es válida en PENDING_REVIEW, después
   // de JUDGING), crea el nuevo sin archivar nada.
-  async replaceVerdict(debateId: string, judgeId: string, output: VerdictOutput): Promise<Verdict> {
+  //
+  // `judgedFrom` es el createdAt del veredicto nuevo: el momento del debate
+  // que evaluó el juez (antes de leer su contexto), no el de la escritura.
+  // Así isVerdictStale marca las ediciones hechas mientras el juez corría.
+  //
+  // Callback mínimo a propósito (review F2-2): con
+  // @prisma/adapter-better-sqlite3 hay una sola conexión, así que la
+  // transacción da atomicidad pero no aislamiento: las queries de otras
+  // requests que caen entre estos await corren dentro de ella (y un rollback
+  // se las lleva). Nada lento acá adentro (coding-rules.md §2).
+  async replaceVerdict(debateId: string, judgeId: string, output: VerdictOutput, judgedFrom: Date): Promise<Verdict> {
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.verdict.findUnique({ where: { debateId } });
       if (current) {
@@ -127,19 +137,20 @@ export class DebateService {
         await tx.verdict.delete({ where: { id: current.id } });
       }
       return tx.verdict.create({
-        data: { debateId, judgeId, content: output.content, winnerId: output.winnerAgentId },
+        data: { debateId, judgeId, content: output.content, winnerId: output.winnerAgentId, createdAt: judgedFrom },
       });
     });
   }
 
   // API-19: el veredicto está desactualizado si algún argumento del debate
-  // se archivó en ArgumentHistory DESPUÉS de emitido el veredicto (edit y
-  // regenerate siempre archivan la versión previa). Sin columna nueva. El
-  // historial del loop de enmienda es anterior al veredicto (JUDGING va
-  // después de DEBATING), así que no cuenta.
+  // se archivó en ArgumentHistory a partir del momento que evaluó el juez
+  // (Verdict.createdAt; edit y regenerate siempre archivan la versión
+  // previa). Sin columna nueva. `gte`, no `gt` (review F2-2): un empate en
+  // el mismo milisegundo cae del lado seguro. El historial del loop de
+  // enmienda es anterior al veredicto (JUDGING va después de DEBATING).
   async isVerdictStale(debateId: string, verdictCreatedAt: Date): Promise<boolean> {
     const newer = await this.prisma.argumentHistory.count({
-      where: { createdAt: { gt: verdictCreatedAt }, argument: { debateRound: { debateId } } },
+      where: { createdAt: { gte: verdictCreatedAt }, argument: { debateRound: { debateId } } },
     });
     return newer > 0;
   }

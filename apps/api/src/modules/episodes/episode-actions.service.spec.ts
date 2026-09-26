@@ -58,6 +58,7 @@ describe("EpisodeActionsService", () => {
     reviseDraft: jest.Mock;
     promoteToOfficial: jest.Mock;
     replaceVerdict: jest.Mock;
+    isVerdictStale: jest.Mock;
   };
   let agentsService: { createDebateAgent: jest.Mock; judge: jest.Mock };
   let stateService: { markApproved: jest.Mock; markCancelled: jest.Mock; resumeFromCheckpoint: jest.Mock };
@@ -85,6 +86,7 @@ describe("EpisodeActionsService", () => {
       reviseDraft: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado" }),
       promoteToOfficial: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado", status: "OFFICIAL" }),
       replaceVerdict: jest.fn().mockResolvedValue(NEW_VERDICT_ROW),
+      isVerdictStale: jest.fn().mockResolvedValue(false),
     };
     agentsService = {
       createDebateAgent: jest.fn().mockReturnValue({
@@ -258,6 +260,14 @@ describe("EpisodeActionsService", () => {
     });
 
     it("en PENDING_REVIEW llama al juez con el contexto compartido dentro de withLlmCall y reemplaza el veredicto", async () => {
+      // Momento en que se lee la primera query del contexto (review F2-2):
+      // judgedFrom tiene que ser anterior o igual.
+      let contextReadAt: Date | undefined;
+      prisma.evidenceFact.findMany.mockImplementation(async () => {
+        contextReadAt ??= new Date();
+        return [];
+      });
+
       const result = await service.regenerateVerdict(EPISODE_ID);
 
       expect(prisma.episodeParticipant.findFirstOrThrow).toHaveBeenCalledWith({ where: { episodeId: EPISODE_ID, isJudge: true } });
@@ -269,8 +279,12 @@ describe("EpisodeActionsService", () => {
         expect.objectContaining({ topic: "Un trend", officialArguments: [] }),
         "ANTHROPIC"
       );
-      expect(debateService.replaceVerdict).toHaveBeenCalledWith(DEBATE_ID, JUDGE_ID, JUDGE_OUTPUT);
-      // Shape de debate.verdict, con stale en false.
+      expect(debateService.replaceVerdict).toHaveBeenCalledWith(DEBATE_ID, JUDGE_ID, JUDGE_OUTPUT, expect.any(Date));
+      const judgedFrom = debateService.replaceVerdict.mock.calls[0][3] as Date;
+      expect(judgedFrom.getTime()).toBeLessThanOrEqual(contextReadAt!.getTime());
+      // stale calculado contra el createdAt del veredicto nuevo, no fijado a mano.
+      expect(debateService.isVerdictStale).toHaveBeenCalledWith(DEBATE_ID, NEW_VERDICT_ROW.createdAt);
+      // Shape de debate.verdict.
       expect(result).toEqual({
         id: NEW_VERDICT_ROW.id,
         judgeId: JUDGE_ID,
@@ -279,6 +293,12 @@ describe("EpisodeActionsService", () => {
         createdAt: "2026-09-26T10:00:00.000Z",
         stale: false,
       });
+    });
+
+    it("si hubo cambios desde la foto que evaluó el juez, la respuesta sale con stale: true", async () => {
+      debateService.isVerdictStale.mockResolvedValue(true);
+
+      await expect(service.regenerateVerdict(EPISODE_ID)).resolves.toMatchObject({ stale: true });
     });
 
     it.each(["DEBATING", "JUDGING", "APPROVED", "REQUIRES_HUMAN_REVIEW", "READY_FOR_RENDER"])(

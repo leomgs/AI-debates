@@ -174,13 +174,14 @@ describe('DebateService', () => {
   describe('replaceVerdict', () => {
     const JUDGE = '66666666-6666-4666-8666-666666666666';
     const issuedAt = new Date('2026-09-25T10:00:00.000Z');
+    const judgedFrom = new Date('2026-09-26T09:58:30.000Z');
     const current = { id: 'verdict-old', debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó A.', winnerId: AGENT_A, createdAt: issuedAt };
 
     it('dentro de una transacción archiva el vigente en VerdictHistory, lo borra y crea el nuevo', async () => {
       tx.verdict.findUnique.mockResolvedValue(current);
       tx.verdict.create.mockResolvedValue({ id: 'verdict-new' });
 
-      const result = await service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'Ganó B.', winnerAgentId: AGENT_B });
+      const result = await service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'Ganó B.', winnerAgentId: AGENT_B }, judgedFrom);
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(tx.verdict.findUnique).toHaveBeenCalledWith({ where: { debateId: DEBATE_ID } });
@@ -188,8 +189,9 @@ describe('DebateService', () => {
         data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó A.', winnerId: AGENT_A, issuedAt },
       });
       expect(tx.verdict.delete).toHaveBeenCalledWith({ where: { id: 'verdict-old' } });
+      // createdAt = el momento del debate que evaluó el juez (review F2-2).
       expect(tx.verdict.create).toHaveBeenCalledWith({
-        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó B.', winnerId: AGENT_B },
+        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó B.', winnerId: AGENT_B, createdAt: judgedFrom },
       });
       // Orden: archivar y borrar antes de crear (debateId es @unique en Verdict).
       expect(tx.verdictHistory.create.mock.invocationCallOrder[0]).toBeLessThan(tx.verdict.delete.mock.invocationCallOrder[0]);
@@ -203,12 +205,12 @@ describe('DebateService', () => {
       tx.verdict.findUnique.mockResolvedValue(null);
       tx.verdict.create.mockResolvedValue({ id: 'verdict-new' });
 
-      await service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'Ganó B.', winnerAgentId: null });
+      await service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'Ganó B.', winnerAgentId: null }, judgedFrom);
 
       expect(tx.verdictHistory.create).not.toHaveBeenCalled();
       expect(tx.verdict.delete).not.toHaveBeenCalled();
       expect(tx.verdict.create).toHaveBeenCalledWith({
-        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó B.', winnerId: null },
+        data: { debateId: DEBATE_ID, judgeId: JUDGE, content: 'Ganó B.', winnerId: null, createdAt: judgedFrom },
       });
     });
 
@@ -216,19 +218,19 @@ describe('DebateService', () => {
       tx.verdict.findUnique.mockResolvedValue(current);
       tx.verdict.create.mockRejectedValue(new Error('FK'));
 
-      await expect(service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'x', winnerAgentId: null })).rejects.toThrow('FK');
+      await expect(service.replaceVerdict(DEBATE_ID, JUDGE, { content: 'x', winnerAgentId: null }, judgedFrom)).rejects.toThrow('FK');
     });
   });
 
   describe('isVerdictStale', () => {
     const verdictCreatedAt = new Date('2026-09-25T10:00:00.000Z');
 
-    it('cuenta el ArgumentHistory del debate posterior al veredicto', async () => {
+    it('cuenta el ArgumentHistory del debate desde el momento del veredicto, empate incluido (gte)', async () => {
       prisma.argumentHistory.count.mockResolvedValue(1);
 
       await expect(service.isVerdictStale(DEBATE_ID, verdictCreatedAt)).resolves.toBe(true);
       expect(prisma.argumentHistory.count).toHaveBeenCalledWith({
-        where: { createdAt: { gt: verdictCreatedAt }, argument: { debateRound: { debateId: DEBATE_ID } } },
+        where: { createdAt: { gte: verdictCreatedAt }, argument: { debateRound: { debateId: DEBATE_ID } } },
       });
     });
 

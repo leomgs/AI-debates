@@ -353,10 +353,6 @@ describe("EpisodesModule (integración)", () => {
       return created;
     }
 
-    // Las marcas de tiempo tienen resolución de milisegundos: en producción
-    // entre el veredicto y una edición del curador pasan segundos, acá no.
-    const nextMillisecond = () => new Promise((resolve) => setTimeout(resolve, 5));
-
     it("stale: false con el historial del loop de enmienda, true tras edit, false tras regenerate-verdict y true de nuevo tras regenerate", async () => {
       const { episode } = await episodeInPendingReview();
       const history = await prisma.argumentHistory.findMany({ where: { argument: { debateRound: { debateId: episode.debateId } } } });
@@ -367,13 +363,16 @@ describe("EpisodesModule (integración)", () => {
       const firstVerdict = detail.debate.verdict!;
       const argumentId = detail.debate.rounds[0].arguments[0].id;
 
-      await nextMillisecond();
       await actions.edit(episode.id, { argumentId, content: "Texto corregido por el curador." });
       detail = await episodesService.getEpisodeDetail(episode.id);
       expect(detail.debate.verdict?.stale).toBe(true);
 
       agentsMock.judge.mockResolvedValueOnce({ content: "Veredicto nuevo.", winnerAgentId: null });
-      await nextMillisecond();
+      // Único sleep que queda: isVerdictStale usa >=, así que un edit en el
+      // mismo milisegundo que la foto del juez marca stale (el lado seguro).
+      // Acá se quiere probar el caso sin cambios posteriores, y sin esta
+      // espera el test dependería de que pase 1 ms entre las queries.
+      await new Promise((resolve) => setTimeout(resolve, 2));
       const usageBefore = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
       const replaced = await actions.regenerateVerdict(episode.id);
 
@@ -398,7 +397,6 @@ describe("EpisodesModule (integración)", () => {
 
       // Un regenerate posterior vuelve a marcarlo (AC 3.81, edge case
       // "Editar después de volver a juzgar").
-      await nextMillisecond();
       await actions.regenerate(episode.id, { argumentId });
       detail = await episodesService.getEpisodeDetail(episode.id);
       expect(detail.debate.verdict?.stale).toBe(true);
@@ -446,6 +444,25 @@ describe("EpisodesModule (integración)", () => {
       expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(0);
     });
 
+    // Review F2-2: el juez evalúa la foto de context.build(), y la llamada
+    // puede esperar ~90 s al limitador de RPM. Un edit hecho en otra pestaña
+    // en esa ventana no está en lo que evaluó el juez: el veredicto nuevo
+    // tiene que salir desactualizado.
+    it("un edit hecho mientras el juez corre deja el veredicto nuevo como desactualizado", async () => {
+      const { episode } = await episodeInPendingReview();
+      const detail = await episodesService.getEpisodeDetail(episode.id);
+      const argumentId = detail.debate.rounds[0].arguments[0].id;
+      agentsMock.judge.mockImplementationOnce(async () => {
+        await actions.edit(episode.id, { argumentId, content: "Editado en otra pestaña mientras el juez pensaba." });
+        return { content: "Veredicto sobre la foto vieja.", winnerAgentId: null };
+      });
+
+      const replaced = await actions.regenerateVerdict(episode.id);
+
+      expect(replaced.stale).toBe(true);
+      expect((await episodesService.getEpisodeDetail(episode.id)).debate.verdict).toMatchObject({ id: replaced.id, stale: true });
+    });
+
     it("replaceVerdict es atómico: si crear el nuevo falla, el vigente sigue y no queda archivo", async () => {
       const { episode } = await episodeInPendingReview();
       const verdictBefore = await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } });
@@ -453,7 +470,7 @@ describe("EpisodesModule (integración)", () => {
       // judgeId inexistente: la FK Verdict.judgeId → Agent falla en el
       // create, después de que ya se archivó y borró el vigente.
       await expect(
-        debateService.replaceVerdict(episode.debateId, "00000000-0000-4000-8000-000000000000", { content: "x", winnerAgentId: null })
+        debateService.replaceVerdict(episode.debateId, "00000000-0000-4000-8000-000000000000", { content: "x", winnerAgentId: null }, new Date())
       ).rejects.toThrow();
 
       expect(await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } })).toEqual(verdictBefore);
