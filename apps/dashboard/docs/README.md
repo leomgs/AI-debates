@@ -12,4 +12,4 @@ Carpeta creada el 2026-09-24, antes de que existiera código. `apps/dashboard/` 
 
 ## Estado actual
 
-Scaffold vacío, sin páginas propias. La UI real está especificada en `../../../docs/product/003-dashboard-ui.md` (revisada por `architect`, auth en `../../../docs/adr/0001-auth-sesion-nest-mismo-origen.md`). Secuenciación en `roadmap.md` y tareas en `tasks.md` de esta carpeta; el primer bloqueante real es API-8 (auth) en el backend.
+F1 implementada (2026-09-26, rama `feat/dashboard-f1`): login, rutas protegidas, cliente tipado desde `openapi.json`, los dos layouts raíz (panel y showcase) y páginas placeholder donde van las pantallas de F2-F4. Estado ítem por ítem en `tasks.md` §1. La UI real está especificada en `../../../docs/product/003-dashboard-ui.md` (revisada por `architect`, auth en `../../../docs/adr/0001-auth-sesion-nest-mismo-origen.md`). Secuenciación en `roadmap.md` y tareas en `tasks.md` de esta carpeta; lo que bloquea la F2 es el backend de la spec 004 (API-17).

@@ -1,6 +1,6 @@
 # Tasks — Dashboard (front)
 
-Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-25, quinta pasada (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
+Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-26, sexta pasada (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
 
 Cada tarea cita su origen en la spec 003 (AC 3.x, D-n, API-n o "Restricciones técnicas"). "Requiere" indica una dependencia explícita con otra tarea de este archivo (§n) o con backend (API-n, trackeado en `tasks.md` de la raíz §12; API-17, en §13). Antes de escribir código de Next: leer la guía de la versión instalada en `node_modules/next/dist/docs/` (`apps/dashboard/AGENTS.md`).
 
@@ -13,12 +13,12 @@ Bloqueantes previos resueltos:
 
 Dependencias de backend/workspace de la spec 003, trackeadas en `tasks.md` de la raíz §12 (orden según la fase que desbloquean):
 
-- [~] Antes de F1: API-8 (auth, ADR 0001; incluye `/docs` solo fuera de producción, D20) **hecha 2026-09-25**; faltan `check-boundaries` extendido a `apps/dashboard` y `dev.dependsOn: ["^build"]` en el `turbo.json` raíz. Datos de API-8 que usa el front: la cookie se llama `atd_session` (la mira `src/proxy.ts`); `POST /auth/login` responde `401 INVALID_CREDENTIALS` (AC 3.2) o `429 TOO_MANY_ATTEMPTS` con `Retry-After` (AC 3.8), distinto del `401 UNAUTHORIZED` de sesión ausente o vencida en el resto de la API (AC 3.5, 3.7); `GET /auth/session` devuelve `{ authenticated: true, expiresAt }` o `401`; `POST /auth/logout` responde `204` (ver `api-contract.md` §1.1 de la raíz)
+- [x] Antes de F1: API-8 (auth, ADR 0001; incluye `/docs` solo fuera de producción, D20) **hecha 2026-09-25**; `check-boundaries` extendido a `apps/dashboard` y `dev.dependsOn: ["^build"]` en el `turbo.json` raíz **hechos 2026-09-26** en la rama `feat/dashboard-f1`. Datos de API-8 que usa el front: la cookie se llama `atd_session` (la mira `src/proxy.ts`); `POST /auth/login` responde `401 INVALID_CREDENTIALS` (AC 3.2) o `429 TOO_MANY_ATTEMPTS` con `Retry-After` (AC 3.8), distinto del `401 UNAUTHORIZED` de sesión ausente o vencida en el resto de la API (AC 3.5, 3.7); `GET /auth/session` devuelve `{ authenticated: true, expiresAt }` o `401`; `POST /auth/logout` responde `204` (ver `api-contract.md` §1.1 de la raíz)
 - [~] Antes de F2: API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (bloqueantes); API-10b (recomendada, pero prerrequisito de API-19 en el backend); API-10, API-14, API-16 (recomendadas); API-18 (no bloqueante). **Hechas 2026-09-25**: API-1 parte 1 (sin `language`), API-5, API-7a, API-12 y API-13 (raíz, `decision-log.md` entrada 34). **Hechas 2026-09-26**: API-10b, API-14, API-15 y API-19 (raíz, `decision-log.md` entrada 35). Datos que usa el front (ver `api-contract.md` §1, §2, §3, §4 y §6 de la raíz):
   - `GET /episodes/:id` suma `pipelineActive`, `topic { id, title }`, `createdAt`, `publishedAt` (siempre `null` hasta API-7) y `participants[] { agentId, name, role, isJudge }` (debatientes primero, juez al final; vacío en `CREATED`). `GET /episodes` suma `publishedAt`
   - SSE: episodio inexistente → `404 NOT_FOUND` (JSON); existente sin pipeline activo → `204` sin body ni `Content-Type: text/event-stream` (para `EventSource`, "no reconectar"); con pipeline activo → `200 text/event-stream`, con `event: heartbeat` cada 15 s. El heartbeat sale sin línea `data:`, así que `EventSource` no lo despacha y nunca llega al feed. `research.started` y `episode.pending_review` llegan con `data: {}`
   - `/notifications`: `NotificationDto` (`readAt` nullable); `POST /notifications/read-all` responde `{ count }`. Los dos POST responden `201`
-  - `participants[].role` sale en `openapi.json` como `type: ["string","null"]`, igual que `avatarUrl`: verificar qué genera `openapi-typescript` (Restricciones técnicas de la spec)
+  - `participants[].role` sale en `openapi.json` como `type: ["string","null"]`, igual que `avatarUrl`: `openapi-typescript` genera `string | null` para los dos (verificado en F1, §1)
   - API-19: `debate.verdict.stale: boolean` en `GET /episodes/:id` (AC 3.81). Acción `POST /episodes/:id/actions/regenerate-verdict` con body `{}` obligatorio (sin body o con campos de más → `400 VALIDATION_ERROR`); responde `201` con el veredicto nuevo en el shape de `debate.verdict` y `stale: false`, y `verdict.id` cambia en cada vuelta. Es sincrónica (espera de RPM de hasta unos 90 s más reintentos). Errores: `409 INVALID_STATE_TRANSITION` (fuera de `PENDING_REVIEW` o si el estado cambió durante la llamada), `409 USAGE_LIMIT_EXCEEDED`, `503 PROVIDER_QUOTA_EXCEEDED`, `500 INTERNAL_ERROR` (AC 3.85). Todavía no está en `openapi.json` como acción tipada: el path param `action` y las respuestas por acción los documenta API-10
   - API-10b: `regenerate` y `regenerate-audio` ya responden `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` (antes `500`; AC 3.50, 3.62). API-14: `edit`/`regenerate` con un `argumentId` de otro episodio → `404 NOT_FOUND` (AC 3.50: refrescar el detalle)
   - `RemotionManifest.meta.language` ya es obligatorio (`DebateLanguage` en `@ai-trend-debates/contracts`); sale `"ES"` hasta que la spec 004 agregue el idioma por episodio
@@ -26,38 +26,39 @@ Dependencias de backend/workspace de la spec 003, trackeadas en `tasks.md` de la
 - [ ] Antes de F3: `packages/video` como librería con audio real + catálogo de pnpm (Restricciones técnicas, puntos 1-4)
 - [ ] Antes de F4: API-7; API-8 en producción con TTL de audio 3600 s (D12) y sin `/docs` (D20); ajuste de `coding-rules.md` §1
 
-## 1. F1 — Base: auth, origen único, cliente tipado, layouts — sin empezar
+## 1. F1 — Base: auth, origen único, cliente tipado, layouts — implementada 2026-09-26 (rama `feat/dashboard-f1`, sin mergear), con verificaciones en navegador pendientes
 
-Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1.
+Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1. Proceso y hallazgos en `decision-log.md` de esta carpeta, entrada 6. Lo que falta verificar a mano en un navegador está marcado `[~]`.
 
-- [ ] Instalar shadcn/ui, TanStack Query, `openapi-typescript` y `openapi-fetch` (D4)
-- [ ] `apps/dashboard/turbo.json` con `extends: ["//"]` y tarea `generate:api` → `src/lib/api/schema.d.ts`; `build`/`dev`/`lint` dependen de ella, con `env: ["API_INTERNAL_URL"]` (Restricciones técnicas, "Turborepo y tipos")
-- [ ] Verificar qué genera `openapi-typescript` con `avatarUrl` (`type: ["string","null"]` en un documento 3.0.0) (Restricciones técnicas, "Tipos generados")
-- [ ] Rewrites `/api/:path*` y `/audio-files/:path*` hacia `API_INTERNAL_URL` (apuntando al puerto 3000 fijo de `main.ts:54`) (ADR 0001 punto 3; AC 3.9)
-- [ ] `experimental.proxyTimeout` por encima del peor caso de `regenerate-verdict` (API-19, sincrónica): unos 90 s de espera del limitador de RPM más los reintentos; cubre también el SSE junto con el `heartbeat` (Restricciones técnicas, "Rewrites y SSE")
-- [ ] Cliente `openapi-fetch`: `baseUrl` `/api` en el navegador, `API_INTERNAL_URL` en el render de servidor, sin reenviar cookies (D11)
-- [ ] Provider de TanStack Query + manejo global del `401` → `/login?next=<ruta actual>` con aviso de acción no ejecutada (AC 3.7)
+- [x] Instalar shadcn/ui, TanStack Query, `openapi-typescript` y `openapi-fetch` (D4). shadcn/ui con base Radix (`button`, `input`, `label`); el CLI actual trae el paquete `cn` (de `shadcn-ui`) en lugar de `clsx` + `tailwind-merge`. Se sumó Vitest 4 (dev) para los tests unitarios del front
+- [x] `apps/dashboard/turbo.json` con `extends: ["//"]` y tarea `generate:api` → `src/lib/api/schema.d.ts` (generado, en `.gitignore`); `build`/`dev`/`lint`/`test` dependen de ella; `build` y `dev` con `env: ["API_INTERNAL_URL"]` (Restricciones técnicas, "Turborepo y tipos")
+- [x] Verificar qué genera `openapi-typescript` con `avatarUrl` (`type: ["string","null"]` en un documento 3.0.0): con `openapi-typescript` 7.13.0 sale `avatarUrl: string | null` (requerido), igual que `participants[].role: string | null`. No hace falta tocar el backend (Restricciones técnicas, "Tipos generados")
+- [x] Rewrites `/api/:path*` y `/audio-files/:path*` hacia `API_INTERNAL_URL` (ADR 0001 punto 3; AC 3.9). Default `http://127.0.0.1:3000`, el `HOST`/`PORT` por defecto de la API (`main.ts` ya usa `PORT` desde API-8); la URL se valida al cargar `next.config.ts`
+- [x] `experimental.proxyTimeout` de 10 minutos, por encima del peor caso de `regenerate-verdict` (API-19, sincrónica): 3 intentos de Cockatiel × (hasta 90 s de espera del limitador de RPM + generación) + backoff, unos 5-6 minutos; cubre también el SSE junto con el `heartbeat` (Restricciones técnicas, "Rewrites y SSE")
+- [x] Cliente `openapi-fetch`: `baseUrl` `/api` en el navegador (`src/lib/api/client.ts`), `API_INTERNAL_URL` en el render de servidor (`server-client.ts`, `server-only`, sin reenviar cookies ni headers; se usa recién en F4) (D11)
+- [x] Provider de TanStack Query + manejo global del `401` → `/login?next=<ruta actual>&expired=1` con aviso de acción no ejecutada (AC 3.7). Solo dispara con `code: UNAUTHORIZED`, no con el `401 INVALID_CREDENTIALS` del login. Probado con tests de `QueryClient`; el redirect en el navegador queda por verificar a mano
 
 **Layouts raíz separados** (Restricciones técnicas, "Layouts raíz separados para panel y showcase"; AC 3.79 a; D16):
-- [ ] Separar los layouts raíz: eliminar `src/app/layout.tsx` (hoy único layout raíz, con `lang="en"` en la línea 23); sin layout compartido
-- [ ] `app/(panel)/layout.tsx` con `<html lang="es">`, que contiene `login/` y `studio/`; verificar que las URLs siguen siendo `/login` y `/studio/*` (AC 3.79 a)
-- [ ] `app/[locale]/layout.tsx` con `<html lang={locale}>`, `es` como único valor válido (por ejemplo, `generateStaticParams` + validación que responde 404); `locale` como lista propia del dashboard, no derivada de `DebateLanguage` (D16; Restricciones técnicas, "Tipos generados")
-- [ ] `/` → redirección temporal (307) a `/es` (D16)
-- [ ] Spike: `app/global-not-found.js` es experimental en Next 16.3.6; verificar el flag antes de usarlo, o resolver la 404 con `not-found` dentro de cada layout raíz
-- [ ] Verificar la convivencia de rutas: `login` y `studio` tienen prioridad sobre `[locale]`, y los rewrites `/api/*` y `/audio-files/*` no caen en `[locale]`
-- [ ] Verificar: `/` redirige a `/es` y `/en` responde 404 (criterio F1)
+- [x] Separar los layouts raíz: eliminado `src/app/layout.tsx` (y la página del scaffold); sin layout compartido
+- [x] `app/(panel)/layout.tsx` con `<html lang="es">`, que contiene `login/` y `studio/`; las URLs siguen siendo `/login` y `/studio/*` (AC 3.79 a; verificado con curl: `lang="es"` en `/login`, `/studio` y `/studio/new`)
+- [x] `app/[locale]/layout.tsx` con `<html lang={locale}>`, `es` como único valor válido: `generateStaticParams` + `dynamicParams = false` + `notFound()` en el layout como red de seguridad; `locale` en `src/lib/locales.ts`, lista propia del dashboard, no derivada de `DebateLanguage` (D16; Restricciones técnicas, "Tipos generados")
+- [x] `/` → redirección temporal (307) a `/es` (D16), con `redirects` de `next.config.ts`
+- [x] Spike de `global-not-found`: el flag `experimental.globalNotFound` existe en 16.3.6 y se usa (`app/global-not-found.tsx`, en español, `lang="es"`), más un `not-found.tsx` dentro de cada layout raíz para los `notFound()` de páginas. Hallazgos en `decision-log.md` entrada 6: con Turbopack el archivo se toma aun sin el flag, y un `notFound()` lanzado durante un render dinámico sale como documento de error de Next que se completa en el cliente (status 404 correcto)
+- [x] Verificar la convivencia de rutas: `login` y `studio` tienen prioridad sobre `[locale]`, y los rewrites `/api/*` y `/audio-files/*` no caen en `[locale]` (curl: `/api/episodes` → `401` de Nest, `/audio-files/x.mp3` → `403` de la firma HMAC)
+- [x] Verificar: `/` redirige a `/es` (307) y `/en` responde 404 (criterio F1); también `/pt`, `/xx` y `/foo/bar` → 404 con `global-not-found`
+- [~] `/en/e/[id]` responde 404, pero con la 404 por defecto de Next (en inglés) en lugar de `global-not-found`: el `notFound()` sale del layout raíz, que no tiene boundary propio. Es una URL de F4 (AC 3.80); se resuelve ahí o se acepta
 
 **Auth y navegación:**
-- [ ] `src/proxy.ts`: chequeo optimista de la cookie en `/studio/*` → `/login?next=` (AC 3.1; ADR 0001 punto 4)
-- [ ] Validación de `next`: solo rutas relativas `/studio/...`, cualquier otro valor → `/studio` (AC 3.1)
-- [ ] Página `/login` contra `POST /auth/login`: error sin indicar campo (AC 3.2), mensaje específico de rate-limit (AC 3.8)
-- [ ] Persistencia de sesión 7 días verificada con recargas (AC 3.3)
-- [ ] "Cerrar sesión" contra `POST /auth/logout` (AC 3.4)
-- [ ] Layout del panel `/studio/*` con navegación: lista, crear, showcase (`/es`), cerrar sesión (AC 3.15)
-- [ ] Layout del showcase (`/[locale]`) sin controles ni enlaces del panel; `/`, `/[locale]` y `/[locale]/e/[id]` sin sesión (AC 3.6)
-- [ ] Mapeo de los 14 `EpisodeStatus` a etiqueta/categoría/grupo/actualización como módulo compartido (spec, "Mapeo de estados a UI")
-- [ ] Verificar con curl contra `/api/...` que los endpoints no públicos devuelven `401 UNAUTHORIZED` (AC 3.5) y que la pestaña de red solo muestra el origen del dashboard (AC 3.9)
-- [ ] Verificar criterio F1: `pnpm build` verde; un cambio en `openapi.json` que rompe un tipo usado hace fallar el build; un import prohibido hace fallar `check-boundaries`
+- [x] `src/proxy.ts`: chequeo optimista de la cookie `atd_session` en `/studio` y `/studio/*` → `/login?next=` (AC 3.1; ADR 0001 punto 4)
+- [x] Validación de `next`: solo `/studio` o `/studio/...` ya resuelto (sin `//`, `\`, caracteres de control ni `..` que salga del panel); cualquier otro valor → `/studio` (AC 3.1). Se valida en el servidor, antes de llegar al formulario
+- [x] Página `/login` contra `POST /auth/login`: error único sin indicar campo (AC 3.2), mensaje específico de rate-limit con los minutos de `Retry-After` (AC 3.8) y otro para `LOGIN_BUSY`. Verificado con curl a través del rewrite (login real `200` con cookie `HttpOnly; SameSite=Lax; Max-Age=604800`, `401 INVALID_CREDENTIALS`, `429 TOO_MANY_ATTEMPTS` con `Retry-After: 900`); el formulario en el navegador queda por probar
+- [~] Persistencia de sesión 7 días (AC 3.3): la cookie sale con `Max-Age=604800` y `/studio` y `GET /auth/session` responden `200` con ella en cada request (curl); falta la prueba de recargas en un navegador. `SessionCheck` consulta `GET /auth/session` en todo `/studio/*`, así que una cookie vencida o alterada lleva a `/login`
+- [x] "Cerrar sesión" contra `POST /auth/logout` (AC 3.4): `204` que borra la cookie, y después `/studio` → `307` a `/login` (curl); el botón en el navegador queda por probar
+- [x] Layout del panel `/studio/*` con navegación: episodios, crear, showcase (`/es`, con `<a>` porque es otro layout raíz), cerrar sesión (AC 3.15). `/studio` y `/studio/new` son placeholders hasta F2
+- [x] Layout del showcase (`/[locale]`) sin controles ni enlaces del panel; `/`, `/[locale]` y `/[locale]/e/[id]` sin sesión (AC 3.6). `/es/e/[id]` responde 404 hasta F4 (no hay episodios publicados)
+- [x] Mapeo de los 14 `EpisodeStatus` a etiqueta/categoría/grupo/terminal/actualización como módulo compartido (`src/lib/episode-status.ts`), con el tipo sacado de `openapi.json` (spec, "Mapeo de estados a UI")
+- [~] Verificar con curl contra `/api/...` que los endpoints no públicos devuelven `401 UNAUTHORIZED` (AC 3.5): hecho (episodios, detalle, SSE, manifest, acciones, notificaciones, sesión). AC 3.9: la URL interna no aparece en el HTML ni en ningún chunk de `.next/static` (solo en el `routes-manifest.json` del servidor); falta mirar la pestaña de red en un navegador
+- [x] Verificar criterio F1: `pnpm build` verde; renombrar `COMPLETED` en el enum de estados o `password` en `LoginDto` de `openapi.json` hace fallar el build del dashboard (`TS2353`); un import prohibido hace fallar `check-boundaries` y corta `pnpm build`
 
 ## 2. F2 — Panel de curación (privado) — sin empezar
 
