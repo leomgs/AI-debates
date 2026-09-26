@@ -210,6 +210,7 @@ model Debate {
   updatedAt DateTime      @updatedAt
   rounds    DebateRound[]
   verdict   Verdict?
+  verdictHistory VerdictHistory[]
   episode   Episode?
 }
 
@@ -293,6 +294,24 @@ model Verdict {
   content   String // Argumentación final del veredicto
   winnerId  String? // Id del Agent ganador (opcional)
   createdAt DateTime @default(now())
+}
+
+// Spec 003, API-19 (D17): veredictos reemplazados por `regenerate-verdict`.
+// Feature 10: no se descarta lo que produjo la IA. Una fila por reemplazo,
+// escrita en la misma transacción que borra el Verdict viejo y crea el nuevo
+// (DebateService.replaceVerdict). No se expone en la API.
+// judgeId y winnerId sin FK a Agent a propósito: es un archivo (igual que
+// Verdict.winnerId) y así la reconstrucción de Agent de la spec 004
+// (tasks.md §13.4) no tiene que recrear otra FK.
+model VerdictHistory {
+  id           String   @id @default(uuid())
+  debateId     String
+  debate       Debate   @relation(fields: [debateId], references: [id], onDelete: Cascade)
+  judgeId      String
+  content      String
+  winnerId     String?
+  issuedAt     DateTime // Verdict.createdAt del veredicto archivado
+  supersededAt DateTime @default(now())
 }
 
 // =========================================================================
