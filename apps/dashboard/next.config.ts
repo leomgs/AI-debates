@@ -17,6 +17,9 @@ const PROXY_TIMEOUT_MS = 10 * 60 * 1000;
 const nextConfig: NextConfig = {
   experimental: {
     proxyTimeout: PROXY_TIMEOUT_MS,
+    // app/global-not-found.tsx: 404 para URLs sin ruta y para un `locale`
+    // inválido, que con dos layouts raíz no tienen un layout propio.
+    globalNotFound: true,
   },
 
   // Next es el único origen público (ADR 0001 punto 3; AC 3.9). Como array,
@@ -28,6 +31,13 @@ const nextConfig: NextConfig = {
       { source: "/api/:path*", destination: `${apiInternalUrl}/:path*` },
       { source: "/audio-files/:path*", destination: `${apiInternalUrl}/audio-files/:path*` },
     ];
+  },
+
+  // `/` no tiene página: con dos layouts raíz no hay layout para ella.
+  // Redirección temporal (307) y no permanente: cuando haya más idiomas de
+  // interfaz, `/` va a elegir el destino según el navegador (D16).
+  async redirects() {
+    return [{ source: "/", destination: "/es", permanent: false }];
   },
 };
 
