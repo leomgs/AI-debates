@@ -5,9 +5,14 @@ import { DEFAULT_SHOWCASE_LOCALE } from "@/lib/locales";
 
 // 404 global (experimental.globalNotFound en next.config.ts). Con dos layouts
 // raíz y sin app/layout.tsx no hay un layout común para las URLs que no
-// matchean ninguna ruta, ni para un notFound() lanzado por el propio layout
-// raíz del showcase (un `locale` inválido, AC 3.80). Next saltea el render
-// normal y devuelve este documento completo.
+// matchean ninguna ruta (por ejemplo, /foo/bar). Next saltea el render normal
+// y devuelve este documento completo.
+//
+// No cubre los `locale` inválidos del showcase (/en, /xx): mientras
+// [locale]/layout.tsx sea force-dynamic, esas URLs matchean la ruta y el 404
+// sale del notFound() del layout, con la 404 por defecto de Next. Vuelve a
+// cubrirlos si F4 prerenderiza el showcase (dynamicParams = false), o si
+// proxy.ts los manda acá (tasks.md §4, "Página 404 del showcase").
 //
 // Sirve a las dos superficies, así que no muestra nada del panel (AC 3.6):
 // la interfaz de ambas es en español (D8, D16) y el único enlace es al showcase.
