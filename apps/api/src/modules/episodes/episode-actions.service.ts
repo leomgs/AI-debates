@@ -10,6 +10,7 @@ import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeOrchestratorService, ManualSource } from "./episode-orchestrator.service";
 import { EpisodeContextService } from "./episode-context.service";
 import { InvalidEpisodeTransitionError } from "./episodes.errors";
+import { serializeVerdict, SerializedVerdict } from "./episode-detail.mapper";
 import { EditActionDto } from "./dto/edit-action.dto";
 import { RegenerateActionDto } from "./dto/regenerate-action.dto";
 import { RegenerateAudioActionDto } from "./dto/regenerate-audio-action.dto";
@@ -113,6 +114,30 @@ export class EpisodeActionsService {
 
     await this.debate.reviseDraft(dto.argumentId, newContent);
     return this.debate.promoteToOfficial(dto.argumentId);
+  }
+
+  // Spec 003, API-19 (D17): "Volver a juzgar". Sincrónica, como regenerate.
+  // El juez evalúa los argumentos OFFICIAL actuales (EpisodeContextService,
+  // el mismo contexto que usa el orquestador en JUDGING) con el
+  // modelProvider que tiene asignado en el episodio, dentro de withLlmCall
+  // (1 llamada del presupuesto, AC 2.1). Si el juez falla, withLlmCall
+  // devuelve el cupo y el error se propaga sin tocar el veredicto
+  // (BudgetExceededError → 409, cuota del proveedor → 503, resto → 500;
+  // API-10b). La llamada puede tardar lo que espere el limitador de RPM,
+  // así que el estado se vuelve a validar justo antes de escribir: si en el
+  // medio se aprobó o rechazó el episodio, 409 y el veredicto queda como
+  // estaba (la llamada ya se hizo, así que el cupo sí se consume).
+  async regenerateVerdict(episodeId: string): Promise<SerializedVerdict> {
+    const episode = await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate-verdict");
+    const judge = await this.prisma.episodeParticipant.findFirstOrThrow({ where: { episodeId, isJudge: true } });
+    const context = await this.context.build(episodeId);
+
+    const output = await this.budget.withLlmCall(episodeId, () => this.agents.judge(context, judge.modelProvider));
+
+    await this.assertStatus(episodeId, ["PENDING_REVIEW"], "regenerate-verdict");
+    const verdict = await this.debate.replaceVerdict(episode.debateId, judge.agentId, output);
+    // Recién emitido: ningún ArgumentHistory puede ser posterior.
+    return serializeVerdict(verdict, false);
   }
 
   async reject(episodeId: string): Promise<Episode> {

@@ -14,6 +14,7 @@ import { EditActionSchema } from "./dto/edit-action.dto";
 import { RegenerateActionSchema } from "./dto/regenerate-action.dto";
 import { RegenerateAudioActionSchema } from "./dto/regenerate-audio-action.dto";
 import { ResumeActionBodySchema } from "./dto/resume-action.dto";
+import { RegenerateVerdictActionSchema } from "./dto/regenerate-verdict-action.dto";
 import { EpisodeDto, EpisodeListItemDto } from "./dto/episode.schema";
 import { EpisodeDetailDto } from "./episode-detail.mapper";
 import { RemotionManifestDto } from "../render/remotion-manifest.dto";
@@ -101,8 +102,9 @@ export class EpisodesController {
   // Un solo endpoint para las acciones (api-contract.md §3) — cada rama
   // valida su propio DTO; el path param `action` ya viene acotado a los
   // valores válidos por ActionNameSchema (cualquier otro valor es 400 antes
-  // de llegar acá). Sin @ZodResponse a propósito (spec 001, alcance): las 6
-  // ramas devuelven 3 shapes distintos (Episode/Argument/AudioAsset) y este
+  // de llegar acá). Sin @ZodResponse a propósito (spec 001, alcance): las 7
+  // ramas devuelven 4 shapes distintos (Episode/Argument/AudioAsset y, desde
+  // API-19, el veredicto de EpisodeVerdictSchema) y este
   // método único no puede declarar uno solo sin mentir sobre las otras —
   // documentar esto correctamente (unión, o separar el endpoint) queda fuera
   // del alcance de esta primera pasada.
@@ -126,6 +128,9 @@ export class EpisodesController {
         return this.actions.resume(id, ResumeActionBodySchema.parse(body));
       case "regenerate-audio":
         return this.actions.regenerateAudio(id, RegenerateAudioActionSchema.parse(body));
+      case "regenerate-verdict":
+        RegenerateVerdictActionSchema.parse(body);
+        return this.actions.regenerateVerdict(id);
     }
   }
 

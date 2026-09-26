@@ -15,6 +15,10 @@ import { EpisodesModule } from "./episodes.module";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { EpisodeRecoveryService } from "./episode-recovery.service";
+import { EpisodesService } from "./episodes.service";
+import { DebateService } from "../debate/debate.service";
+import { DailyQuotaExceededError } from "../ai/ai.errors";
+import { BudgetExceededError, InvalidEpisodeTransitionError } from "./episodes.errors";
 
 // coding-rules.md §9 — único módulo con tests de integración multi-módulo
 // (todo mockeado en el borde externo: Research/Agents/FactCheck llaman a
@@ -111,6 +115,8 @@ describe("EpisodesModule (integración)", () => {
   let orchestrator: EpisodeOrchestratorService;
   let actions: EpisodeActionsService;
   let recovery: EpisodeRecoveryService;
+  let episodesService: EpisodesService;
+  let debateService: DebateService;
 
   let researchMock: { createTopic: jest.Mock; research: jest.Mock };
   let agentsMock: { createDebateAgent: jest.Mock; judge: jest.Mock };
@@ -153,6 +159,8 @@ describe("EpisodesModule (integración)", () => {
     orchestrator = moduleRef.get(EpisodeOrchestratorService);
     actions = moduleRef.get(EpisodeActionsService);
     recovery = moduleRef.get(EpisodeRecoveryService);
+    episodesService = moduleRef.get(EpisodesService);
+    debateService = moduleRef.get(DebateService);
 
     await seedAgents(prisma);
   }, 60_000);
@@ -324,5 +332,132 @@ describe("EpisodesModule (integración)", () => {
     // no repetir la cobertura completa del pipeline feliz de más arriba.
     expect(finalEpisode.status).not.toBe("DEBATING");
     expect(debate.id).toBeTruthy(); // silencia unused var, referenciado por claridad del setup
+  });
+
+  // Spec 003, API-19 (D17): veredicto desactualizado y "Volver a juzgar",
+  // contra la base real (transacción, VerdictHistory, ArgumentHistory y
+  // EpisodeUsage de verdad). Solo AgentsService está mockeado.
+  describe("API-19: regenerate-verdict y verdict.stale", () => {
+    // Deja un episodio en PENDING_REVIEW con el pipeline real. El primer
+    // check de fact-check falla una vez, así que el loop de enmienda archiva
+    // un ArgumentHistory ANTES del veredicto (no tiene que contar como stale).
+    async function episodeInPendingReview() {
+      const created = await createTestEpisode(prisma);
+      researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+      factCheckMock.check.mockResolvedValueOnce({ veracity: "FALSE", analysis: "Dato incorrecto.", sourceIds: [] });
+
+      await orchestrator.runPipeline(created.episode.id);
+
+      const episode = await prisma.episode.findUniqueOrThrow({ where: { id: created.episode.id } });
+      expect(episode.status).toBe("PENDING_REVIEW");
+      return created;
+    }
+
+    // Las marcas de tiempo tienen resolución de milisegundos: en producción
+    // entre el veredicto y una edición del curador pasan segundos, acá no.
+    const nextMillisecond = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+    it("stale: false con el historial del loop de enmienda, true tras edit, false tras regenerate-verdict y true de nuevo tras regenerate", async () => {
+      const { episode } = await episodeInPendingReview();
+      const history = await prisma.argumentHistory.findMany({ where: { argument: { debateRound: { debateId: episode.debateId } } } });
+      expect(history.length).toBeGreaterThan(0); // el loop de enmienda sí archivó
+
+      let detail = await episodesService.getEpisodeDetail(episode.id);
+      expect(detail.debate.verdict?.stale).toBe(false);
+      const firstVerdict = detail.debate.verdict!;
+      const argumentId = detail.debate.rounds[0].arguments[0].id;
+
+      await nextMillisecond();
+      await actions.edit(episode.id, { argumentId, content: "Texto corregido por el curador." });
+      detail = await episodesService.getEpisodeDetail(episode.id);
+      expect(detail.debate.verdict?.stale).toBe(true);
+
+      agentsMock.judge.mockResolvedValueOnce({ content: "Veredicto nuevo.", winnerAgentId: null });
+      await nextMillisecond();
+      const usageBefore = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
+      const replaced = await actions.regenerateVerdict(episode.id);
+
+      expect(replaced).toMatchObject({ content: "Veredicto nuevo.", winnerId: null, stale: false });
+      expect(replaced.id).not.toBe(firstVerdict.id); // Verdict.id cambia en cada vuelta
+      const usageAfter = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
+      expect(usageAfter.llmCalls).toBe(usageBefore.llmCalls + 1);
+
+      detail = await episodesService.getEpisodeDetail(episode.id);
+      expect(detail.debate.verdict).toEqual(replaced);
+
+      // El reemplazado quedó archivado tal cual, con su fecha de emisión.
+      const archived = await prisma.verdictHistory.findMany({ where: { debateId: episode.debateId } });
+      expect(archived).toHaveLength(1);
+      expect(archived[0]).toMatchObject({
+        judgeId: firstVerdict.judgeId,
+        content: firstVerdict.content,
+        winnerId: firstVerdict.winnerId,
+      });
+      expect(archived[0].issuedAt.toISOString()).toBe(firstVerdict.createdAt);
+      expect(await prisma.verdict.count({ where: { debateId: episode.debateId } })).toBe(1);
+
+      // Un regenerate posterior vuelve a marcarlo (AC 3.81, edge case
+      // "Editar después de volver a juzgar").
+      await nextMillisecond();
+      await actions.regenerate(episode.id, { argumentId });
+      detail = await episodesService.getEpisodeDetail(episode.id);
+      expect(detail.debate.verdict?.stale).toBe(true);
+    });
+
+    it("si el juez falla, el veredicto queda intacto, no se archiva nada y el cupo se devuelve", async () => {
+      const { episode } = await episodeInPendingReview();
+      const verdictBefore = await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } });
+      const usageBefore = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
+      agentsMock.judge.mockRejectedValueOnce(new DailyQuotaExceededError("GOOGLE", 500));
+
+      await expect(actions.regenerateVerdict(episode.id)).rejects.toThrow(DailyQuotaExceededError);
+
+      expect(await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } })).toEqual(verdictBefore);
+      expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(0);
+      const usageAfter = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
+      expect(usageAfter.llmCalls).toBe(usageBefore.llmCalls);
+    });
+
+    it("sin presupuesto tira BudgetExceededError sin llamar al juez y con el veredicto intacto", async () => {
+      const { episode } = await episodeInPendingReview();
+      const usage = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
+      await prisma.episode.update({ where: { id: episode.id }, data: { maxLlmCalls: usage.llmCalls } });
+      const verdictBefore = await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } });
+      agentsMock.judge.mockClear();
+
+      await expect(actions.regenerateVerdict(episode.id)).rejects.toThrow(BudgetExceededError);
+
+      expect(agentsMock.judge).not.toHaveBeenCalled();
+      expect(await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } })).toEqual(verdictBefore);
+      expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(0);
+    });
+
+    it("si el episodio se aprueba mientras el juez piensa, 409 y el veredicto queda como estaba", async () => {
+      const { episode } = await episodeInPendingReview();
+      const verdictBefore = await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } });
+      agentsMock.judge.mockImplementationOnce(async () => {
+        await prisma.episode.update({ where: { id: episode.id }, data: { status: "APPROVED" } });
+        return { content: "Llega tarde.", winnerAgentId: null };
+      });
+
+      await expect(actions.regenerateVerdict(episode.id)).rejects.toThrow(InvalidEpisodeTransitionError);
+
+      expect(await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } })).toEqual(verdictBefore);
+      expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(0);
+    });
+
+    it("replaceVerdict es atómico: si crear el nuevo falla, el vigente sigue y no queda archivo", async () => {
+      const { episode } = await episodeInPendingReview();
+      const verdictBefore = await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } });
+
+      // judgeId inexistente: la FK Verdict.judgeId → Agent falla en el
+      // create, después de que ya se archivó y borró el vigente.
+      await expect(
+        debateService.replaceVerdict(episode.debateId, "00000000-0000-4000-8000-000000000000", { content: "x", winnerAgentId: null })
+      ).rejects.toThrow();
+
+      expect(await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } })).toEqual(verdictBefore);
+      expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(0);
+    });
   });
 });

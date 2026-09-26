@@ -10,7 +10,8 @@ import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { TtsService } from "../tts/tts.service";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { EpisodeContextService } from "./episode-context.service";
-import { InvalidEpisodeTransitionError } from "./episodes.errors";
+import { BudgetExceededError, InvalidEpisodeTransitionError } from "./episodes.errors";
+import { DailyQuotaExceededError } from "../ai/ai.errors";
 
 const EPISODE_ID = "11111111-1111-4111-8111-111111111111";
 const ARG_ID = "22222222-2222-4222-8222-222222222222";
@@ -18,6 +19,16 @@ const AGENT_ID = "33333333-3333-4333-8333-333333333333";
 const DEBATE_ID = "44444444-4444-4444-8444-444444444444";
 const TOPIC_ID = "55555555-5555-4555-8555-555555555555";
 const FOREIGN_ARG_ID = "66666666-6666-4666-8666-666666666666";
+const JUDGE_ID = "77777777-7777-4777-8777-777777777777";
+const JUDGE_OUTPUT = { content: "Ganó el analista.", winnerAgentId: AGENT_ID };
+const NEW_VERDICT_ROW = {
+  id: "88888888-8888-4888-8888-888888888888",
+  debateId: DEBATE_ID,
+  judgeId: JUDGE_ID,
+  content: "Ganó el analista.",
+  winnerId: AGENT_ID,
+  createdAt: new Date("2026-09-26T10:00:00.000Z"),
+};
 
 // Lo que tira Prisma cuando un *OrThrow no encuentra la fila.
 function notFound() {
@@ -46,8 +57,9 @@ describe("EpisodeActionsService", () => {
     editByHuman: jest.Mock;
     reviseDraft: jest.Mock;
     promoteToOfficial: jest.Mock;
+    replaceVerdict: jest.Mock;
   };
-  let agentsService: { createDebateAgent: jest.Mock };
+  let agentsService: { createDebateAgent: jest.Mock; judge: jest.Mock };
   let stateService: { markApproved: jest.Mock; markCancelled: jest.Mock; resumeFromCheckpoint: jest.Mock };
   let budgetService: { withLlmCall: jest.Mock; withTtsCall: jest.Mock };
   let orchestrator: { runPipeline: jest.Mock; runAudioPipeline: jest.Mock };
@@ -72,12 +84,14 @@ describe("EpisodeActionsService", () => {
       editByHuman: jest.fn().mockResolvedValue({ id: ARG_ID, content: "editado" }),
       reviseDraft: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado" }),
       promoteToOfficial: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado", status: "OFFICIAL" }),
+      replaceVerdict: jest.fn().mockResolvedValue(NEW_VERDICT_ROW),
     };
     agentsService = {
       createDebateAgent: jest.fn().mockReturnValue({
         argue: jest.fn().mockResolvedValue({ content: "regenerado" }),
         respond: jest.fn().mockResolvedValue({ content: "regenerado", respondsToId: "target-1" }),
       }),
+      judge: jest.fn().mockResolvedValue(JUDGE_OUTPUT),
     };
     stateService = {
       markApproved: jest.fn().mockResolvedValue({ id: EPISODE_ID, status: "APPROVED" }),
@@ -234,6 +248,91 @@ describe("EpisodeActionsService", () => {
       expect(budgetService.withLlmCall).not.toHaveBeenCalled();
       expect(agentsService.createDebateAgent).not.toHaveBeenCalled();
       expect(debateService.reviseDraft).not.toHaveBeenCalled();
+    });
+  });
+
+  // Spec 003, API-19 (D17, AC 3.82-3.85).
+  describe("regenerateVerdict", () => {
+    beforeEach(() => {
+      prisma.episodeParticipant.findFirstOrThrow.mockResolvedValue({ agentId: JUDGE_ID, modelProvider: "ANTHROPIC", isJudge: true });
+    });
+
+    it("en PENDING_REVIEW llama al juez con el contexto compartido dentro de withLlmCall y reemplaza el veredicto", async () => {
+      const result = await service.regenerateVerdict(EPISODE_ID);
+
+      expect(prisma.episodeParticipant.findFirstOrThrow).toHaveBeenCalledWith({ where: { episodeId: EPISODE_ID, isJudge: true } });
+      expect(budgetService.withLlmCall).toHaveBeenCalledTimes(1);
+      expect(budgetService.withLlmCall).toHaveBeenCalledWith(EPISODE_ID, expect.any(Function));
+      // Contexto de EpisodeContextService (real en este spec) y el
+      // modelProvider del participante juez.
+      expect(agentsService.judge).toHaveBeenCalledWith(
+        expect.objectContaining({ topic: "Un trend", officialArguments: [] }),
+        "ANTHROPIC"
+      );
+      expect(debateService.replaceVerdict).toHaveBeenCalledWith(DEBATE_ID, JUDGE_ID, JUDGE_OUTPUT);
+      // Shape de debate.verdict, con stale en false.
+      expect(result).toEqual({
+        id: NEW_VERDICT_ROW.id,
+        judgeId: JUDGE_ID,
+        content: "Ganó el analista.",
+        winnerId: AGENT_ID,
+        createdAt: "2026-09-26T10:00:00.000Z",
+        stale: false,
+      });
+    });
+
+    it.each(["DEBATING", "JUDGING", "APPROVED", "REQUIRES_HUMAN_REVIEW", "READY_FOR_RENDER"])(
+      "en %s tira 409 sin llamar al juez ni gastar presupuesto",
+      async (status) => {
+        prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate(status));
+
+        await expect(service.regenerateVerdict(EPISODE_ID)).rejects.toThrow(InvalidEpisodeTransitionError);
+
+        expect(budgetService.withLlmCall).not.toHaveBeenCalled();
+        expect(agentsService.judge).not.toHaveBeenCalled();
+        expect(debateService.replaceVerdict).not.toHaveBeenCalled();
+      }
+    );
+
+    it("si el estado cambia mientras corre la llamada al juez, tira 409 y no toca el veredicto", async () => {
+      agentsService.judge.mockImplementation(async () => {
+        // Otra pestaña aprueba el episodio mientras el juez está pensando.
+        prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("APPROVED"));
+        return JUDGE_OUTPUT;
+      });
+
+      await expect(service.regenerateVerdict(EPISODE_ID)).rejects.toMatchObject({
+        name: "InvalidEpisodeTransitionError",
+        currentStatus: "APPROVED",
+        attempted: "regenerate-verdict",
+      });
+      expect(agentsService.judge).toHaveBeenCalledTimes(1);
+      expect(debateService.replaceVerdict).not.toHaveBeenCalled();
+    });
+
+    it("sin presupuesto propaga BudgetExceededError (409 USAGE_LIMIT_EXCEEDED) sin llamar al juez ni tocar el veredicto", async () => {
+      budgetService.withLlmCall.mockRejectedValue(new BudgetExceededError("USAGE_LIMIT_EXCEEDED", "llmCalls", 38));
+
+      await expect(service.regenerateVerdict(EPISODE_ID)).rejects.toThrow(BudgetExceededError);
+
+      expect(agentsService.judge).not.toHaveBeenCalled();
+      expect(debateService.replaceVerdict).not.toHaveBeenCalled();
+    });
+
+    it("con la cuota del proveedor agotada propaga el error (503 PROVIDER_QUOTA_EXCEEDED) sin tocar el veredicto", async () => {
+      agentsService.judge.mockRejectedValue(new DailyQuotaExceededError("ANTHROPIC", 50));
+
+      await expect(service.regenerateVerdict(EPISODE_ID)).rejects.toThrow(DailyQuotaExceededError);
+
+      expect(debateService.replaceVerdict).not.toHaveBeenCalled();
+    });
+
+    it("cualquier otra falla del juez se propaga tal cual (500) sin tocar el veredicto", async () => {
+      agentsService.judge.mockRejectedValue(new Error("respuesta inválida del modelo"));
+
+      await expect(service.regenerateVerdict(EPISODE_ID)).rejects.toThrow("respuesta inválida del modelo");
+
+      expect(debateService.replaceVerdict).not.toHaveBeenCalled();
     });
   });
 
