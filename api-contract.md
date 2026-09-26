@@ -9,6 +9,11 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
 - Formato: JSON sobre HTTP, salvo el endpoint de eventos (SSE).
 - Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1), y los de auth (§1.1): `UNAUTHORIZED` (401, sin sesión válida), `INVALID_CREDENTIALS` (401, login rechazado), `TOO_MANY_ATTEMPTS` (429, login bloqueado por rate-limit) y `LOGIN_BUSY` (429, reintentar en un segundo).
 - Una acción de curaduría llamada en un estado que no la admite (ver tabla de la sección 5) responde `409 Conflict`, nunca `400` — el request está bien formado, lo que falla es la transición.
+- Acciones sincrónicas que llaman a un proveedor (`regenerate`, `regenerate-verdict`, `regenerate-audio`; spec 003, API-10b, implementado el 2026-09-26):
+  - `409 USAGE_LIMIT_EXCEEDED`: el presupuesto del episodio (`maxLlmCalls` o `maxTtsSegments`) está agotado. En `PENDING_REVIEW` y `READY_FOR_RENDER` no hay forma de subir los límites, así que el dashboard deshabilita el botón antes de llegar a este error (AC 3.46, 3.61, 3.83).
+  - `503 PROVIDER_QUOTA_EXCEEDED`: el proveedor no pudo atender la llamada: cuota diaria del LLM agotada (`DailyQuotaExceededError`), espera del limitador de RPM por encima del tope (`RateLimitWaitExceededError`) o TTS no disponible (`TtsProviderUnavailableError`). Es el mismo conjunto que el pipeline convierte en el checkpoint `PROVIDER_QUOTA_EXCEEDED`. Reintentar más tarde.
+  - Cualquier otra falla del proveedor sale como `500 INTERNAL_ERROR`. En todos los casos la llamada fallida no consume presupuesto y los datos quedan como estaban.
+- `404 NOT_FOUND`: el recurso no existe o no pertenece al episodio del path (por ejemplo, el `argumentId` de `edit`/`regenerate`, API-14, o el `audioAssetId` de §2).
 
 ### 1.1 Autenticación (API-8, ADR 0001)
 
@@ -127,6 +132,7 @@ Campos agregados por la spec 003 (2026-09-25, `decision-log.md` entrada 34):
 - `publishedAt` (API-7a): igual que en el listado; `null` hasta que exista `publish`.
 - `participants` (API-1, parte 1): los agentes del episodio, debatientes primero y el juez al final. `agentId` es el mismo que usan `arguments[].agentId`, `verdict.judgeId` y `verdict.winnerId`, así que alcanza para poner nombres en el timeline y el veredicto (AC 3.27, 3.29) e identificar al agente sin argumento aprobado en un `VALIDATION_INCONSISTENCY` (cierra API-9). `role` es la persona (`ANALYST`, `CONTRARIAN`, `DIPLOMAT`, `PROVOCATEUR`) o `JUDGE`, y `name` su nombre visible. Está vacío mientras el episodio sigue en `CREATED` (los participantes se eligen al pasar a `RESEARCHING`).
 - `language` (resto de API-1) llega con la spec 004 (`tasks.md` §13.7).
+- `debate.verdict.stale` (API-19, D17, implementado el 2026-09-26): `true` si algún argumento del debate se editó (`edit`) o regeneró (`regenerate`) **después** de emitido el veredicto, es decir, si existe un `ArgumentHistory` de un argumento del debate con `createdAt` posterior a `verdict.createdAt`. No es una columna. El historial del loop de enmienda del pipeline es anterior al veredicto y no cuenta. Vuelve a `false` solo cuando `regenerate-verdict` reemplaza el veredicto (AC 3.81). Ejemplo: `"verdict": { "id": "uuid", "judgeId": "uuid", "content": "...", "winnerId": "uuid", "createdAt": "...", "stale": false }`. `verdict.id` cambia cada vez que se vuelve a juzgar.
 
 ### `GET /episodes/:id/manifest` (P0 — implementado 2026-09-24, `decision-log.md` entrada 27)
 Devuelve el `RemotionManifest` (Feature 7, **P0** en `features.md` — a diferencia del worker que lo consume para producir el `.mp4`, que sí es P1/Feature 9) con URLs firmadas resueltas para cada `AudioAsset` (campo `audioUrl` en cada `timeline[]`, adicional a `audioAssetId` — no está en el JSON de ejemplo de `features.md`, que es el contrato congelado, pero sí en esta promesa de la superficie HTTP). Se genera al vuelo en cada `GET`, no se persiste. Antes de que exista audio/veredicto para todos los `Argument` OFFICIAL, devuelve `409` con `code: MANIFEST_NOT_READY` (mismo criterio: solo tiene contenido significativo desde `READY_FOR_RENDER` en adelante). El consumo vía `@remotion/player` en el frontend es la parte P1 de Feature 9, no este endpoint.
@@ -158,6 +164,8 @@ Válida solo desde `PENDING_REVIEW`. Reescribe el contenido de un argumento punt
 { "argumentId": "uuid", "content": "Texto corregido por el curador." }
 ```
 
+Un `argumentId` que no es de un round del debate de este episodio (o que no existe) → `404 NOT_FOUND`, sin tocar nada (API-14). Marca el veredicto como desactualizado (`debate.verdict.stale`, §2).
+
 ### `POST /episodes/:id/actions/regenerate`
 Válida solo desde `PENDING_REVIEW`. Pide al agente correspondiente que regenere un argumento puntual desde cero (no es lo mismo que `Resume`: acá el episodio ya llegó completo a revisión, esto es una reescritura editorial, no una recuperación de fallo).
 
@@ -165,6 +173,8 @@ Válida solo desde `PENDING_REVIEW`. Pide al agente correspondiente que regenere
 // Request
 { "argumentId": "uuid" }
 ```
+
+Sincrónica: responde cuando el agente terminó (puede esperar al limitador de RPM, hasta unos 90 s, más reintentos). Consume 1 llamada del presupuesto. Errores: `404 NOT_FOUND` si el `argumentId` no es del episodio (API-14); `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` según §1 (API-10b). En todos los casos el argumento queda como estaba. Marca el veredicto como desactualizado (§2).
 
 ### `POST /episodes/:id/actions/regenerate-audio`
 Válida solo desde `READY_FOR_RENDER` (AC 6.2) — a diferencia de `edit`/`regenerate`, opera sobre audio ya sintetizado, no sobre texto en revisión. Regenera el audio de un único `sequenceIndex` (1-based, mismo orden que `timeline` del manifest) sin tocar el resto del episodio: sintetiza de nuevo con el motor activo, swapea `Argument.audioAssetId` al `AudioAsset` nuevo, y borra (best-effort) el `AudioAsset`/archivo previos.
@@ -177,7 +187,22 @@ Válida solo desde `READY_FOR_RENDER` (AC 6.2) — a diferencia de `edit`/`regen
 { "id": "uuid", "storageKey": "...", "provider": "LOCAL", "durationMs": 64812, "mimeType": "audio/wav" }
 ```
 
-`sequenceIndex` fuera de rango → `400` con `code: INVALID_SEQUENCE_INDEX`.
+`sequenceIndex` fuera de rango → `400` con `code: INVALID_SEQUENCE_INDEX`. Presupuesto de TTS agotado → `409 USAGE_LIMIT_EXCEEDED`; TTS no disponible → `503 PROVIDER_QUOTA_EXCEEDED` (§1, API-10b).
+
+### `POST /episodes/:id/actions/regenerate-verdict`
+Spec 003, API-19 (D17), implementada el 2026-09-26. Válida solo desde `PENDING_REVIEW`. Vuelve a llamar al juez del episodio (su `modelProvider` asignado) con los argumentos OFFICIAL actuales y **reemplaza** el veredicto, incluido el ganador. El veredicto anterior se archiva en `VerdictHistory` (no se expone en la API). Consume 1 llamada LLM del presupuesto del episodio.
+
+```json
+// Request: body vacío, estricto (un campo de más, o no mandar body, → 400 VALIDATION_ERROR)
+{}
+
+// Response 201 — el veredicto nuevo, con el shape de debate.verdict (§2)
+{ "id": "uuid", "judgeId": "uuid", "content": "...", "winnerId": "uuid", "createdAt": "...", "stale": false }
+```
+
+- **Sincrónica**: responde cuando el juez terminó; puede esperar al limitador de RPM (hasta unos 90 s) más reintentos. El cliente y el rewrite no deben cortar antes.
+- **Errores**: `409 INVALID_STATE_TRANSITION` fuera de `PENDING_REVIEW`, **o si el estado cambió mientras corría la llamada al juez** (por ejemplo, se aprobó en otra pestaña; el estado se vuelve a validar justo antes de escribir, y en ese caso la llamada ya hecha sí cuenta en el presupuesto); `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` según §1; cualquier otra falla del juez, `500 INTERNAL_ERROR`. En todos los casos el veredicto anterior queda intacto.
+- El archivo, el borrado del veredicto viejo y la creación del nuevo van en una sola transacción: no puede quedar el episodio sin veredicto ni con un archivo huérfano.
 
 ### `POST /episodes/:id/actions/reject`
 Válida desde `PENDING_REVIEW` **o** `REQUIRES_HUMAN_REVIEW`. Sin body. Transiciona a `CANCELLED`.
@@ -195,6 +220,8 @@ Válida solo desde `REQUIRES_HUMAN_REVIEW`. El body depende de la `reason` del c
 // reason: MAX_REVISIONS_EXCEEDED o VALIDATION_INCONSISTENCY
 {}
 ```
+
+El estado se valida **antes** de leer el body o aplicar límites nuevos (API-15): un `resume` fuera de `REQUIRES_HUMAN_REVIEW` responde `409 INVALID_STATE_TRANSITION` sin modificar nada.
 
 Reanuda exactamente desde `checkpoint.fromState` / `checkpoint.debateRoundId` (ver `02-architecture/architecture.md` sección 4). Si la misma causa vuelve a ocurrir tras el resume, el episodio pasa a `FAILED` — no hay reintento automático de esa acción.
 
@@ -233,6 +260,7 @@ Ciclo de vida del stream (spec 003, API-12 y API-13, implementado 2026-09-25):
 | `reject` | `PENDING_REVIEW`, `REQUIRES_HUMAN_REVIEW` |
 | `resume` | `REQUIRES_HUMAN_REVIEW` |
 | `regenerate-audio` | `READY_FOR_RENDER` |
+| `regenerate-verdict` | `PENDING_REVIEW` (spec 003, API-19; también `409` si el estado cambia mientras corre la llamada al juez) |
 
 Cualquier llamada fuera de esta tabla → `409 Conflict` con `code: INVALID_STATE_TRANSITION`.
 ## 6. Notificaciones (inbox)

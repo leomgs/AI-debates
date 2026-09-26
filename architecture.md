@@ -133,7 +133,7 @@ El modelo de datos completo vive en `schema.prisma` (comentado inline). Resumen 
 
 - **research**: `Topic`, `ResearchSession`, `Source`, `EvidenceFact`
 - **agents**: `Agent`
-- **debate**: `Debate`, `DebateRound` (tipada por `RoundType`: `OPENING`/`REBUTTAL`/`CROSS_EXAMINATION`), `Argument` (con `respondsToId` auto-referencial para cross-examination), `ArgumentHistory`, `Verdict`
+- **debate**: `Debate`, `DebateRound` (tipada por `RoundType`: `OPENING`/`REBUTTAL`/`CROSS_EXAMINATION`), `Argument` (con `respondsToId` auto-referencial para cross-examination), `ArgumentHistory`, `Verdict`, `VerdictHistory` (spec 003, API-19: los veredictos reemplazados por la acción `regenerate-verdict`, archivados por `DebateService.replaceVerdict` en la misma transacción que borra el `Verdict` viejo y crea el nuevo; Feature 10, no se expone en la API; `judgeId`/`winnerId` sin FK a `Agent`). `Verdict` sigue siendo 1:1 con `Debate`, y "veredicto desactualizado" (`debate.verdict.stale`) no es una columna: se deriva de `ArgumentHistory.createdAt` posterior a `Verdict.createdAt`, así que toda mutación de un argumento OFFICIAL en `PENDING_REVIEW` tiene que archivar en `ArgumentHistory`
 - **fact-check**: `Claim`, `FactCheck`
 - **ai**: `LlmRequestLog` (estado persistido del rate limiter, §5.2) — no es un módulo de dominio de producto, es infraestructura
 - **notifications**: `Notification` (acoplada 1:1 a `Episode` — no hay otro emisor de notificaciones en el sistema, se descartó un modelo genérico/polimórfico por generalización prematura)
