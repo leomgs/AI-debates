@@ -16,7 +16,7 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
   - paso 4: migración de idioma (`AgentVoice`, `Episode.language`, `AudioAsset.voiceId`), que es la tercera de la cola e incluye los índices de `stale` anotados en §13.4;
   - pasos 6 y 7: TTS por idioma y `language` en la API. Cierran API-17 y la parte 2 de API-1.
   - Los pasos 5b, 5c, 8 y 9 (prompts sin voseo y pipeline con idioma) no bloquean la F2.
-- **Alternativa en paralelo**: la F1 del dashboard (`frontend-engineer`) ya no depende de nada del backend (API-8 está en master). Conviene hacerla en un git worktree aparte para no pisarse con la rama de backend.
+- **En paralelo**: la F1 del dashboard (`frontend-engineer`) está implementada en la rama `feat/dashboard-f1` (git worktree aparte), con los dos ítems de Workspace de §12.1 incluidos. Falta la revisión de `code-reviewer`, las verificaciones en navegador que lista `apps/dashboard/docs/tasks.md` §1 (marcadas `[~]`) y el merge.
 - **Flujo acordado**: cada bloque va en su propia rama → `backend-engineer`/`frontend-engineer` → verificación propia (build + tests) → `code-reviewer` → correcciones → merge fast-forward a `master`. Commits sin línea de atribución.
 
 **Última tarea (2026-09-26)**: bloque F2-2 del backend implementado en la rama `feat/backend-bloque-f2-2`, en serie sobre `episode-actions.service.ts` (sección 12.2): API-10b (`BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED`; `DailyQuotaExceededError`, `RateLimitWaitExceededError` y `TtsProviderUnavailableError` → `503 PROVIDER_QUOTA_EXCEEDED`), API-14 (`argumentId` ajeno → `404`), API-15 (`resume` valida el estado antes de tocar límites) y API-19 (`regenerate-verdict`, tabla `VerdictHistory` sin FK a `Agent`, `debate.verdict.stale`). Segunda migración de la cola aplicada sobre `dev.db` (solo `CREATE TABLE`, datos intactos). Proceso y hallazgos en `decision-log.md` entrada 35. Lo que queda para la F2 del lado del backend: la sección 13 (pasos 4, 6 y 7, que cierran API-17 y el `language` de API-1).
@@ -324,8 +324,8 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 - [ ] `scripts/hash-password.ts` silencia el eco pisando `rl._writeToOutput`, una API interna de `readline` que puede cambiar entre versiones de Node
 
 **Workspace (spec, "Límites del workspace" y "Turborepo y tipos")**
-- [ ] `scripts/check-boundaries.mjs` extendido a `apps/dashboard`: prohíbe `@ai-trend-debates/api` e imports relativos fuera del paquete; detecta `import()` dinámico e `import "x"`; corre en CI o `prebuild` (F1)
-- [ ] `turbo.json` raíz: `dev.dependsOn: ["^build"]`
+- [x] `scripts/check-boundaries.mjs` extendido a `apps/dashboard`: prohíbe `@ai-trend-debates/api` e imports relativos fuera del paquete; detecta `import()` dinámico e `import "x"` (además de `from` y `require`); corre en la cadena de build como tarea raíz de Turborepo (`//#check:boundaries`, dependencia de todo `build`), así que `pnpm build` falla ante una violación (F1). Probado en las dos direcciones: 10 imports prohibidos insertados a mano (estático, dinámico, `import "x"`, `export * from`, `require`, relativos a `apps/api`, a `packages/` y a `openapi.json`, en `apps/dashboard` y en `packages/video`) fallan, y el estado real pasa. Hecho 2026-09-26 en la rama `feat/dashboard-f1` (`apps/dashboard/docs/decision-log.md` entrada 6)
+- [x] `turbo.json` raíz: `dev.dependsOn: ["^build"]` (2026-09-26, rama `feat/dashboard-f1`)
 
 ### 12.2. Antes de F2 — panel de curación
 
