@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Tipos generados desde openapi.json por la tarea generate:api (turbo.json);
+# build, dev, lint y test la corren antes, así que nunca quedan desfasados.
+/src/lib/api/schema.d.ts

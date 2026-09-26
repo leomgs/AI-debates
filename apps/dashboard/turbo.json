@@ -1,0 +1,24 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "generate:api": {
+      "inputs": ["$TURBO_ROOT$/openapi.json", "package.json"],
+      "outputs": ["src/lib/api/schema.d.ts"]
+    },
+    "build": {
+      "dependsOn": ["^build", "//#check:boundaries", "generate:api"],
+      "env": ["API_INTERNAL_URL"]
+    },
+    "dev": {
+      "dependsOn": ["^build", "generate:api"],
+      "env": ["API_INTERNAL_URL"]
+    },
+    "lint": {
+      "dependsOn": ["^build", "generate:api"]
+    },
+    "test": {
+      "dependsOn": ["^build", "generate:api"]
+    }
+  }
+}
