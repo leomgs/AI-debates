@@ -6,7 +6,7 @@ Cada ADR cubre: contexto, decisión, consecuencias, y alternativas consideradas.
 
 ## Registro
 
-- [`0001-auth-sesion-nest-mismo-origen.md`](0001-auth-sesion-nest-mismo-origen.md) — Auth del curador: sesión emitida y validada por Nest, dashboard Next como único origen público (2026-09-25, spec 003).
+- [`0001-auth-sesion-nest-mismo-origen.md`](0001-auth-sesion-nest-mismo-origen.md) — Auth del curador: sesión emitida y validada por Nest, dashboard Next como único origen público (2026-09-25, spec 003). Alcance de `src/proxy.ts` aclarado el 2026-09-26.
 - [`0002-voces-por-agente-e-idioma.md`](0002-voces-por-agente-e-idioma.md): voces TTS por agente, idioma y proveedor en la tabla `AgentVoice`. Reemplaza el shape Json de `decision-log.md` #20 (2026-09-25, spec 004).
 
 Las decisiones anteriores a este registro siguen documentadas directamente en `architecture.md`.

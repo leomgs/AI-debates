@@ -176,7 +176,11 @@ Requiere §3 y API-7 (§0). Criterio: ver `roadmap.md`, Fase 4. Fuera de esta fa
   - un `notFound()` en `/es/e/[id]` responde con `<html id="__next_error__">` sin `lang`, con "This page could not be found" en el HTML inicial, y el `not-found.tsx` del showcase recién aparece en el cliente;
   - un `locale` inválido (`/en`, `/xx`, `/en/e/[id]`) muestra la 404 por defecto de Next, en inglés, porque el `notFound()` sale del layout raíz, que no tiene boundary propio.
 
-  En F4, `/es/e/[id]` va a devolver 404 de verdad para los episodios no publicados, así que la 404 tiene que salir bien en el HTML inicial: en español, con `lang="es"` y sin controles del panel. Opciones a evaluar: resolver el episodio antes del render (por ejemplo, con un `generateMetadata` o un fetch que corte antes del stream), o que `proxy.ts` mande los `locale` inválidos a la ruta de `global-not-found`. Si F4 vuelve a prerenderizar el showcase por el caché de AC 3.72, depende de que la canonicalización de mayúsculas de `proxy.ts` siga activa
+  En F4, `/es/e/[id]` va a devolver 404 de verdad para los episodios no publicados, así que la 404 tiene que salir bien en el HTML inicial: en español, con `lang="es"` y sin controles del panel. Son dos casos distintos (ADR 0001, "Aclaración: alcance de `src/proxy.ts`"):
+  - episodio inexistente o no publicado en `/es/e/[id]`: necesita datos, así que sale obligatoriamente del render, resolviendo el episodio antes del stream (por ejemplo, con un `generateMetadata` o un fetch que corte antes). El proxy no puede resolverlo;
+  - `locale` inválido (`/en`, `/xx`, `/en/e/[id]`): se puede resolver en el render o desde `proxy.ts`, reescribiendo contra `SHOWCASE_LOCALES` hacia `global-not-found`. Antes, spike: verificar que en 16.3.6 un `NextResponse.rewrite` desde el proxy hacia un path sin ruta renderiza `global-not-found` con status 404 real.
+
+  Si F4 vuelve a prerenderizar el showcase por el caché de AC 3.72, depende de que la canonicalización de mayúsculas de `proxy.ts` siga activa
 - [ ] Título y transcripción en el HTML inicial + metadatos por episodio (AC 3.70)
 - [ ] Caché del HTML y de respuestas con `audioUrl` acotada al TTL; renovación como en AC 3.59 (AC 3.72)
 - [ ] Layout usable a 360 px (AC 3.76)
