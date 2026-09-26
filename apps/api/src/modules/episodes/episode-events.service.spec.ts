@@ -3,8 +3,18 @@ import { EpisodeEventsService, SSE_HEARTBEAT_INTERVAL_MS } from "./episode-event
 describe("EpisodeEventsService", () => {
   let service: EpisodeEventsService;
 
+  // Fake timers en todo el archivo (review F2-1): con begin() + subscribe,
+  // stream() programa el interval del heartbeat, y los tests que no
+  // completan la corrida dejaban 3 setInterval reales vivos. Jest terminaba
+  // con "A worker process has failed to exit gracefully".
   beforeEach(() => {
+    jest.useFakeTimers();
     service = new EpisodeEventsService();
+  });
+
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
   });
 
   it("emitir sin suscriptor no rompe", () => {
@@ -107,9 +117,6 @@ describe("EpisodeEventsService", () => {
   });
 
   describe("heartbeat (API-13)", () => {
-    beforeEach(() => jest.useFakeTimers());
-    afterEach(() => jest.useRealTimers());
-
     it("emite un heartbeat cada 15 s mientras el pipeline está activo, mezclado con los eventos de negocio", () => {
       service.begin("ep-1");
       const received: Array<{ type: string }> = [];
