@@ -16,7 +16,8 @@
 // Corre como dependencia de toda tarea `build` de Turborepo
 // (`//#check:boundaries` en turbo.json), así que `pnpm build` falla si hay
 // una violación. También se puede correr suelto con `pnpm check:boundaries`.
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -117,22 +118,32 @@ function matchesForbidden(specifier, forbidden) {
 // Alias de `compilerOptions.paths` del tsconfig del paquete (por ejemplo
 // "@/*" → "./src/*" en el dashboard). Se expanden antes del chequeo de
 // relativos: "@/../../api/src/x" es un import relativo disfrazado.
+//
+// El tsconfig se lee con la API de TypeScript, no con JSON.parse ni con
+// regex: admite comentarios y comas finales (un regex de comentarios se come
+// el "/*" de "@/*") y resuelve `extends`, así que también cuentan los alias
+// heredados. `typescript` se resuelve desde el propio paquete (todos lo
+// tienen como devDependency): el script no suma dependencias en la raíz.
 function readPathAliases(pkgDir) {
-  let raw;
+  const configPath = join(pkgDir, "tsconfig.json");
+  if (!existsSync(configPath)) return [];
+
+  let ts;
   try {
-    raw = readFileSync(join(pkgDir, "tsconfig.json"), "utf-8");
+    ts = createRequire(join(pkgDir, "package.json"))("typescript");
   } catch {
-    return [];
+    throw new Error(
+      `${relative(ROOT, pkgDir)} tiene tsconfig.json pero no resuelve "typescript": sin él no se pueden leer sus alias.`,
+    );
   }
-  let tsconfig;
-  try {
-    tsconfig = JSON.parse(raw);
-  } catch {
-    // tsconfig admite comentarios y comas finales.
-    tsconfig = JSON.parse(raw.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"));
+  const { config, error } = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (error) {
+    throw new Error(`${relative(ROOT, configPath)}: ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`);
   }
-  const options = tsconfig.compilerOptions ?? {};
-  const baseDir = resolve(pkgDir, options.baseUrl ?? ".");
+  const { options } = ts.parseJsonConfigFileContent(config, ts.sys, pkgDir, undefined, configPath);
+  // Sin baseUrl, TypeScript resuelve `paths` contra el tsconfig que los
+  // declara (pathsBasePath), que con `extends` puede ser otro archivo.
+  const baseDir = options.baseUrl ?? options.pathsBasePath ?? pkgDir;
   return Object.entries(options.paths ?? {}).flatMap(([pattern, targets]) => {
     const [target] = targets;
     if (!target) return [];
