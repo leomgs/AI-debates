@@ -74,12 +74,19 @@ export class EpisodesService {
     }));
   }
 
+  // pipelineActive se lee ANTES de la query, no después (review del bloque
+  // F2-1). Si la corrida termina mientras la query está en vuelo, leerlo
+  // después daba {status: DEBATING, pipelineActive: false}: el estado viejo
+  // con el flag nuevo, que la UI muestra como "trabado" (AC 3.39) sin volver
+  // a mirar. Leído antes, lo peor que puede pasar es {DEBATING, true} con el
+  // pipeline ya terminado: la UI abre el SSE, que cierra enseguida, y refresca.
   async getEpisodeDetail(id: string): Promise<EpisodeDetailResponse> {
+    const pipelineActive = this.events.isPipelineActive(id);
     const episode = await this.prisma.episode.findUniqueOrThrow({
       where: { id },
       include: EPISODE_DETAIL_INCLUDE,
     });
-    return mapEpisodeDetail(episode, { pipelineActive: this.events.isPipelineActive(id) });
+    return mapEpisodeDetail(episode, { pipelineActive });
   }
 
   // Feature 7 (features.md, P0) — GET /episodes/:id/manifest. Orquesta 3

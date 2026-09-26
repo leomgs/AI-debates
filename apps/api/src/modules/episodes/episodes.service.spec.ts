@@ -240,6 +240,22 @@ describe("EpisodesService", () => {
       expect((await service.getEpisodeDetail(EPISODE_ID)).pipelineActive).toBe(false);
     });
 
+    // Review F2-1: si la corrida termina mientras la query está en vuelo, el
+    // flag tiene que ser el de antes de leer la fila. Si no, sale el estado
+    // viejo (DEBATING) con pipelineActive=false y la UI lo muestra trabado.
+    it("lee pipelineActive antes de la query: si la corrida termina durante la lectura, no sale el estado viejo con false", async () => {
+      events.begin(EPISODE_ID);
+      prisma.episode.findUniqueOrThrow.mockImplementation(async () => {
+        events.complete(EPISODE_ID); // la corrida termina con la query en vuelo
+        return detailRow(); // la fila que leyó la query todavía dice DEBATING
+      });
+
+      const detail = await service.getEpisodeDetail(EPISODE_ID);
+
+      expect(detail.status).toBe("DEBATING");
+      expect(detail.pipelineActive).toBe(true);
+    });
+
     it("pipelineActive es por episodio: una corrida de otro episodio no cuenta", async () => {
       prisma.episode.findUniqueOrThrow.mockResolvedValue(detailRow());
       events.begin("otro-episodio");
