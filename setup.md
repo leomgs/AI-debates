@@ -100,6 +100,10 @@ Si no se cumplen, `req.ip` es la IP de Next para todos o un valor que controla e
 
 ## 4. Correr el proyecto
 
+Desde la raíz, `pnpm dev` levanta la API (`nest start --watch`, puerto 3000) y el dashboard (`next dev`, puerto 3001) juntos vía Turborepo. El dashboard se abre en `http://localhost:3001` y llega a la API por el rewrite `/api`. Para uno solo: `pnpm --filter @ai-trend-debates/api dev` o `pnpm --filter @ai-trend-debates/dashboard dev`.
+
+Dentro de `apps/api`:
+
 ```bash
 npm run start:dev   # dev con watch
 npm run test        # unit
