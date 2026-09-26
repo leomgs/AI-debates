@@ -3,8 +3,9 @@ import { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { ZodValidationException } from "nestjs-zod";
-import { InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
-import { SequenceIndexOutOfRangeError } from "../../modules/tts/tts.errors";
+import { BudgetExceededError, InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
+import { SequenceIndexOutOfRangeError, TtsProviderUnavailableError } from "../../modules/tts/tts.errors";
+import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
 import { ManifestNotReadyError } from "../../modules/render/render.errors";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
 
@@ -57,6 +58,29 @@ export class HttpErrorFilter implements ExceptionFilter {
     // datos, no un payload inválido (mismo status class que INVALID_STATE_TRANSITION).
     if (exception instanceof ManifestNotReadyError) {
       return { status: 409, code: "MANIFEST_NOT_READY", message: exception.message };
+    }
+
+    // API-10b (spec 003, AC 3.50/3.62/3.85): las acciones sincrónicas que
+    // llaman a un proveedor (regenerate, regenerate-verdict,
+    // regenerate-audio) no pasan por handlePipelineError del orquestador,
+    // así que estos errores llegaban acá como 500. Presupuesto del episodio
+    // agotado: conflicto con el estado de los datos (en PENDING_REVIEW o
+    // READY_FOR_RENDER no hay forma de subir los límites), mismo `code` que
+    // el CheckpointReason equivalente.
+    if (exception instanceof BudgetExceededError) {
+      return { status: 409, code: "USAGE_LIMIT_EXCEEDED", message: exception.message };
+    }
+
+    // Mismo conjunto que el orquestador mapea a PROVIDER_QUOTA_EXCEEDED
+    // (episode-orchestrator.service.ts, handlePipelineError): cuota diaria
+    // del LLM, espera del rate limiter por encima del tope y TTS caído. Es
+    // una indisponibilidad temporal del proveedor, no un bug: 503.
+    if (
+      exception instanceof DailyQuotaExceededError ||
+      exception instanceof RateLimitWaitExceededError ||
+      exception instanceof TtsProviderUnavailableError
+    ) {
+      return { status: 503, code: "PROVIDER_QUOTA_EXCEEDED", message: exception.message };
     }
 
     // API-8 (spec 003, AC 3.2/3.8) — login rechazado. La falta de sesión en

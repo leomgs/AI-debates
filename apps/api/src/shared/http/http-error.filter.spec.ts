@@ -1,6 +1,9 @@
 import type { ArgumentsHost } from "@nestjs/common";
 import { UnauthorizedException } from "@nestjs/common";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
+import { BudgetExceededError } from "../../modules/episodes/episodes.errors";
+import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
+import { TtsProviderUnavailableError } from "../../modules/tts/tts.errors";
 import { HttpErrorFilter } from "./http-error.filter";
 
 function run(exception: unknown) {
@@ -37,5 +40,31 @@ describe("HttpErrorFilter — errores de auth (API-8)", () => {
     expect(res.status).toHaveBeenCalledWith(429);
     expect(res.setHeader).toHaveBeenCalledWith("Retry-After", "1");
     expect(res.json).toHaveBeenCalledWith({ error: { code: "LOGIN_BUSY", message: expect.stringMatching(/en curso/) } });
+  });
+});
+
+describe("HttpErrorFilter — errores de proveedor y presupuesto (API-10b)", () => {
+  it("presupuesto del episodio agotado: 409 USAGE_LIMIT_EXCEEDED", () => {
+    const res = run(new BudgetExceededError("USAGE_LIMIT_EXCEEDED", "llmCalls", 25));
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({
+      error: { code: "USAGE_LIMIT_EXCEEDED", message: "Se alcanzó el límite de llmCalls (25) configurado para este episodio." },
+    });
+  });
+
+  it.each([
+    ["cuota diaria del LLM", new DailyQuotaExceededError("GOOGLE", 500)],
+    ["espera del rate limiter por encima del tope", new RateLimitWaitExceededError("GOOGLE", 120_000, 90_000)],
+    ["TTS no disponible", new TtsProviderUnavailableError("LOCAL", new Error("boom"))],
+  ])("%s: 503 PROVIDER_QUOTA_EXCEEDED", (_label, error) => {
+    const res = run(error);
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith({ error: { code: "PROVIDER_QUOTA_EXCEEDED", message: error.message } });
+  });
+
+  it("cualquier otro error sigue siendo 500 INTERNAL_ERROR", () => {
+    const res = run(new Error("el juez devolvió algo inválido"));
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ error: { code: "INTERNAL_ERROR", message: "el juez devolvió algo inválido" } });
   });
 });
