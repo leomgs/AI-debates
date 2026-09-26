@@ -7,11 +7,11 @@ Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revis
 ## Dónde retomar (última sesión: 2026-09-26 — bloque F2-2: API-10b, API-14, API-15 y API-19)
 
 **ESTADO AL CORTAR LA SESIÓN (2026-09-26)**. Leer esto primero.
-- **Rama sin mergear**: `feat/backend-bloque-f2-2`, sobre `master` (`81fe20a`). Ya pasó la revisión de `code-reviewer` y sus correcciones están aplicadas: `stale` anclado al momento de la foto del juez con `>=`, `$transaction` sin aislamiento documentado en `coding-rules.md` §2, `BrokenCircuitError` → 503 y el e2e de TTS por `AUDIO_PROVIDER`. Verificado: build en verde, 317 unit, 41 e2e y `check:boundaries` OK. **Falta el merge.**
+- **Bloque F2-2 mergeado** a `master` (fast-forward `81fe20a..754b5cf`, 2026-09-26). Pasó la revisión de `code-reviewer` y sus correcciones están aplicadas: `stale` anclado al momento de la foto del juez con `>=`, `$transaction` sin aislamiento documentado en `coding-rules.md` §2, `BrokenCircuitError` → 503 y el e2e de TTS por `AUDIO_PROVIDER`. Verificado: build en verde, 317 unit, 41 e2e y `check:boundaries` OK (re-verificado sobre la rama antes del merge).
 - [x] **Ventana de falso negativo de `stale`: se decidió la opción (b) y se corrigió en la misma rama, con un segundo review aplicado** (entrada 35 de `decision-log.md`, "Ventana de `stale` cerrada"). Había dos casos. `editByHuman` y `reviseDraft` archivaban en `ArgumentHistory` **antes** de actualizar el contenido: un juez que tomaba su foto (`judgedFrom`) entre las dos queries evaluaba el texto viejo con `stale: false`. Y `regenerate` sobre un argumento no `OFFICIAL` (por ejemplo, `REJECTED`) hacía `reviseDraft` + `promoteToOfficial` por separado: un juez entre el historial y el promote no veía el argumento. Ahora los tres caminos (`reviseDraft`, `editByHuman` y el nuevo `regenerateArgument`, que promueve a `OFFICIAL` en el mismo update) leen la versión previa, actualizan y **después** archivan, dentro de una `$transaction` mínima. El loop de enmienda sigue con `reviseDraft`, sin promover. Hay tests unit del orden y de integración del intercalado para `edit` y `regenerate`, sin sleeps. Queda aceptado el mismo trade-off de `replaceVerdict`: la transacción no aísla (`coding-rules.md` §2).
-- [ ] Hacer el merge de `feat/backend-bloque-f2-2`.
-- [ ] Push: `master` local tiene muchos commits sin pushear (specs 003/004, ADRs, API-8, bloque F2-1). No se pusheó nada en esta tanda de sesiones.
-- **Después del merge, backend para cerrar la F2** (sección 13, spec 004):
+- [x] Merge fast-forward de `feat/backend-bloque-f2-2` a `master`, tras el re-review de `code-reviewer`.
+- [ ] Push: `master` local tiene 18 commits sin pushear respecto de `origin/master` (bloque F2-2 y lo que venía antes).
+- **Siguiente: backend para cerrar la F2** (sección 13, spec 004):
   - paso 1: elegir 5 voces `en_US` y la asignación `PT` con repetición, más el spike de tono;
   - paso 4: migración de idioma (`AgentVoice`, `Episode.language`, `AudioAsset.voiceId`), que es la tercera de la cola e incluye los índices de `stale` anotados en §13.4;
   - pasos 6 y 7: TTS por idioma y `language` en la API. Cierran API-17 y la parte 2 de API-1.
