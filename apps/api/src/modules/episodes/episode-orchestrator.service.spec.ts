@@ -282,6 +282,53 @@ describe("EpisodeOrchestratorService", () => {
     });
   });
 
+  // Review F2-1 (spec 004, paso 5a): el contexto se reconstruye en cada turno
+  // y para el juez, desde EpisodeContextService. Si alguien lo cacheara o
+  // armara uno a mano, officialArguments quedaría viejo (o, con la spec 004,
+  // sin idioma), sin que falle ningún otro test.
+  describe("contexto de los agentes (EpisodeContextService)", () => {
+    it("pide un contexto nuevo por turno y otro para el juez, y se los pasa tal cual a argue() y judge()", async () => {
+      researchService.research.mockResolvedValue({ topic: "x", facts: [] });
+      prisma.evidenceFact.count.mockResolvedValue(0);
+      prisma.episode.findUniqueOrThrow
+        .mockResolvedValueOnce(episodeRow("CREATED"))
+        .mockResolvedValueOnce(episodeRow("RESEARCHING"))
+        .mockResolvedValueOnce(episodeRow("READY_FOR_DEBATE"))
+        .mockResolvedValueOnce(episodeRow("DEBATING"))
+        .mockResolvedValueOnce(episodeRow("JUDGING"));
+      const contextForTurn1 = { topic: "turno 1", evidenceBase: { topic: "t", facts: [] }, officialArguments: [], participants: [] };
+      const contextForTurn2 = { ...contextForTurn1, topic: "turno 2" };
+      const contextForJudge = { ...contextForTurn1, topic: "juez" };
+      contextService.build
+        .mockResolvedValueOnce(contextForTurn1)
+        .mockResolvedValueOnce(contextForTurn2)
+        .mockResolvedValueOnce(contextForJudge);
+
+      await service.runPipeline(EPISODE_ID);
+
+      // 1 opening round x 2 debatientes + 1 veredicto
+      expect(contextService.build).toHaveBeenCalledTimes(3);
+      for (const call of contextService.build.mock.calls) expect(call).toEqual([EPISODE_ID]);
+      // El orden de turnos se sortea (resolveTurnOrder): se ordenan las
+      // llamadas a argue() de los dos agentes por orden real de invocación.
+      const agentStubs = agentsService.createDebateAgent.mock.results.map((r) => r.value as ReturnType<typeof makeAgentStub>);
+      const argueContexts = agentStubs
+        .flatMap((stub) =>
+          stub.argue.mock.calls.map((call: unknown[], i: number) => ({
+            context: call[0],
+            order: stub.argue.mock.invocationCallOrder[i],
+          }))
+        )
+        .sort((a, b) => a.order - b.order)
+        .map((c) => c.context);
+      expect(argueContexts).toHaveLength(2);
+      expect(argueContexts[0]).toBe(contextForTurn1);
+      expect(argueContexts[1]).toBe(contextForTurn2);
+      expect(agentsService.judge).toHaveBeenCalledWith(contextForJudge, "GOOGLE");
+      expect(agentsService.judge.mock.calls[0][0]).toBe(contextForJudge);
+    });
+  });
+
   describe("processDraft (loop de enmienda, §7.3)", () => {
     it("un claim falla una vez, se llama amend, la segunda vuelta pasa -> OFFICIAL", async () => {
       const agentInstance = makeAgentStub();
