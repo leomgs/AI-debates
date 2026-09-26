@@ -4,6 +4,7 @@ import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } fr
 import { BudgetExceededError } from "../../modules/episodes/episodes.errors";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
 import { TtsProviderUnavailableError } from "../../modules/tts/tts.errors";
+import { BrokenCircuitError } from "cockatiel";
 import { HttpErrorFilter } from "./http-error.filter";
 
 function run(exception: unknown) {
@@ -60,6 +61,18 @@ describe("HttpErrorFilter — errores de proveedor y presupuesto (API-10b)", () 
     const res = run(error);
     expect(res.status).toHaveBeenCalledWith(503);
     expect(res.json).toHaveBeenCalledWith({ error: { code: "PROVIDER_QUOTA_EXCEEDED", message: error.message } });
+  });
+
+  // Review F2-2: circuito abierto de Cockatiel → 503 con mensaje propio en
+  // castellano, no el de la librería.
+  it("circuit breaker abierto: 503 PROVIDER_QUOTA_EXCEEDED con mensaje en castellano", () => {
+    const error = new BrokenCircuitError();
+    const res = run(error);
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith({
+      error: { code: "PROVIDER_QUOTA_EXCEEDED", message: expect.stringMatching(/Reintentá más tarde/) },
+    });
+    expect(res.json.mock.calls[0][0].error.message).not.toBe(error.message);
   });
 
   it("cualquier otro error sigue siendo 500 INTERNAL_ERROR", () => {

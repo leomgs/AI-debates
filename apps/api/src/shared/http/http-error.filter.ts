@@ -3,6 +3,7 @@ import { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { ZodValidationException } from "nestjs-zod";
+import { BrokenCircuitError } from "cockatiel";
 import { BudgetExceededError, InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
 import { SequenceIndexOutOfRangeError, TtsProviderUnavailableError } from "../../modules/tts/tts.errors";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
@@ -81,6 +82,20 @@ export class HttpErrorFilter implements ExceptionFilter {
       exception instanceof TtsProviderUnavailableError
     ) {
       return { status: 503, code: "PROVIDER_QUOTA_EXCEEDED", message: exception.message };
+    }
+
+    // Review F2-2: el circuit breaker de Cockatiel (una policy por módulo,
+    // coding-rules.md §4) quedó abierto tras fallos consecutivos del
+    // proveedor y rechaza la llamada sin intentarla. Es la misma situación
+    // para el curador (el proveedor no está disponible, reintentar más tarde)
+    // y sin esto salía un 500 con el mensaje en inglés de la librería. Solo
+    // cambia la respuesta HTTP: el orquestador no se toca.
+    if (exception instanceof BrokenCircuitError) {
+      return {
+        status: 503,
+        code: "PROVIDER_QUOTA_EXCEEDED",
+        message: "El proveedor de IA falló varias veces seguidas y se pausaron las llamadas por unos segundos. Reintentá más tarde.",
+      };
     }
 
     // API-8 (spec 003, AC 3.2/3.8) — login rechazado. La falta de sesión en
