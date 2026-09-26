@@ -105,14 +105,26 @@ describe('Episodes (e2e)', () => {
       }
     });
 
-    it('sin pipeline activo, el SSE responde y cierra enseguida sin eventos', async () => {
+    // Decisión del usuario (review F2-1): SSE explícito según el caso.
+    it('episodio existente sin pipeline activo: 204, sin text/event-stream y body vacío', async () => {
       const { episode } = await seedEpisode(prisma, 'DEBATING');
 
       const res = await openSse(baseUrl, `/episodes/${episode.id}/events`, cookie);
       const body = await readAll(res);
 
-      expect(res.statusCode).toBe(200);
-      expect(body).not.toMatch(/event:/);
+      expect(res.statusCode).toBe(204);
+      expect(res.headers['content-type'] ?? '').not.toMatch(/text\/event-stream/);
+      expect(body).toBe('');
+    });
+
+    it('episodio inexistente: 404 NOT_FOUND con el envelope de error, sin abrir el stream', async () => {
+      const res = await openSse(baseUrl, '/episodes/00000000-0000-4000-8000-000000000000/events', cookie);
+      const body = await readAll(res);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.headers['content-type']).toMatch(/application\/json/);
+      expect(res.headers['content-type']).not.toMatch(/text\/event-stream/);
+      expect(JSON.parse(body)).toEqual({ error: { code: 'NOT_FOUND', message: expect.any(String) } });
     });
 
     it('con pipeline activo, el SSE entrega los eventos y cierra cuando la corrida termina', async () => {

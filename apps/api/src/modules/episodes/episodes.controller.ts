@@ -1,10 +1,11 @@
-import { Body, Controller, Get, MessageEvent, Param, Post, Query, Sse } from "@nestjs/common";
+import { Body, Controller, Get, MessageEvent, Param, Post, Query, Res, Sse } from "@nestjs/common";
 import { ApiExtraModels, ApiOperation, ApiResponse, ApiTags, getSchemaPath } from "@nestjs/swagger";
 import { ZodResponse, ZodValidationPipe } from "nestjs-zod";
-import { Observable } from "rxjs";
+import { EMPTY, Observable } from "rxjs";
+import type { Response } from "express";
+import { ErrorResponseDto } from "../../shared/http/error-response.dto";
 import { EpisodesService } from "./episodes.service";
 import { EpisodeActionsService } from "./episode-actions.service";
-import { EpisodeEventsService } from "./episode-events.service";
 import { TtsService } from "../tts/tts.service";
 import { CreateEpisodeDto } from "./dto/create-episode.dto";
 import { ListEpisodesQueryDto } from "./dto/list-episodes-query.dto";
@@ -54,7 +55,6 @@ export class EpisodesController {
   constructor(
     private readonly episodes: EpisodesService,
     private readonly actions: EpisodeActionsService,
-    private readonly events: EpisodeEventsService,
     private readonly tts: TtsService
   ) {}
 
@@ -140,6 +140,13 @@ export class EpisodesController {
   // must-revalidate, max-age=0, no-transform", más X-Accel-Buffering: no), y
   // no se puede pisar desde acá: los headers propios se aplican antes que
   // los de Nest. Lo cubre un test e2e (test/episodes.e2e-spec.ts).
+  //
+  // 204/404 (decisión del usuario tras el review F2-1): el handler es async
+  // y verifica que el episodio exista antes de devolver el stream (un P2025
+  // llega a HttpErrorFilter como 404, antes de abrir el SSE). Sin pipeline
+  // activo responde 204: Nest toma el status de `res.statusCode` al armar la
+  // respuesta SSE, y con EMPTY el stream termina sin escribir las cabeceras
+  // de text/event-stream. Para EventSource un 204 es "no reconectar".
   @Sse(":id/events")
   @ApiOperation({ operationId: "streamEpisodeEvents" })
   @ApiExtraModels(...SSE_EVENT_DTOS)
@@ -147,15 +154,25 @@ export class EpisodesController {
     status: 200,
     description:
       "Server-Sent Events (Feature 8) — cada `event:` corresponde a uno de los 7 schemas listados. " +
-      "Si no hay una ejecución del pipeline en curso (`pipelineActive: false` en el detalle), el stream cierra enseguida sin eventos. " +
-      "Mientras hay una, llega un `heartbeat` cada 15 s, que no es un evento de negocio.",
+      "Solo mientras hay una ejecución del pipeline en curso (`pipelineActive: true` en el detalle): llega un `heartbeat` cada 15 s, " +
+      "que no es un evento de negocio, y el stream cierra cuando la ejecución termina.",
     content: {
       "text/event-stream": {
         schema: { oneOf: SSE_EVENT_DTOS.map((dto) => ({ $ref: getSchemaPath(dto) })) },
       },
     },
   })
-  streamEvents(@Param("id") id: string): Observable<MessageEvent> {
-    return this.events.stream(id);
+  @ApiResponse({
+    status: 204,
+    description: "El episodio existe pero no hay una ejecución del pipeline en curso: sin body y sin stream (no hay nada que escuchar).",
+  })
+  @ApiResponse({ status: 404, type: ErrorResponseDto, description: "`NOT_FOUND`: el episodio no existe." })
+  async streamEvents(@Param("id") id: string, @Res({ passthrough: true }) res: Response): Promise<Observable<MessageEvent>> {
+    const stream = await this.episodes.streamEpisodeEvents(id);
+    if (!stream) {
+      res.status(204);
+      return EMPTY;
+    }
+    return stream;
   }
 }

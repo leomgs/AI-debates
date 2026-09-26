@@ -264,6 +264,40 @@ describe("EpisodesService", () => {
     });
   });
 
+  // Decisión del usuario (review F2-1): el controller responde 204 con null
+  // y 404 con el P2025 de la verificación de existencia.
+  describe("streamEpisodeEvents", () => {
+    it("verifica que el episodio exista antes de abrir nada (P2025 → 404 lo mapea el filter)", async () => {
+      const notFound = new Error("No record was found");
+      prisma.episode.findUniqueOrThrow.mockRejectedValue(notFound);
+      events.begin(EPISODE_ID);
+
+      await expect(service.streamEpisodeEvents(EPISODE_ID)).rejects.toBe(notFound);
+      expect(prisma.episode.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: EPISODE_ID }, select: { id: true } });
+      events.complete(EPISODE_ID);
+    });
+
+    it("existe sin pipeline activo → null (el controller responde 204)", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ id: EPISODE_ID });
+
+      await expect(service.streamEpisodeEvents(EPISODE_ID)).resolves.toBeNull();
+    });
+
+    it("con pipeline activo → el stream de EpisodeEventsService", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ id: EPISODE_ID });
+      events.begin(EPISODE_ID);
+
+      const stream = await service.streamEpisodeEvents(EPISODE_ID);
+      const received: unknown[] = [];
+      const subscription = stream!.subscribe((e) => received.push(e));
+      events.emit(EPISODE_ID, "research.started");
+
+      expect(received).toEqual([{ type: "research.started", data: {} }]);
+      subscription.unsubscribe();
+      events.complete(EPISODE_ID);
+    });
+  });
+
   describe("getManifest (Feature 7)", () => {
     it("arma el input de RenderService desde Prisma+TtsService y resuelve audioUrl por segmento (AC 6.1)", async () => {
       prisma.episode.findUniqueOrThrow.mockResolvedValue({

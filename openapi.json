@@ -311,7 +311,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Server-Sent Events (Feature 8) — cada `event:` corresponde a uno de los 7 schemas listados. Si no hay una ejecución del pipeline en curso (`pipelineActive: false` en el detalle), el stream cierra enseguida sin eventos. Mientras hay una, llega un `heartbeat` cada 15 s, que no es un evento de negocio.",
+            "description": "Server-Sent Events (Feature 8) — cada `event:` corresponde a uno de los 7 schemas listados. Solo mientras hay una ejecución del pipeline en curso (`pipelineActive: true` en el detalle): llega un `heartbeat` cada 15 s, que no es un evento de negocio, y el stream cierra cuando la ejecución termina.",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -342,8 +342,21 @@
               }
             }
           },
+          "204": {
+            "description": "El episodio existe pero no hay una ejecución del pipeline en curso: sin body y sin stream (no hay nada que escuchar)."
+          },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1579,6 +1592,29 @@
           "type"
         ]
       },
+      "ErrorResponseDto": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
       "NotificationDto_Output": {
         "type": "object",
         "properties": {
@@ -1680,29 +1716,6 @@
           "expiresAt"
         ],
         "additionalProperties": false
-      },
-      "ErrorResponseDto": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "object",
-            "properties": {
-              "code": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "code",
-              "message"
-            ]
-          }
-        },
-        "required": [
-          "error"
-        ]
       }
     }
   }

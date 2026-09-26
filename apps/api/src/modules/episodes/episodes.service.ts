@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, MessageEvent } from "@nestjs/common";
+import type { Observable } from "rxjs";
 import { EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
@@ -79,7 +80,7 @@ export class EpisodesService {
   // después daba {status: DEBATING, pipelineActive: false}: el estado viejo
   // con el flag nuevo, que la UI muestra como "trabado" (AC 3.39) sin volver
   // a mirar. Leído antes, lo peor que puede pasar es {DEBATING, true} con el
-  // pipeline ya terminado: la UI abre el SSE, que cierra enseguida, y refresca.
+  // pipeline ya terminado: la UI abre el SSE, recibe 204 y refresca.
   async getEpisodeDetail(id: string): Promise<EpisodeDetailResponse> {
     const pipelineActive = this.events.isPipelineActive(id);
     const episode = await this.prisma.episode.findUniqueOrThrow({
@@ -87,6 +88,18 @@ export class EpisodesService {
       include: EPISODE_DETAIL_INCLUDE,
     });
     return mapEpisodeDetail(episode, { pipelineActive });
+  }
+
+  // GET /episodes/:id/events (decisión del usuario tras el review F2-1):
+  // - episodio inexistente → P2025 → 404 NOT_FOUND (HttpErrorFilter),
+  //   antes de abrir ningún stream;
+  // - existe pero sin pipeline activo → null, que el controller responde
+  //   como 204 sin stream (no hay nada que escuchar);
+  // - con pipeline activo → el stream de EpisodeEventsService.
+  async streamEpisodeEvents(id: string): Promise<Observable<MessageEvent> | null> {
+    await this.prisma.episode.findUniqueOrThrow({ where: { id }, select: { id: true } });
+    if (!this.events.isPipelineActive(id)) return null;
+    return this.events.stream(id);
   }
 
   // Feature 7 (features.md, P0) — GET /episodes/:id/manifest. Orquesta 3
