@@ -17,7 +17,8 @@
 // (`//#check:boundaries` en turbo.json), así que `pnpm build` falla si hay
 // una violación. También se puede correr suelto con `pnpm check:boundaries`.
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -25,8 +26,9 @@ const SKIPPED_DIRS = new Set(["node_modules", "dist", ".next", ".turbo", "out", 
 const SOURCE_FILE_RE = /\.(?:[cm]?[jt]sx?)$/;
 
 // Cada regla: qué directorios son "paquetes" a revisar y qué specifiers
-// por nombre están prohibidos adentro. Los imports relativos que salen del
-// propio paquete están prohibidos en todas.
+// por nombre están prohibidos adentro. En todas está prohibido apuntar fuera
+// del propio paquete por path: relativo, absoluto, `file:`, alias de
+// tsconfig (`@/..`) o `/// <reference path>`.
 const RULES = [
   {
     label: "packages/*",
@@ -76,26 +78,35 @@ function walk(dir) {
   return files;
 }
 
-// Capturamos el specifier crudo de todas las formas de import que resuelven
-// un módulo, sin distinguir sintaxis:
+// Capturamos el specifier crudo de todas las formas que resuelven un módulo
+// o un archivo, sin distinguir sintaxis:
 //   import x from "y" / import type { X } from "y" / export { x } from "y"
 //   import "y"                (import solo por efectos)
-//   import("y")               (import dinámico)
+//   import("y")               (import dinámico, con comentarios en el medio:
+//                              `import(/* webpackChunkName: "x" */ "y")`)
 //   require("y")
+//   /// <reference path="y" />  y  /// <reference types="y" />
 // No es un parser: un comentario con la misma forma también cuenta. Es
 // preferible un falso positivo (se ve y se corrige) a dejar pasar un import.
-const IMPORT_RES = [
-  /\bfrom\s*["'`]([^"'`]+)["'`]/g,
-  /\bimport\s*["'`]([^"'`]+)["'`]/g,
-  /\bimport\s*\(\s*["'`]([^"'`]+)["'`]/g,
-  /\brequire\s*\(\s*["'`]([^"'`]+)["'`]/g,
+const GAP = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*`; // espacios y comentarios
+const QUOTED = String.raw`["'\`]([^"'\`]+)["'\`]`;
+const MODULE_RES = [
+  new RegExp(String.raw`\bfrom${GAP}${QUOTED}`, "g"),
+  new RegExp(String.raw`\bimport${GAP}${QUOTED}`, "g"),
+  new RegExp(String.raw`\bimport${GAP}\(${GAP}${QUOTED}`, "g"),
+  new RegExp(String.raw`\brequire${GAP}\(${GAP}${QUOTED}`, "g"),
+  /\/\/\/\s*<reference\s+types\s*=\s*["']([^"']+)["']/g,
 ];
+// `path` de una directiva triple-slash es siempre relativo al archivo, aunque
+// no empiece con "." ("../../api/x.d.ts" o "x.d.ts").
+const REFERENCE_PATH_RE = /\/\/\/\s*<reference\s+path\s*=\s*["']([^"']+)["']/g;
 
 function extractSpecifiers(content) {
   const specifiers = [];
-  for (const re of IMPORT_RES) {
-    for (const match of content.matchAll(re)) specifiers.push(match[1]);
+  for (const re of MODULE_RES) {
+    for (const match of content.matchAll(re)) specifiers.push({ specifier: match[1], kind: "module" });
   }
+  for (const match of content.matchAll(REFERENCE_PATH_RE)) specifiers.push({ specifier: match[1], kind: "path" });
   return specifiers;
 }
 
@@ -103,27 +114,77 @@ function matchesForbidden(specifier, forbidden) {
   return forbidden.find((name) => specifier === name || specifier.startsWith(`${name}/`));
 }
 
+// Alias de `compilerOptions.paths` del tsconfig del paquete (por ejemplo
+// "@/*" → "./src/*" en el dashboard). Se expanden antes del chequeo de
+// relativos: "@/../../api/src/x" es un import relativo disfrazado.
+function readPathAliases(pkgDir) {
+  let raw;
+  try {
+    raw = readFileSync(join(pkgDir, "tsconfig.json"), "utf-8");
+  } catch {
+    return [];
+  }
+  let tsconfig;
+  try {
+    tsconfig = JSON.parse(raw);
+  } catch {
+    // tsconfig admite comentarios y comas finales.
+    tsconfig = JSON.parse(raw.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"));
+  }
+  const options = tsconfig.compilerOptions ?? {};
+  const baseDir = resolve(pkgDir, options.baseUrl ?? ".");
+  return Object.entries(options.paths ?? {}).flatMap(([pattern, targets]) => {
+    const [target] = targets;
+    if (!target) return [];
+    return pattern.endsWith("*") && target.endsWith("*")
+      ? [{ prefix: pattern.slice(0, -1), dir: resolve(baseDir, target.slice(0, -1)), wildcard: true }]
+      : [{ prefix: pattern, dir: resolve(baseDir, target), wildcard: false }];
+  });
+}
+
+// Devuelve el path en disco al que apunta el specifier, o null si es un
+// paquete por nombre (lo cubre `forbidden`).
+function resolveToPath(specifier, kind, file, aliases) {
+  const fromDir = join(file, "..");
+  if (kind === "path") return resolve(fromDir, specifier);
+  if (specifier.startsWith("file:")) {
+    try {
+      return fileURLToPath(specifier);
+    } catch {
+      return specifier;
+    }
+  }
+  if (specifier.startsWith(".") || isAbsolute(specifier)) return resolve(fromDir, specifier);
+  for (const alias of aliases) {
+    if (alias.wildcard && specifier.startsWith(alias.prefix)) {
+      return resolve(alias.dir, specifier.slice(alias.prefix.length));
+    }
+    if (!alias.wildcard && specifier === alias.prefix) return alias.dir;
+  }
+  return null;
+}
+
 function findViolations() {
   const violations = [];
   for (const rule of RULES) {
     for (const pkgDir of rule.packageDirs()) {
+      const aliases = readPathAliases(pkgDir);
       for (const file of walk(pkgDir)) {
         const content = readFileSync(file, "utf-8");
         const relFile = relative(ROOT, file);
 
-        for (const specifier of extractSpecifiers(content)) {
-          const forbiddenName = matchesForbidden(specifier, rule.forbidden);
-          if (forbiddenName) {
+        for (const { specifier, kind } of extractSpecifiers(content)) {
+          if (kind === "module" && matchesForbidden(specifier, rule.forbidden)) {
             violations.push(`${relFile}: importa "${specifier}" (${rule.reason})`);
             continue;
           }
-          if (specifier.startsWith(".")) {
-            const resolved = resolve(join(file, ".."), specifier);
-            const relResolved = relative(pkgDir, resolved);
-            // ".." al principio del path relativo resuelto = sale del paquete.
-            if (relResolved.startsWith("..")) {
-              violations.push(`${relFile}: import relativo "${specifier}" sale de su propio paquete (${rule.label})`);
-            }
+          const resolved = resolveToPath(specifier, kind, file, aliases);
+          if (resolved === null) continue;
+          const relResolved = relative(pkgDir, resolved);
+          // ".." al principio del path resuelto, o un path absoluto (otra
+          // unidad en Windows), = sale del paquete.
+          if (relResolved.startsWith("..") || isAbsolute(relResolved)) {
+            violations.push(`${relFile}: "${specifier}" apunta fuera de su propio paquete (${rule.label})`);
           }
         }
       }
@@ -139,5 +200,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  "check:boundaries OK — packages/ no importa nada de apps/*, apps/dashboard no importa apps/api y nadie cruza límites de paquete con paths relativos."
+  "check:boundaries OK — packages/ no importa nada de apps/*, apps/dashboard no importa apps/api y nadie apunta fuera de su paquete por path."
 );
