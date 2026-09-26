@@ -211,7 +211,7 @@ describe("EpisodesService", () => {
       expect(prisma.episode.findUniqueOrThrow).toHaveBeenCalledWith({
         where: { id: EPISODE_ID },
         include: expect.objectContaining({
-          participants: expect.objectContaining({ orderBy: { isJudge: "asc" } }),
+          participants: expect.objectContaining({ orderBy: [{ isJudge: "asc" }, { agentId: "asc" }] }),
           debate: expect.objectContaining({ include: expect.objectContaining({ topic: expect.anything() }) }),
         }),
       });

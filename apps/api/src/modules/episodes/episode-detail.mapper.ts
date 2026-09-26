@@ -10,9 +10,10 @@ import { CheckpointReasonSchema } from "./dto/checkpoint-reason.schema";
 export const EPISODE_DETAIL_INCLUDE = {
   usage: true,
   checkpoints: { orderBy: { createdAt: "asc" } },
-  // API-1: debatientes primero y el juez al final.
+  // API-1: debatientes primero y el juez al final; entre debatientes, por
+  // agentId, para que el orden sea estable entre llamadas.
   participants: {
-    orderBy: { isJudge: "asc" },
+    orderBy: [{ isJudge: "asc" }, { agentId: "asc" }],
     include: { agent: { select: { name: true, role: true } } },
   },
   debate: {
