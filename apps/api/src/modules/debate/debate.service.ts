@@ -52,43 +52,58 @@ export class DebateService {
   // status REJECTED, mismo origin) y se pisa el content con la versión
   // enmendada — el Argument sigue en DRAFT hasta que procesarBorrador lo
   // vuelva a evaluar.
-  //
-  // Orden a propósito (review F2-2, entrada 35): primero se pisa el content
-  // y DESPUÉS se archiva la versión previa, ya leída. El historial nace
-  // cuando el texto nuevo ya es visible, así que si el juez de
-  // regenerate-verdict leyó el texto viejo, su judgedFrom (tomado antes de
-  // leer) es ≤ createdAt del historial e isVerdictStale (gte) lo marca. Con
-  // el orden inverso quedaba una ventana entre las dos escrituras en la que
-  // el juez leía el texto viejo con judgedFrom > createdAt: stale: false.
-  //
-  // Transacción para no dejar un content nuevo sin su versión previa
-  // archivada si falla el create. Callback mínimo, como replaceVerdict:
-  // atomicidad sin aislamiento (coding-rules.md §2).
   async reviseDraft(argumentId: string, newContent: string): Promise<Argument> {
-    return this.prisma.$transaction(async (tx) => {
-      const previous = await tx.argument.findUniqueOrThrow({ where: { id: argumentId } });
-      const updated = await tx.argument.update({ where: { id: argumentId }, data: { content: newContent } });
-      await tx.argumentHistory.create({
-        data: { argumentId, content: previous.content, origin: previous.origin, status: ArgumentHistoryStatus.REJECTED },
-      });
-      return updated;
-    });
+    return this.replaceContent(argumentId, { content: newContent }, ArgumentHistoryStatus.REJECTED);
+  }
+
+  // Acción `regenerate` del curador (EpisodeActionsService): mismo archivo
+  // que reviseDraft (REJECTED, origin previo), pero el argumento queda
+  // OFFICIAL en el mismo update. Si se regenera uno que no era OFFICIAL
+  // (findArgumentInEpisode no filtra status), el juez no lo ve hasta la
+  // promoción: con reviseDraft + promoteToOfficial por separado, un
+  // judgedFrom entre el historial y el promote daba stale: false sin que
+  // el juez lo hubiera leído (review F2-2).
+  async regenerateArgument(argumentId: string, newContent: string): Promise<Argument> {
+    return this.replaceContent(
+      argumentId,
+      { content: newContent, status: ArgumentStatus.OFFICIAL },
+      ArgumentHistoryStatus.REJECTED
+    );
   }
 
   // Feature 5 — edición humana post-hoc (no un rechazo por fact-check):
   // archiva la versión anterior (ArgumentHistory con status SUPERSEDED, con
-  // SU origin original) y marca el argumento como HUMAN_EDITED. Mismo orden
-  // (update y después historial) y misma transacción que reviseDraft, por
-  // el mismo motivo.
+  // SU origin original) y marca el argumento como HUMAN_EDITED.
   async editByHuman(argumentId: string, newContent: string): Promise<Argument> {
+    return this.replaceContent(
+      argumentId,
+      { content: newContent, origin: ArgumentOrigin.HUMAN_EDITED },
+      ArgumentHistoryStatus.SUPERSEDED
+    );
+  }
+
+  // Orden a propósito (review F2-2, entrada 35): primero se pisa el
+  // Argument (content y, si corresponde, status/origin) y DESPUÉS se archiva
+  // la versión previa, ya leída. El historial nace cuando lo nuevo ya es
+  // visible, así que si el juez de regenerate-verdict leyó la versión
+  // vieja, su judgedFrom (tomado antes de leer) es ≤ createdAt del
+  // historial e isVerdictStale (gte) lo marca. Con el orden inverso quedaba
+  // una ventana entre las dos escrituras en la que el juez leía lo viejo
+  // con judgedFrom > createdAt: stale: false.
+  //
+  // Transacción para no dejar un content nuevo sin su versión previa
+  // archivada si falla el create. Callback mínimo, como replaceVerdict:
+  // atomicidad sin aislamiento (coding-rules.md §2).
+  private async replaceContent(
+    argumentId: string,
+    data: { content: string; status?: ArgumentStatus; origin?: ArgumentOrigin },
+    archivedAs: ArgumentHistoryStatus
+  ): Promise<Argument> {
     return this.prisma.$transaction(async (tx) => {
       const previous = await tx.argument.findUniqueOrThrow({ where: { id: argumentId } });
-      const updated = await tx.argument.update({
-        where: { id: argumentId },
-        data: { content: newContent, origin: ArgumentOrigin.HUMAN_EDITED },
-      });
+      const updated = await tx.argument.update({ where: { id: argumentId }, data });
       await tx.argumentHistory.create({
-        data: { argumentId, content: previous.content, origin: previous.origin, status: ArgumentHistoryStatus.SUPERSEDED },
+        data: { argumentId, content: previous.content, origin: previous.origin, status: archivedAs },
       });
       return updated;
     });
@@ -168,8 +183,9 @@ export class DebateService {
   // previa). Sin columna nueva. `gte`, no `gt` (review F2-2): un empate en
   // el mismo milisegundo cae del lado seguro. El historial del loop de
   // enmienda es anterior al veredicto (JUDGING va después de DEBATING).
-  // Que reviseDraft/editByHuman archiven DESPUÉS de pisar el content es lo
-  // que garantiza que un juez que leyó el texto viejo no quede sin marcar.
+  // Que reviseDraft/regenerateArgument/editByHuman archiven DESPUÉS de
+  // pisar el Argument (replaceContent) es lo que garantiza que un juez que
+  // leyó la versión vieja no quede sin marcar.
   async isVerdictStale(debateId: string, verdictCreatedAt: Date): Promise<boolean> {
     const newer = await this.prisma.argumentHistory.count({
       where: { createdAt: { gte: verdictCreatedAt }, argument: { debateRound: { debateId } } },

@@ -132,12 +132,50 @@ describe('DebateService', () => {
       expect(result).toEqual(argumentRow({ content: 'versión enmendada' }));
     });
 
-    it('si falla el archivo, el error se propaga (la transacción no se confirma)', async () => {
+    it('propaga el error del archivo', async () => {
       tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow());
       tx.argument.update.mockResolvedValue(argumentRow({ content: 'versión enmendada' }));
       tx.argumentHistory.create.mockRejectedValue(new Error('FK'));
 
       await expect(service.reviseDraft(ARG_1, 'versión enmendada')).rejects.toThrow('FK');
+    });
+
+    it('no promueve: el loop de enmienda deja el argumento en DRAFT', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow());
+      tx.argument.update.mockResolvedValue(argumentRow({ content: 'versión enmendada' }));
+
+      await service.reviseDraft(ARG_1, 'versión enmendada');
+
+      expect(tx.argument.update.mock.calls[0][0].data).not.toHaveProperty('status');
+    });
+  });
+
+  // Acción regenerate del curador (review F2-2): el status OFFICIAL va en el
+  // mismo update, antes del archivo y dentro de la transacción.
+  describe('regenerateArgument', () => {
+    it('pisa el content y promueve a OFFICIAL en un solo update, y después archiva el anterior como REJECTED con su origin', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow({ content: 'versión rechazada', status: 'REJECTED' }));
+      tx.argument.update.mockResolvedValue(argumentRow({ content: 'versión regenerada', status: 'OFFICIAL' }));
+
+      const result = await service.regenerateArgument(ARG_1, 'versión regenerada');
+
+      expect(tx.argument.update).toHaveBeenCalledWith({
+        where: { id: ARG_1 },
+        data: { content: 'versión regenerada', status: 'OFFICIAL' },
+      });
+      expect(tx.argumentHistory.create).toHaveBeenCalledWith({
+        data: { argumentId: ARG_1, content: 'versión rechazada', origin: 'AI_GENERATED', status: 'REJECTED' },
+      });
+      expectUpdateThenHistoryInsideTransaction();
+      expect(result).toEqual(argumentRow({ content: 'versión regenerada', status: 'OFFICIAL' }));
+    });
+
+    it('propaga el error del archivo', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow());
+      tx.argument.update.mockResolvedValue(argumentRow({ status: 'OFFICIAL' }));
+      tx.argumentHistory.create.mockRejectedValue(new Error('FK'));
+
+      await expect(service.regenerateArgument(ARG_1, 'versión regenerada')).rejects.toThrow('FK');
     });
   });
 
@@ -158,6 +196,14 @@ describe('DebateService', () => {
       });
       expectUpdateThenHistoryInsideTransaction();
       expect(result).toEqual(argumentRow({ content: 'versión editada a mano', origin: 'HUMAN_EDITED' }));
+    });
+
+    it('propaga el error del archivo', async () => {
+      tx.argument.findUniqueOrThrow.mockResolvedValue(argumentRow());
+      tx.argument.update.mockResolvedValue(argumentRow({ origin: 'HUMAN_EDITED' }));
+      tx.argumentHistory.create.mockRejectedValue(new Error('FK'));
+
+      await expect(service.editByHuman(ARG_1, 'versión editada a mano')).rejects.toThrow('FK');
     });
   });
 

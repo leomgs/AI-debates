@@ -62,11 +62,14 @@ export class EpisodeActionsService {
   // Reescritura editorial desde cero (api-contract.md §3: "no es lo mismo
   // que Resume") — el agente correcto (misma persona+provider que tenía
   // asignado) genera un argue()/respond() nuevo, SIN pasar por el loop de
-  // fact-check de procesarBorrador. Se persiste con reviseDraft (no
+  // fact-check de procesarBorrador. Se persiste con regenerateArgument (no
   // editByHuman): el contenido sigue siendo AI_GENERATED, no HUMAN_EDITED —
   // editByHuman cambiaría el origin incorrectamente, ya que quien reescribió
-  // el texto fue el agente, no el curador. El ArgumentHistoryStatus queda
-  // como REJECTED (reviseDraft no tiene otra opción) aunque la etiqueta no
+  // el texto fue el agente, no el curador. regenerateArgument deja el
+  // argumento OFFICIAL en la misma transacción que archiva la versión previa
+  // (antes era reviseDraft + promoteToOfficial por separado; review F2-2,
+  // ver el comentario en DebateService). El ArgumentHistoryStatus queda
+  // como REJECTED (igual que en el loop de enmienda) aunque la etiqueta no
   // sea 100% precisa para este caso — no hay un status de historial dedicado
   // a "regenerado por pedido editorial", y agregar uno nuevo es más de lo
   // que este alcance pide.
@@ -112,8 +115,7 @@ export class EpisodeActionsService {
       newContent = draft.content;
     }
 
-    await this.debate.reviseDraft(dto.argumentId, newContent);
-    return this.debate.promoteToOfficial(dto.argumentId);
+    return this.debate.regenerateArgument(dto.argumentId, newContent);
   }
 
   // Spec 003, API-19 (D17): "Volver a juzgar". Sincrónica, como regenerate.

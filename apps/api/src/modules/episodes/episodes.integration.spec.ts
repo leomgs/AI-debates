@@ -464,36 +464,36 @@ describe("EpisodesModule (integración)", () => {
     });
 
     // Review F2-2 (entrada 35): la ventana que quedaba era un juez que toma
-    // su foto ENTRE las dos escrituras del edit. Se la fuerza sin sleeps:
-    // la transacción de editByHuman se frena antes de su segunda escritura
-    // hasta que el juez ya leyó el contexto, y el juez no contesta hasta que
-    // el edit terminó. Con update → historial, esa foto ya ve el texto nuevo
-    // y el historial es posterior a judgedFrom, así que sale stale: true
-    // (el lado seguro). Con el orden inverso, el juez leería el texto viejo
-    // y el veredicto saldría stale: false.
-    it("un juez que toma su foto entre las dos escrituras del edit nunca lee el texto viejo sin quedar desactualizado", async () => {
-      const { episode } = await episodeInPendingReview();
-      const detail = await episodesService.getEpisodeDetail(episode.id);
-      const argumentId = detail.debate.rounds[0].arguments[0].id;
-      const newText = "Editado justo mientras el juez tomaba su foto.";
-
-      let judgeSawContext!: (context: { officialArguments: Array<{ content: string }> }) => void;
-      const judgeContext = new Promise<{ officialArguments: Array<{ content: string }> }>((resolve) => (judgeSawContext = resolve));
-      let finishEdit!: () => void;
-      const editFinished = new Promise<void>((resolve) => (finishEdit = resolve));
-      agentsMock.judge.mockImplementationOnce(async (context: { officialArguments: Array<{ content: string }> }) => {
+    // su foto ENTRE las dos escrituras de una acción que archiva en
+    // ArgumentHistory. Se la fuerza sin sleeps: la transacción de la acción
+    // se frena antes de su segunda escritura hasta que el juez de
+    // regenerate-verdict ya leyó el contexto, y el juez no contesta hasta que
+    // la acción terminó. Con update → historial, esa foto ya ve la versión
+    // nueva y el historial es posterior a judgedFrom, así que sale
+    // stale: true (el lado seguro). Con el orden inverso, el juez leería la
+    // versión vieja y el veredicto saldría stale: false.
+    //
+    // Devuelve el contexto que recibió el juez y el veredicto resultante.
+    async function judgeBetweenTheTwoWrites(episodeId: string, action: () => Promise<unknown>) {
+      type JudgeContext = { officialArguments: Array<{ content: string }> };
+      let judgeSawContext!: (context: JudgeContext) => void;
+      const judgeContext = new Promise<JudgeContext>((resolve) => (judgeSawContext = resolve));
+      let finishAction!: () => void;
+      const actionFinished = new Promise<void>((resolve) => (finishAction = resolve));
+      agentsMock.judge.mockImplementationOnce(async (context: JudgeContext) => {
         judgeSawContext(context);
-        await editFinished;
-        return { content: "Veredicto con foto en el medio del edit.", winnerAgentId: null };
+        await actionFinished;
+        return { content: "Veredicto con foto en el medio de la acción.", winnerAgentId: null };
       });
 
-      let regenerating: Promise<Awaited<ReturnType<EpisodeActionsService["regenerateVerdict"]>>> | undefined;
+      let regenerating: ReturnType<EpisodeActionsService["regenerateVerdict"]> | undefined;
       const realTransaction = prisma.$transaction.bind(prisma) as (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
       const spy = jest.spyOn(prisma, "$transaction").mockImplementationOnce(((fn: (tx: unknown) => Promise<unknown>) =>
         realTransaction((tx) => {
-          // Cuenta las escrituras de Argument/ArgumentHistory del edit y,
-          // antes de la segunda, arranca regenerate-verdict y espera a que
-          // el juez tenga su contexto.
+          // Cuenta las escrituras de Argument/ArgumentHistory y, antes de la
+          // segunda, arranca regenerate-verdict y espera a que el juez tenga
+          // su contexto. Si regenerateVerdict termina sin llamar al juez, el
+          // test falla con un error claro en vez de colgarse.
           let writes = 0;
           const pauseBeforeSecondWrite = (delegate: Record<string, unknown>) =>
             new Proxy(delegate, {
@@ -504,8 +504,12 @@ describe("EpisodesModule (integración)", () => {
                 return async (args: unknown) => {
                   writes += 1;
                   if (writes === 2) {
-                    regenerating = actions.regenerateVerdict(episode.id);
-                    await judgeContext;
+                    regenerating = actions.regenerateVerdict(episodeId);
+                    const endedWithoutJudge = regenerating.then(() => {
+                      throw new Error("regenerateVerdict terminó sin llamar al juez");
+                    });
+                    endedWithoutJudge.catch(() => undefined); // el perdedor de la carrera no queda sin manejar
+                    await Promise.race([judgeContext, endedWithoutJudge]);
                   }
                   return value.call(target, args);
                 };
@@ -523,17 +527,49 @@ describe("EpisodesModule (integración)", () => {
         })) as never);
 
       try {
-        await actions.edit(episode.id, { argumentId, content: newText });
+        await action();
       } finally {
         spy.mockRestore();
+        finishAction();
       }
-      finishEdit();
       expect(regenerating).toBeDefined();
-      const replaced = await regenerating!;
+      const verdict = await regenerating!;
+      return { context: await judgeContext, verdict };
+    }
 
-      const seen = (await judgeContext).officialArguments.map((a) => a.content);
-      expect(seen).toContain(newText);
-      expect(replaced.stale).toBe(true);
+    it("un juez que toma su foto entre las dos escrituras del edit nunca lee el texto viejo sin quedar desactualizado", async () => {
+      const { episode } = await episodeInPendingReview();
+      const detail = await episodesService.getEpisodeDetail(episode.id);
+      const argumentId = detail.debate.rounds[0].arguments[0].id;
+      const newText = "Editado justo mientras el juez tomaba su foto.";
+
+      const { context, verdict } = await judgeBetweenTheTwoWrites(episode.id, () =>
+        actions.edit(episode.id, { argumentId, content: newText })
+      );
+
+      expect(context.officialArguments.map((a) => a.content)).toContain(newText);
+      expect(verdict.stale).toBe(true);
+    });
+
+    // Review F2-2: regenerate sobre un argumento que no es OFFICIAL
+    // (findArgumentInEpisode no filtra status). El juez solo lee OFFICIAL,
+    // así que la promoción tiene que ir en el mismo update, antes del
+    // historial: con reviseDraft + promoteToOfficial por separado, un juez
+    // entre el historial y el promote no veía el argumento y daba stale: false.
+    it("regenerate sobre un argumento no OFFICIAL: un juez entre las dos escrituras ya lo ve OFFICIAL y queda desactualizado", async () => {
+      const { episode } = await episodeInPendingReview();
+      const detail = await episodesService.getEpisodeDetail(episode.id);
+      const argumentId = detail.debate.rounds[0].arguments[0].id;
+      await prisma.argument.update({ where: { id: argumentId }, data: { status: "REJECTED" } });
+      const newText = "Regenerado por el agente a pedido del curador.";
+      agentsMock.createDebateAgent.mockImplementationOnce(() => fakeArgentAgent(newText));
+
+      const { context, verdict } = await judgeBetweenTheTwoWrites(episode.id, () => actions.regenerate(episode.id, { argumentId }));
+
+      expect(context.officialArguments.map((a) => a.content)).toContain(newText);
+      expect(verdict.stale).toBe(true);
+      const regenerated = await prisma.argument.findUniqueOrThrow({ where: { id: argumentId } });
+      expect(regenerated).toMatchObject({ content: newText, status: "OFFICIAL", origin: "AI_GENERATED" });
     });
 
     // Review F2-2: con @prisma/adapter-better-sqlite3 las transacciones

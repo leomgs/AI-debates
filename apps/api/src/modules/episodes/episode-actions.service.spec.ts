@@ -57,6 +57,7 @@ describe("EpisodeActionsService", () => {
     editByHuman: jest.Mock;
     reviseDraft: jest.Mock;
     promoteToOfficial: jest.Mock;
+    regenerateArgument: jest.Mock;
     replaceVerdict: jest.Mock;
     isVerdictStale: jest.Mock;
   };
@@ -84,7 +85,8 @@ describe("EpisodeActionsService", () => {
     debateService = {
       editByHuman: jest.fn().mockResolvedValue({ id: ARG_ID, content: "editado" }),
       reviseDraft: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado" }),
-      promoteToOfficial: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado", status: "OFFICIAL" }),
+      promoteToOfficial: jest.fn(),
+      regenerateArgument: jest.fn().mockResolvedValue({ id: ARG_ID, content: "regenerado", status: "OFFICIAL" }),
       replaceVerdict: jest.fn().mockResolvedValue(NEW_VERDICT_ROW),
       isVerdictStale: jest.fn().mockResolvedValue(false),
     };
@@ -171,7 +173,7 @@ describe("EpisodeActionsService", () => {
   });
 
   describe("regenerate", () => {
-    it("OPENING/REBUTTAL: pide argue() nuevo y persiste vía reviseDraft+promoteToOfficial", async () => {
+    it("OPENING/REBUTTAL: pide argue() nuevo y persiste y promueve en un solo paso vía regenerateArgument", async () => {
       prisma.argument.findFirstOrThrow.mockResolvedValue({
         id: ARG_ID,
         agentId: AGENT_ID,
@@ -191,8 +193,11 @@ describe("EpisodeActionsService", () => {
       // (gap encontrado y corregido en revisión).
       expect(budgetService.withLlmCall).toHaveBeenCalledWith(EPISODE_ID, expect.any(Function));
       expect(agentsService.createDebateAgent).toHaveBeenCalledWith(expect.objectContaining({ id: "ANALYST" }), "GOOGLE");
-      expect(debateService.reviseDraft).toHaveBeenCalledWith(ARG_ID, "regenerado");
-      expect(debateService.promoteToOfficial).toHaveBeenCalledWith(ARG_ID);
+      expect(debateService.regenerateArgument).toHaveBeenCalledWith(ARG_ID, "regenerado");
+      // Review F2-2: nada de reviseDraft + promoteToOfficial por separado
+      // (el promote fuera de la transacción dejaba la ventana de stale).
+      expect(debateService.reviseDraft).not.toHaveBeenCalled();
+      expect(debateService.promoteToOfficial).not.toHaveBeenCalled();
       expect(result.status).toBe("OFFICIAL");
     });
 
@@ -229,7 +234,7 @@ describe("EpisodeActionsService", () => {
         content: "argumento original",
         roundType: "OPENING",
       });
-      expect(debateService.reviseDraft).toHaveBeenCalledWith(ARG_ID, "regenerado");
+      expect(debateService.regenerateArgument).toHaveBeenCalledWith(ARG_ID, "regenerado");
     });
 
     it("fuera de PENDING_REVIEW tira InvalidEpisodeTransitionError sin llamar al agente", async () => {
@@ -249,7 +254,7 @@ describe("EpisodeActionsService", () => {
       });
       expect(budgetService.withLlmCall).not.toHaveBeenCalled();
       expect(agentsService.createDebateAgent).not.toHaveBeenCalled();
-      expect(debateService.reviseDraft).not.toHaveBeenCalled();
+      expect(debateService.regenerateArgument).not.toHaveBeenCalled();
     });
   });
 
