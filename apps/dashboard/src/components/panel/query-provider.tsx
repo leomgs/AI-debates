@@ -2,19 +2,16 @@
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { buildLoginUrl } from "@/lib/auth/next-path";
+import { createLoginRedirect } from "@/lib/auth/login-redirect";
 import { createPanelQueryClient } from "@/lib/query-client";
 
-let redirectingToLogin = false;
+// Se crea al primer 401, que solo ocurre en el navegador: en el render de
+// servidor del provider no hay `window`.
+let redirect: (() => void) | null = null;
 
-// Navegación completa (no router.replace): descarta el caché de consultas de
-// la sesión vencida. El flag evita que varias consultas con 401 en paralelo
-// disparen varias redirecciones.
 function redirectToLogin() {
-  if (redirectingToLogin) return;
-  redirectingToLogin = true;
-  const current = `${window.location.pathname}${window.location.search}`;
-  window.location.assign(buildLoginUrl(current, { sessionExpired: true }));
+  redirect ??= createLoginRedirect(window);
+  redirect();
 }
 
 export function QueryProvider({ children }: { children: React.ReactNode }) {
