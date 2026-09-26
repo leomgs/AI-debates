@@ -31,6 +31,22 @@ describe("EpisodeEventsService", () => {
     expect(received).toEqual([{ type: "argument.approved", data: { agentId: "a1", text: "x" } }]);
   });
 
+  // Sin data, Nest no escribe la línea `data:` y EventSource descarta el
+  // evento: research.started/episode.pending_review no llegaban al navegador.
+  it("un evento sin payload sale con data {} (para que EventSource lo despache)", () => {
+    service.begin("ep-1");
+    const received: unknown[] = [];
+    service.stream("ep-1").subscribe((event) => received.push(event));
+
+    service.emit("ep-1", "research.started");
+    service.emit("ep-1", "episode.pending_review");
+
+    expect(received).toEqual([
+      { type: "research.started", data: {} },
+      { type: "episode.pending_review", data: {} },
+    ]);
+  });
+
   it("dos episodios distintos no comparten eventos", () => {
     service.begin("ep-a");
     service.begin("ep-b");

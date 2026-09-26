@@ -70,8 +70,12 @@ export class EpisodeEventsService {
     });
   }
 
+  // `data ?? {}` (decisión del usuario tras el review F2-1): Nest solo
+  // escribe la línea `data:` si `data` no es nulo, y EventSource descarta un
+  // evento con el buffer de datos vacío. Sin esto, research.started y
+  // episode.pending_review nunca llegaban al navegador (AC 3.32).
   emit(episodeId: string, type: string, data?: unknown): void {
-    this.subjects.get(episodeId)?.next({ type, data } as unknown as MessageEvent);
+    this.subjects.get(episodeId)?.next({ type, data: data ?? {} } as unknown as MessageEvent);
   }
 
   // Llamado por EpisodeOrchestratorService en el `finally` de

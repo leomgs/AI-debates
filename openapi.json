@@ -1345,10 +1345,16 @@
             "enum": [
               "research.started"
             ]
+          },
+          "data": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
           }
         },
         "required": [
-          "type"
+          "type",
+          "data"
         ]
       },
       "AgentThinkingEventDto": {
@@ -1462,10 +1468,16 @@
             "enum": [
               "episode.pending_review"
             ]
+          },
+          "data": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
           }
         },
         "required": [
-          "type"
+          "type",
+          "data"
         ]
       },
       "EpisodeRequiresReviewEventDto": {

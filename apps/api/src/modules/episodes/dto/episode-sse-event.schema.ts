@@ -23,12 +23,16 @@ export const EpisodeSseEventTypeSchema = z.enum([
   "episode.requires_review",
 ]);
 
-// Sin campo `data` (no z.undefined().optional(): Zod 4 tampoco puede
-// representar undefined en JSON Schema, mismo motivo que z.date() más
-// abajo) — research.started/episode.pending_review se emiten sin payload,
-// así que el shape correcto es directamente no tener la propiedad.
+// `data: {}` y no "sin data" (decisión del usuario tras el review F2-1):
+// research.started y episode.pending_review no tienen payload, pero si el
+// frame SSE sale sin línea `data:`, EventSource descarta el evento (buffer
+// de datos vacío) y el navegador nunca lo recibe. EpisodeEventsService.emit
+// completa `data ?? {}`, así que el wire lleva `data: {}`.
+export const EmptyEventDataSchema = z.object({}).strict();
+
 export const ResearchStartedEventSchema = z.object({
   type: z.literal("research.started"),
+  data: EmptyEventDataSchema,
 });
 
 export const AgentThinkingEventSchema = z.object({
@@ -57,6 +61,7 @@ export const ArgumentApprovedEventSchema = z.object({
 
 export const EpisodePendingReviewEventSchema = z.object({
   type: z.literal("episode.pending_review"),
+  data: EmptyEventDataSchema,
 });
 
 export const EpisodeRequiresReviewEventSchema = z.object({
@@ -82,8 +87,11 @@ export const EpisodeRequiresReviewEventSchema = z.object({
 // activo (EpisodeEventsService.stream). No es un evento de negocio: lo emite
 // EpisodeEventsService, no el orquestador, y por eso no está en
 // EpisodeSseEventTypeSchema (el tipo de lo que el orquestador puede emitir).
-// Sin payload, igual que research.started: los bytes alcanzan para que el
-// rewrite de Next no corte la conexión, y la UI no lo muestra en el feed.
+// Sin `data` a propósito, a diferencia de research.started: sale como un
+// frame `event: heartbeat` + `id:` sin línea `data:`, así que EventSource
+// no lo despacha (nunca llega a un listener ni al feed, AC 3.33). Solo
+// importa que los bytes pasen por el rewrite de Next para que no corte la
+// conexión por inactividad.
 export const HEARTBEAT_EVENT_TYPE = "heartbeat";
 
 export const HeartbeatEventSchema = z.object({

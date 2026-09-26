@@ -204,13 +204,13 @@ Reanuda exactamente desde `checkpoint.fromState` / `checkpoint.debateRoundId` (v
 `Content-Type: text/event-stream`. Eventos definidos en Feature 8 de `features.md`, más el agregado en v1.1:
 
 ```
-event: research.started
+event: research.started        data: {}
 event: agent.thinking          data: { agentId, round }
 event: fact_check.completed    data: { status, errorsDetected }
 event: argument.approved       data: { sequenceIndex, agentId, text }
-event: episode.pending_review
+event: episode.pending_review  data: {}
 event: episode.requires_review data: { reason, checkpoint }
-event: heartbeat               (spec 003, API-13; sin payload)
+event: heartbeat               (spec 003, API-13; sin línea data:, ver abajo)
 ```
 
 El MVP transmite bloques de texto consolidado (no streaming palabra por palabra) — ver alcance definido en Feature 8.
@@ -220,7 +220,7 @@ Ciclo de vida del stream (spec 003, API-12 y API-13, implementado 2026-09-25):
 - **Sin pipeline activo** (`pipelineActive: false` en `GET /episodes/:id`, lo que incluye un id inexistente): responde `200` y cierra enseguida, sin eventos. Como el stream termina antes de que Nest escriba las cabeceras del SSE, la respuesta sale vacía y **sin** `Content-Type: text/event-stream`. Para `EventSource` es un error fatal: dispara `error`, queda en `CLOSED` y no reconecta solo, que es lo que pide AC 3.38 (cerrar, refrescar el detalle y reconectar solo si `pipelineActive` sigue en `true`). Un id inexistente no da `404` acá; el `404` lo da el refetch del detalle.
 - **Con pipeline activo**: entrega los eventos de negocio y además un `event: heartbeat` cada 15 s, para que el rewrite de Next (que corta a los 30 s sin bytes) no cierre la conexión (AC 3.33). El heartbeat no es un evento de negocio: la UI no lo muestra en el feed ni refresca el detalle con él. Cuando termina la ejecución (éxito, checkpoint o error), el stream se cierra.
 - **Cabeceras**: `Content-Type: text/event-stream`, `Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0, no-transform` y `X-Accel-Buffering: no`. Las pone Nest 11 en todo `@Sse`; `no-transform` es lo que pide API-13, para que ningún proxy comprima o bufferee el stream.
-- **Limitación conocida, sin resolver**: los eventos sin payload (`research.started`, `episode.pending_review`, `heartbeat`) viajan sin línea `data:`, y según el estándar de SSE `EventSource` no dispara un evento con el buffer de datos vacío. Por eso hoy el navegador no recibe `research.started` ni `episode.pending_review` (el `heartbeat` igual mantiene viva la conexión). Pendiente en `tasks.md` §12.2.
+- **Eventos sin payload** (decisión del usuario, 2026-09-25): `research.started` y `episode.pending_review` salen con una línea `data: {}` (por ejemplo, `event: research.started` / `id: 1` / `data: {}`). Sin esa línea `EventSource` no los despacha, porque según el estándar de SSE descarta un evento con el buffer de datos vacío. El `heartbeat`, en cambio, sale a propósito **sin** línea `data:`: `EventSource` no lo despacha y nunca llega a un listener ni al feed (AC 3.33). Solo sirve para que pasen bytes por el rewrite.
 
 ## 5. Tabla de estados válidos por acción
 

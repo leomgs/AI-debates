@@ -132,6 +132,23 @@ describe('Episodes (e2e)', () => {
       expect(res.headers['cache-control']).toMatch(/\bno-transform\b/);
       expect(body).toMatch(/event: research\.started/);
     });
+
+    // Decisión del usuario (review F2-1): sin línea `data:`, EventSource
+    // descarta el evento. Se mira el frame crudo tal como sale por el wire.
+    it('research.started y episode.pending_review salen con una línea "data: {}"', async () => {
+      const { episode } = await seedEpisode(prisma, 'DEBATING');
+      events.begin(episode.id);
+
+      const res = await openSse(baseUrl, `/episodes/${episode.id}/events`, cookie);
+      const bodyPromise = readAll(res);
+      events.emit(episode.id, 'research.started');
+      events.emit(episode.id, 'episode.pending_review');
+      events.complete(episode.id);
+      const body = await bodyPromise;
+
+      expect(body).toMatch(/event: research\.started\nid: \d+\ndata: \{\}\n\n/);
+      expect(body).toMatch(/event: episode\.pending_review\nid: \d+\ndata: \{\}\n\n/);
+    });
   });
 
   describe('API-1 (parte 1): tópico, createdAt y participantes en el detalle', () => {
