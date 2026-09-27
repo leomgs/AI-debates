@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { EpisodeList, EpisodeListSkeleton } from "@/components/panel/episode-list";
 
 export const metadata: Metadata = {
   title: "Episodios",
 };
 
-// Placeholder de F1: la lista agrupada (AC 3.16-3.21) llega en F2.
+// Lista de episodios agrupada por "requiere acción" (spec 003, sección 3).
+// Los datos se piden desde el navegador (D11). EpisodeList lee el filtro con
+// useSearchParams; el Suspense es el que pide la guía de Next para ese hook,
+// aunque /studio no se prerenderiza (force-dynamic en el layout).
 export default function StudioHomePage() {
   return (
-    <section className="space-y-2">
-      <h1 className="text-2xl font-semibold">Episodios</h1>
-      <p className="text-muted-foreground">La lista de episodios todavía no está disponible.</p>
-    </section>
+    <Suspense fallback={<EpisodeListSkeleton />}>
+      <EpisodeList />
+    </Suspense>
   );
 }
