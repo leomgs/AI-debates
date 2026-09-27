@@ -63,8 +63,8 @@ export class HttpErrorFilter implements ExceptionFilter {
 
     // Spec 004, D15 (ADR 0002 punto 4): falta la voz de algún agente para el
     // idioma y el proveedor activo. En createEpisode (antes de crear filas),
-    // en regenerate-audio (el segmento queda como estaba, AC 4.15) y en el
-    // manifest (un agente sin AudioAsset.voiceId y sin fila en AgentVoice).
+    // en regenerate-audio (el segmento queda como estaba, AC 4.15). El manifest
+    // nunca lo emite: informa la voz guardada o null (D17 revisado).
     // Es un conflicto con los datos cargados, no un bug: 409. El mensaje ya
     // nombra el idioma, el proveedor y los agentes sin voz.
     if (exception instanceof VoiceNotConfiguredError) {

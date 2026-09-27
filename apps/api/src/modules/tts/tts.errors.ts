@@ -25,7 +25,7 @@ export class SequenceIndexOutOfRangeError extends Error {
 // Spec 004, D15 (ADR 0002 punto 4): falta la fila de AgentVoice de uno o más
 // agentes para el idioma pedido y el proveedor activo. Nunca hay respaldo con
 // otra voz (D14). Solo EpisodesModule decide qué hacer con esto: 409
-// VOICE_NOT_CONFIGURED en HTTP (createEpisode, regenerate-audio, manifest) y
+// VOICE_NOT_CONFIGURED en HTTP (createEpisode, regenerate-audio; el manifest nunca lo emite, spec 004 D17) y
 // REQUIRES_HUMAN_REVIEW con el CheckpointReason VOICE_NOT_CONFIGURED en el
 // pipeline. `agents` lleva un rótulo legible por agente sin voz (nombre y
 // rol, o solo el rol si falta la fila Agent de un rol candidato).

@@ -706,7 +706,7 @@ describe("EpisodesModule (integración)", () => {
       await prisma.agentVoice.deleteMany({ where: { language: { not: "ES" } } });
     });
 
-    // AC 4.29 (parte de servicio; la HTTP está en test/episodes.e2e-spec.ts) y AC 4.4.
+    // AC 4.29 (parte de servicio; la HTTP está en test/episode-language.e2e-spec.ts) y AC 4.4.
     describe("createEpisode (D15, AC 4.4 y 4.29)", () => {
       let runPipelineSpy: jest.SpyInstance;
 

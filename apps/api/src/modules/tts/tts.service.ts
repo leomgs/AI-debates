@@ -20,7 +20,7 @@ const AGENT_WITH_VOICES_INCLUDE = {
 
 // Lo mínimo que necesita resolveVoiceId: las voces del agente y con qué
 // nombrarlo en el error si falta la suya.
-type AgentWithVoices =Pick<Agent, "name" | "role"> & {
+type AgentWithVoices = Pick<Agent, "name" | "role"> & {
   voices: Pick<AgentVoice, "language" | "provider" | "voiceId">[];
 };
 
@@ -32,7 +32,8 @@ function agentLabel(agent: Pick<Agent, "name" | "role">): string {
 
 // audioAsset incluido para Feature 7 (RenderModule reusa este método vía
 // EpisodesService para leer durationMs/subtitles ya persistidos, sin query
-// propia — mismo orden/set que sequenceIndex de AC 6.2).
+// propia — mismo orden/set que sequenceIndex de AC 6.2). El manifest recibe
+// agent.voices pero no debe usarlas: informa AudioAsset.voiceId o null (D17 revisado).
 const ARGUMENT_WITH_AGENT_INCLUDE = {
   agent: { include: AGENT_WITH_VOICES_INCLUDE },
   audioAsset: true,
