@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { DEFAULT_SHOWCASE_LOCALE } from "@/lib/locales";
 import { LogoutButton } from "./logout-button";
+import { NotificationsInbox } from "./notifications-inbox";
 
 const LINKS = [
   { href: "/studio", label: "Episodios" },
@@ -16,7 +17,8 @@ function isActive(pathname: string, href: string): boolean {
   return href === "/studio" ? pathname === "/studio" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-// Navegación del panel (AC 3.15): lista, crear, showcase público y cerrar sesión.
+// Navegación del panel (AC 3.15): lista, crear, showcase público y cerrar
+// sesión, más el inbox de notificaciones (AC 3.10-3.14).
 export function PanelNav() {
   const pathname = usePathname();
 
@@ -54,6 +56,7 @@ export function PanelNav() {
           </a>
         </li>
       </ul>
+      <NotificationsInbox />
       <LogoutButton />
     </nav>
   );
