@@ -14,7 +14,13 @@ function argumentWithAgent(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: ARGUMENT_ID,
     content: 'contenido del argumento',
-    agent: { id: 'agent-1', voiceId: { LOCAL: 'es_ES-davefx-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' } },
+    agent: {
+      id: 'agent-1',
+      voices: [
+        { provider: 'LOCAL', voiceId: 'es_ES-davefx-medium' },
+        { provider: 'GOOGLE_TTS', voiceId: 'es' },
+      ],
+    },
     ...overrides,
   };
 }
@@ -66,7 +72,7 @@ describe('TtsService', () => {
       });
       expect(prisma.argument.findMany).toHaveBeenCalledWith({
         where: { debateRound: { debateId: DEBATE_ID }, status: 'OFFICIAL' },
-        include: { agent: true, audioAsset: true },
+        include: { agent: { include: { voices: { where: { language: 'ES' } } } }, audioAsset: true },
         orderBy: { createdAt: 'asc' },
       });
       expect(result).toHaveLength(1);
@@ -85,8 +91,8 @@ describe('TtsService', () => {
 
       const result = await service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never);
 
-      // TTS_PROVIDER=LOCAL (mock de ConfigService) -> lee voiceMap.LOCAL, no
-      // GOOGLE_TTS/OPENROUTER (decision-log.md 2026-09-09, #20 punto 1).
+      // TTS_PROVIDER=LOCAL (mock de ConfigService) -> usa la fila AgentVoice
+      // LOCAL, no la de GOOGLE_TTS (ADR 0002).
       expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'es_ES-davefx-medium');
 
       expect(storage.save).toHaveBeenCalledTimes(1);
@@ -101,6 +107,8 @@ describe('TtsService', () => {
       expect(createArgs.provider).toBe('LOCAL');
       expect(createArgs.durationMs).toBe(1234);
       expect(createArgs.mimeType).toBe('audio/wav');
+      // ADR 0002 punto 6: el AudioAsset guarda la voz realmente usada.
+      expect(createArgs.voiceId).toBe('es_ES-davefx-medium');
       // Feature 7 — subtitles del provider se persisten tal cual en AudioAsset.
       expect(createArgs.subtitles).toEqual([{ text: 'contenido', startMs: 0, endMs: 500 }]);
 
@@ -178,9 +186,24 @@ describe('TtsService', () => {
   });
 
   describe('resolveVoiceId (Feature 7)', () => {
-    it('indexa el VoiceIdMap con el provider activo (TTS_PROVIDER)', () => {
-      const voiceId = service.resolveVoiceId({ LOCAL: 'es_ES-davefx-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' });
+    it('elige la fila de AgentVoice del provider activo (TTS_PROVIDER)', () => {
+      const voiceId = service.resolveVoiceId([
+        { provider: 'GOOGLE_TTS', voiceId: 'es' },
+        { provider: 'LOCAL', voiceId: 'es_ES-davefx-medium' },
+      ]);
       expect(voiceId).toBe('es_ES-davefx-medium');
+    });
+
+    it('sin fila para el provider activo tira error en vez de devolver undefined (spec 004, D14)', () => {
+      expect(() => service.resolveVoiceId([{ provider: 'GOOGLE_TTS', voiceId: 'es' }])).toThrow(/LOCAL/);
+    });
+
+    it('sin voz no sintetiza nada', async () => {
+      await expect(
+        service.synthesizeSegment(EPISODE_ID, argumentWithAgent({ agent: { id: 'agent-1', voices: [] } }) as never)
+      ).rejects.toThrow(/AgentVoice/);
+      expect(provider.synthesize).not.toHaveBeenCalled();
+      expect(prisma.audioAsset.create).not.toHaveBeenCalled();
     });
   });
 

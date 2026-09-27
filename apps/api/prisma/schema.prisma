@@ -44,6 +44,16 @@ enum CheckpointReason {
   PROVIDER_QUOTA_EXCEEDED
 }
 
+// Spec 004 (D3, ADR 0002 punto 1): idioma del debate, compartido por
+// Episode.language y AgentVoice.language. Mismo enum que
+// DebateLanguageSchema de packages/contracts. Agregar un idioma requiere
+// migración a propósito (también exige instrucción de idioma y voces).
+enum DebateLanguage {
+  ES
+  EN
+  PT
+}
+
 // Extensible a propósito: nuevos tipos de ronda = nuevos formatos de debate
 // sin tocar el resto del modelo.
 enum RoundType {
@@ -187,15 +197,27 @@ model Agent {
   role         String? // Ej: "ANALYST", "CONTRARIAN", "JUDGE"
   avatarUrl    String? // Asset visual para Remotion
   systemPrompt String // Personalidad y directrices del agente
-  // Json, no String: los 3 AudioProvider tienen catálogos de voz
-  // incompatibles entre sí (nombre de modelo Piper vs. código de idioma de
-  // Google vs. parámetro voice de fish-audio) — guarda un ID por proveedor
-  // soportado, shape Record<"LOCAL"|"GOOGLE_TTS"|"OPENROUTER", string>
-  // (src/modules/tts/voice-id.types.ts). decision-log.md 2026-09-09, #20.
-  voiceId      Json
+  // Las voces viven en AgentVoice (una por idioma y proveedor), no en un
+  // Json de Agent: ADR 0002, que reemplaza el punto 1 de decision-log.md #20.
+  voices       AgentVoice[]
   arguments    Argument[]
   verdicts     Verdict[] // En caso de que este agente actúe como Juez
   episodeParticipations EpisodeParticipant[]
+}
+
+// ADR 0002 punto 2: la voz de un agente para un idioma y un AudioProvider.
+// Los catálogos de los proveedores son incompatibles entre sí (nombre de
+// modelo Piper vs. código de idioma de Google), por eso la clave incluye el
+// proveedor. Que falte la fila es la única forma de representar "sin voz"
+// (punto 3, spec 004 D14): nunca placeholders como "TBD".
+model AgentVoice {
+  agentId  String
+  agent    Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  language DebateLanguage
+  provider AudioProvider
+  voiceId  String
+
+  @@id([agentId, language, provider])
 }
 
 // =========================================================================
@@ -222,6 +244,10 @@ model DebateRound {
   type        RoundType
   arguments   Argument[]
   checkpoints EpisodeCheckpoint[] // Checkpoints que se congelaron durante esta ronda
+
+  // debate.verdict.stale (spec 003, API-19): DebateService.isVerdictStale
+  // busca las rondas del debate en cada GET /episodes/:id.
+  @@index([debateId])
 }
 
 model Argument {
@@ -259,6 +285,10 @@ model ArgumentHistory {
   origin     ArgumentOrigin
   status     ArgumentHistoryStatus
   createdAt  DateTime               @default(now())
+
+  // debate.verdict.stale (spec 003, API-19): DebateService.isVerdictStale
+  // filtra por argumento y createdAt en cada GET /episodes/:id.
+  @@index([argumentId, createdAt])
 }
 
 model Claim {
@@ -338,6 +368,10 @@ model Episode {
   // publish/unpublish de API-7 cuando existan.
   publishedAt DateTime?
 
+  // Spec 004 (D1, D3): idioma del debate, se fija al crear el episodio y no
+  // cambia. Los episodios anteriores a la migración quedan en ES (AC 4.5).
+  language DebateLanguage @default(ES)
+
   // Feature 2: Límites Operacionales por Episodio
   maxLlmCalls         Int @default(25)
   maxSearchQueries    Int @default(5)
@@ -416,6 +450,13 @@ model AudioAsset {
   // backlog) — null cuando el proveedor activo no lo expone. Solo LOCAL
   // (echogarden) lo llena hoy (decision-log.md 2026-09-14/2026-09-24, #26/#27).
   subtitles Json?
+
+  // ADR 0002 punto 6: la voz realmente usada al sintetizar, para que el
+  // manifest de un episodio ya sintetizado no cambie si después se modifica
+  // el seed. La migración de la spec 004 completó los assets existentes con
+  // la voz LOCAL que tenía su agente (pregunta B); null = no se sabe cuál
+  // se usó, y se resuelve por idioma.
+  voiceId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

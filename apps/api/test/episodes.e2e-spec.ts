@@ -166,9 +166,8 @@ describe('Episodes (e2e)', () => {
   describe('API-1 (parte 1): tópico, createdAt y participantes en el detalle', () => {
     it('GET /episodes/:id cumple EpisodeDetailSchema y trae los participantes, debatientes primero', async () => {
       const { topic, episode } = await seedEpisode(prisma, 'PENDING_REVIEW');
-      const voiceId = { LOCAL: 'x', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
-      const judge = await prisma.agent.create({ data: { name: 'Judge e2e', role: 'JUDGE', systemPrompt: '-', voiceId } });
-      const analyst = await prisma.agent.create({ data: { name: 'Analyst e2e', role: 'ANALYST', systemPrompt: '-', voiceId } });
+      const judge = await prisma.agent.create({ data: { name: 'Judge e2e', role: 'JUDGE', systemPrompt: '-' } });
+      const analyst = await prisma.agent.create({ data: { name: 'Analyst e2e', role: 'ANALYST', systemPrompt: '-' } });
       await prisma.episodeParticipant.create({ data: { episodeId: episode.id, agentId: judge.id, modelProvider: 'GOOGLE', isJudge: true } });
       await prisma.episodeParticipant.create({ data: { episodeId: episode.id, agentId: analyst.id, modelProvider: 'GOOGLE' } });
 

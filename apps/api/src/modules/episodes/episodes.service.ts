@@ -4,7 +4,7 @@ import { EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { DebateService } from "../debate/debate.service";
-import { TtsService } from "../tts/tts.service";
+import { AGENT_WITH_VOICES_INCLUDE, TtsService } from "../tts/tts.service";
 import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { RenderService } from "../render/render.service";
 import type { RemotionManifest } from "@ai-trend-debates/contracts";
@@ -121,7 +121,7 @@ export class EpisodesService {
     });
     const participants = await this.prisma.episodeParticipant.findMany({
       where: { episodeId },
-      include: { agent: true },
+      include: { agent: { include: AGENT_WITH_VOICES_INCLUDE } },
     });
     const officialArguments = await this.tts.getOrderedOfficialArguments(episodeId);
 
@@ -132,7 +132,7 @@ export class EpisodesService {
         agentId: p.agent.id,
         name: p.agent.name,
         avatarUrl: p.agent.avatarUrl,
-        voiceId: this.tts.resolveVoiceId(p.agent.voiceId),
+        voiceId: this.tts.resolveVoiceId(p.agent.voices),
       })),
       officialArguments: officialArguments.map((a) => ({
         agentId: a.agentId,

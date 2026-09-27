@@ -67,13 +67,17 @@ async function seedReviewedEpisode(
   } = {},
 ) {
   const suffix = randomUUID().slice(0, 8);
-  const voiceId = { LOCAL: 'x', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
+  // Voz ES/LOCAL de prueba (AgentVoice, ADR 0002), id visiblemente falso
+  // (spec 004, D14): regenerate-audio la resuelve para el proveedor activo.
+  const voices = {
+    create: { language: 'ES' as const, provider: 'LOCAL' as const, voiceId: 'x' },
+  };
   const judge = await prisma.agent.create({
     data: {
       name: `Judge ${suffix}`,
       role: 'JUDGE',
       systemPrompt: '-',
-      voiceId,
+      voices,
     },
   });
   const analyst = await prisma.agent.create({
@@ -81,7 +85,7 @@ async function seedReviewedEpisode(
       name: `Analyst ${suffix}`,
       role: 'ANALYST',
       systemPrompt: '-',
-      voiceId,
+      voices,
     },
   });
   const topic = await prisma.topic.create({

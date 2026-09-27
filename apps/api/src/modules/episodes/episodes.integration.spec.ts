@@ -48,14 +48,19 @@ function fakeArgentAgent(content = "Contenido de prueba generado por el agente."
   };
 }
 
+// Cada agente con su voz ES/LOCAL en AgentVoice (ADR 0002), con id
+// visiblemente falso (spec 004, D14). Sin estas filas, createEpisode va a
+// responder 409 VOICE_NOT_CONFIGURED cuando exista el chequeo del paso 13.6.
+const TEST_VOICES = { create: { language: "ES" as const, provider: "LOCAL" as const, voiceId: "voice-test" } };
+
 async function seedAgents(prisma: PrismaService): Promise<void> {
   for (const persona of Object.values(DEBATER_PERSONAS)) {
     await prisma.agent.create({
-      data: { name: persona.displayName, role: persona.id, systemPrompt: "prompt de prueba", voiceId: "voice-test" },
+      data: { name: persona.displayName, role: persona.id, systemPrompt: "prompt de prueba", voices: TEST_VOICES },
     });
   }
   await prisma.agent.create({
-    data: { name: JUDGE.displayName, role: JUDGE.id, systemPrompt: "prompt de prueba", voiceId: "voice-test" },
+    data: { name: JUDGE.displayName, role: JUDGE.id, systemPrompt: "prompt de prueba", voices: TEST_VOICES },
   });
 }
 

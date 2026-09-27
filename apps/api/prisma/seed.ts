@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { AudioProvider, DebateLanguage, PrismaClient } from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import {
   DEBATER_PERSONAS,
@@ -7,7 +7,6 @@ import {
   buildJudgeSystemPrompt,
   DebaterPersona,
 } from '../src/shared/personas/agents.personas';
-import { VoiceIdMap } from '../src/modules/tts/voice-id.types';
 
 // Script standalone fuera del bootstrap de Nest — no hay ConfigService acá,
 // mismo patrón de lectura de DATABASE_URL que prisma.config.ts.
@@ -17,7 +16,12 @@ const prisma = new PrismaClient({
   }),
 });
 
-// Un voice ID por AudioProvider soportado (decision-log.md 2026-09-09, #20).
+type SeedVoice = { language: DebateLanguage; provider: AudioProvider; voiceId: string };
+
+// Voces por agente, idioma y proveedor (tabla AgentVoice, ADR 0002). En el
+// MVP de la spec 004 solo hay filas ES (D20): las voces EN/PT se cargan acá
+// con la mejora "Voces EN/PT" (tasks.md §13.11). Sin placeholders ("TBD") ni
+// filas de OPENROUTER: una voz que no se verificó no se inserta (D14).
 // LOCAL: nombres reales del catálogo Piper/vits de echogarden, confirmados
 // corriendo `Echogarden.requestVoiceList({ engine: 'vits', language: 'es' })`
 // contra el paquete real (7 voces es-ES/es-MX disponibles hoy, 1 sola
@@ -25,15 +29,21 @@ const prisma = new PrismaClient({
 // calidad que "low"/"x_low") y se evita repetir voz entre personas.
 // GOOGLE_TTS es la misma "es" para los 5 agentes a propósito: google-tts-api
 // tiene una sola voz por idioma, no diferencia por persona (limitación de
-// producto conocida, no un bug — ver tasks.md sección 5). OPENROUTER usa
-// placeholders hasta el spike de validación contra fish-audio (etapa 5).
-const DEBATER_VOICE_IDS: Record<DebaterPersona['id'], VoiceIdMap> = {
-  ANALYST: { LOCAL: 'es_ES-davefx-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
-  CONTRARIAN: { LOCAL: 'es_ES-sharvard-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
-  DIPLOMAT: { LOCAL: 'es_MX-claude-high', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
-  PROVOCATEUR: { LOCAL: 'es_MX-ald-medium', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' },
+// producto conocida, no un bug — ver tasks.md sección 5).
+function spanishVoices(localVoiceId: string): SeedVoice[] {
+  return [
+    { language: 'ES', provider: 'LOCAL', voiceId: localVoiceId },
+    { language: 'ES', provider: 'GOOGLE_TTS', voiceId: 'es' },
+  ];
+}
+
+const DEBATER_VOICES: Record<DebaterPersona['id'], SeedVoice[]> = {
+  ANALYST: spanishVoices('es_ES-davefx-medium'),
+  CONTRARIAN: spanishVoices('es_ES-sharvard-medium'),
+  DIPLOMAT: spanishVoices('es_MX-claude-high'),
+  PROVOCATEUR: spanishVoices('es_MX-ald-medium'),
 };
-const JUDGE_VOICE_ID: VoiceIdMap = { LOCAL: 'es_ES-mls_10246-low', GOOGLE_TTS: 'es', OPENROUTER: 'TBD' };
+const JUDGE_VOICES: SeedVoice[] = spanishVoices('es_ES-mls_10246-low');
 
 // Snapshot informativo: el prompt real que ve el LLM en cada ronda lo arma
 // AgentsService vía buildDebaterSystemPrompt (roundType-específico) — este
@@ -46,38 +56,43 @@ function debaterSummary(persona: DebaterPersona): string {
   ].join('\n\n');
 }
 
-// Agent.name no tiene constraint @unique en el schema (ver architecture.md
-// §6) — se busca por nombre a mano para que correr el seed dos veces sea
-// idempotente en vez de duplicar filas.
-async function upsertAgentByName(data: {
-  name: string;
-  role: string;
-  systemPrompt: string;
-  voiceId: VoiceIdMap;
-}) {
-  const existing = await prisma.agent.findFirst({ where: { name: data.name } });
-  if (existing) {
-    await prisma.agent.update({ where: { id: existing.id }, data });
-    return;
+// Agent.name es @unique (migración 20260908100801_agent_name_unique) y las
+// voces tienen PK (agentId, language, provider): los dos upserts hacen que
+// correr el seed dos veces no duplique ni cambie filas.
+async function upsertAgent(data: { name: string; role: string; systemPrompt: string; voices: SeedVoice[] }) {
+  const { voices, ...agentData } = data;
+  const agent = await prisma.agent.upsert({
+    where: { name: agentData.name },
+    create: agentData,
+    update: agentData,
+  });
+
+  for (const voice of voices) {
+    await prisma.agentVoice.upsert({
+      where: {
+        agentId_language_provider: { agentId: agent.id, language: voice.language, provider: voice.provider },
+      },
+      create: { agentId: agent.id, ...voice },
+      update: { voiceId: voice.voiceId },
+    });
   }
-  await prisma.agent.create({ data });
 }
 
 async function main() {
   for (const persona of Object.values(DEBATER_PERSONAS)) {
-    await upsertAgentByName({
+    await upsertAgent({
       name: persona.displayName,
       role: persona.id,
       systemPrompt: debaterSummary(persona),
-      voiceId: DEBATER_VOICE_IDS[persona.id],
+      voices: DEBATER_VOICES[persona.id],
     });
   }
 
-  await upsertAgentByName({
+  await upsertAgent({
     name: JUDGE.displayName,
     role: JUDGE.id,
     systemPrompt: buildJudgeSystemPrompt(JUDGE),
-    voiceId: JUDGE_VOICE_ID,
+    voices: JUDGE_VOICES,
   });
 }
 

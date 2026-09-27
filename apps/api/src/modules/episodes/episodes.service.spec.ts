@@ -342,7 +342,7 @@ describe("EpisodesService", () => {
         debate: { verdict: { winnerId: "agent-1", content: "Ganó Analyst." } },
       });
       prisma.episodeParticipant.findMany.mockResolvedValue([
-        { agent: { id: "agent-1", name: "Analyst", avatarUrl: null, voiceId: { LOCAL: "es_ES-davefx-medium" } } },
+        { agent: { id: "agent-1", name: "Analyst", avatarUrl: null, voices: [{ provider: "LOCAL", voiceId: "es_ES-davefx-medium" }] } },
       ]);
       tts.resolveVoiceId.mockReturnValue("es_ES-davefx-medium");
       tts.getOrderedOfficialArguments.mockResolvedValue([
@@ -365,6 +365,8 @@ describe("EpisodesService", () => {
       tts.getSignedAudioUrl.mockResolvedValue({ url: "/audio-files/ep/audio-1.wav?sig=abc" });
 
       const manifest = await service.getManifest(EPISODE_ID);
+
+      expect(tts.resolveVoiceId).toHaveBeenCalledWith([{ provider: "LOCAL", voiceId: "es_ES-davefx-medium" }]);
 
       expect(render.buildManifest).toHaveBeenCalledWith({
         episodeId: EPISODE_ID,
