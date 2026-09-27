@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api/errors";
-import { TOPIC_MAX_LENGTH, createEpisodeErrorView, topicState } from "./create-episode";
+import { TOPIC_MAX_LENGTH, createEpisodeErrorView, parseValidationError, topicState } from "./create-episode";
 
 describe("topicState (AC 3.22)", () => {
   it("vacío o solo espacios no es válido", () => {
@@ -59,18 +59,39 @@ describe("createEpisodeErrorView", () => {
 
   it("400 VALIDATION_ERROR de topic va junto al campo con el mensaje del backend (AC 3.25)", () => {
     const view = createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", "topic: Too big: expected string to have <=300 characters"), "ES");
-    expect(view).toEqual({ field: "topic", message: "topic: Too big: expected string to have <=300 characters", detail: null });
+    // Sin el prefijo "topic: " (el mensaje ya se muestra junto al campo).
+    expect(view).toEqual({ field: "topic", message: "Too big: expected string to have <=300 characters", detail: null });
   });
 
-  it("400 VALIDATION_ERROR de language va junto al selector", () => {
+  it("400 VALIDATION_ERROR de language va junto al selector, sin el prefijo", () => {
     const view = createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", 'language: Invalid option: expected one of "ES"|"EN"|"PT"'), "ES");
     expect(view.field).toBe("language");
+    expect(view.message).toBe('Invalid option: expected one of "ES"|"EN"|"PT"');
   });
 
-  it("400 VALIDATION_ERROR sin campo reconocible va al error general", () => {
-    expect(createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", "Payload inválido."), "ES").field).toBe("form");
+  it("400 VALIDATION_ERROR sin campo reconocible va entero al error general", () => {
+    expect(createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", "Payload inválido."), "ES")).toEqual({
+      field: "form",
+      message: "Payload inválido.",
+      detail: null,
+    });
     expect(createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", ": sin path"), "ES").field).toBe("form");
-    expect(createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", "otro: algo"), "ES").field).toBe("form");
+    expect(createEpisodeErrorView(apiError(400, "VALIDATION_ERROR", "otro: algo"), "ES").message).toBe("otro: algo");
+  });
+});
+
+describe("parseValidationError (N2)", () => {
+  it("separa en el primer ':' y conserva los ':' del mensaje", () => {
+    expect(parseValidationError("topic: a: b")).toEqual({ field: "topic", message: "a: b" });
+  });
+
+  it("un campo conocido sin mensaje queda entero en el error general", () => {
+    expect(parseValidationError("topic:")).toEqual({ field: "form", message: "topic:" });
+    expect(parseValidationError("topic:   ")).toEqual({ field: "form", message: "topic:   " });
+  });
+
+  it("un path anidado o desconocido no se recorta", () => {
+    expect(parseValidationError("topic.x: algo")).toEqual({ field: "form", message: "topic.x: algo" });
   });
 
   it("un 409 con otro código no se confunde con VOICE_NOT_CONFIGURED", () => {

@@ -1,3 +1,4 @@
+import { API_ERROR_CODES } from "@/lib/api/error-codes";
 import { ApiError, errorMessage } from "@/lib/api/errors";
 import { debateLanguageLabel, type DebateLanguage } from "@/lib/debate-language";
 
@@ -37,10 +38,15 @@ export interface CreateEpisodeErrorView {
 
 // El 400 VALIDATION_ERROR de la API trae el primer issue de Zod como
 // "<path>: <mensaje>" (HttpErrorFilter.formatZodIssue), así que el campo sale
-// del prefijo. Si no matchea un campo del formulario, va al error general.
-function validationErrorField(message: string): CreateEpisodeErrorField {
-  const path = message.split(":", 1)[0]?.trim();
-  return path === "topic" || path === "language" ? path : "form";
+// del prefijo. Si matchea un campo del formulario, el mensaje se muestra
+// junto a ese campo sin el prefijo (el campo ya lo dice); si no, va entero
+// al error general.
+export function parseValidationError(message: string): { field: CreateEpisodeErrorField; message: string } {
+  const separator = message.indexOf(":");
+  const path = separator >= 0 ? message.slice(0, separator).trim() : "";
+  const rest = separator >= 0 ? message.slice(separator + 1).trim() : "";
+  if ((path === "topic" || path === "language") && rest) return { field: path, message: rest };
+  return { field: "form", message };
 }
 
 /**
@@ -54,15 +60,15 @@ function validationErrorField(message: string): CreateEpisodeErrorField {
  * - Cualquier otro → error genérico con el mensaje del envelope (AC 3.25).
  */
 export function createEpisodeErrorView(error: unknown, language: DebateLanguage): CreateEpisodeErrorView {
-  if (error instanceof ApiError && error.status === 409 && error.code === "VOICE_NOT_CONFIGURED") {
+  if (error instanceof ApiError && error.status === 409 && error.code === API_ERROR_CODES.VOICE_NOT_CONFIGURED) {
     return {
       field: "language",
       message: `No hay voces configuradas para ${debateLanguageLabel(language)} en el proveedor de audio activo. Configuralas en el seed de la API o elegí otro idioma.`,
       detail: error.message.trim() || null,
     };
   }
-  if (error instanceof ApiError && error.status === 400 && error.code === "VALIDATION_ERROR") {
-    return { field: validationErrorField(error.message), message: error.message, detail: null };
+  if (error instanceof ApiError && error.status === 400 && error.code === API_ERROR_CODES.VALIDATION_ERROR) {
+    return { ...parseValidationError(error.message), detail: null };
   }
   return { field: "form", message: `No se pudo crear el episodio. ${errorMessage(error)}`, detail: null };
 }

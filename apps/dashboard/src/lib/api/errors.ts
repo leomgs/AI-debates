@@ -1,3 +1,4 @@
+import { API_ERROR_CODES, CLIENT_UNKNOWN_ERROR_CODE } from "./error-codes";
 import type { components } from "./schema";
 
 type ErrorResponse = components["schemas"]["ErrorResponseDto"];
@@ -51,7 +52,7 @@ export function toApiError(body: unknown, response: Response): ApiError {
   }
   return new ApiError({
     status: response.status,
-    code: "UNKNOWN_ERROR",
+    code: CLIENT_UNKNOWN_ERROR_CODE,
     message: `El servidor respondió con un error (HTTP ${response.status}).`,
     retryAfterSeconds,
   });
@@ -69,7 +70,7 @@ export function unwrap<T>(result: FetchResult<T>): T {
 // Sesión ausente, alterada o vencida (AC 3.5, 3.7). El 401 del login es
 // INVALID_CREDENTIALS y no cuenta: ese lo maneja el formulario (AC 3.2).
 export function isUnauthorizedError(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 401 && error.code === "UNAUTHORIZED";
+  return error instanceof ApiError && error.status === 401 && error.code === API_ERROR_CODES.UNAUTHORIZED;
 }
 
 // Texto del "error genérico" de la spec 003: el `error.message` del envelope
