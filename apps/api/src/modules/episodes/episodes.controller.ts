@@ -1,22 +1,25 @@
 import { Body, Controller, Get, MessageEvent, Param, Post, Query, Res, Sse } from "@nestjs/common";
-import { ApiExtraModels, ApiOperation, ApiResponse, ApiTags, getSchemaPath } from "@nestjs/swagger";
+import { ApiBody, ApiExcludeEndpoint, ApiExtraModels, ApiOperation, ApiResponse, ApiTags, getSchemaPath } from "@nestjs/swagger";
 import { ZodResponse, ZodValidationPipe } from "nestjs-zod";
 import { EMPTY, Observable } from "rxjs";
 import type { Response } from "express";
 import { ErrorResponseDto } from "../../shared/http/error-response.dto";
+import { ApiErrorResponse } from "../../shared/http/api-error-response.decorator";
 import { EpisodesService } from "./episodes.service";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { TtsService } from "../tts/tts.service";
 import { CreateEpisodeDto } from "./dto/create-episode.dto";
 import { ListEpisodesQueryDto } from "./dto/list-episodes-query.dto";
 import { ActionNameSchema, type ActionName } from "./dto/episode-action-name.dto";
-import { EditActionSchema } from "./dto/edit-action.dto";
-import { RegenerateActionSchema } from "./dto/regenerate-action.dto";
-import { RegenerateAudioActionSchema } from "./dto/regenerate-audio-action.dto";
-import { ResumeActionBodySchema } from "./dto/resume-action.dto";
-import { RegenerateVerdictActionSchema } from "./dto/regenerate-verdict-action.dto";
-import { EpisodeDto, EpisodeListItemDto } from "./dto/episode.schema";
-import { EpisodeDetailDto } from "./episode-detail.mapper";
+import { EditActionDto } from "./dto/edit-action.dto";
+import { RegenerateActionDto } from "./dto/regenerate-action.dto";
+import { RegenerateAudioActionDto } from "./dto/regenerate-audio-action.dto";
+import { ResumeActionBodyDto, ResumeActionBodySchema, type ResumeActionBody } from "./dto/resume-action.dto";
+import { RegenerateVerdictActionDto } from "./dto/regenerate-verdict-action.dto";
+import { EpisodeDto, EpisodeListItemDto, serializeEpisode } from "./dto/episode.schema";
+import { ArgumentDto, serializeArgument } from "./dto/argument.schema";
+import { AudioAssetDto, SignedAudioUrlDto, serializeAudioAsset } from "./dto/audio-asset.schema";
+import { EpisodeDetailDto, EpisodeVerdictDto } from "./episode-detail.mapper";
 import { RemotionManifestDto } from "../render/remotion-manifest.dto";
 import {
   ResearchStartedEventDto,
@@ -38,6 +41,17 @@ const SSE_EVENT_DTOS = [
   HeartbeatEventDto,
 ] as const;
 
+// Descripciones de errores que se repiten entre endpoints (API-10). El
+// schema de todas es ErrorResponseDto; la descripción dice qué `code` trae
+// ese status en ese endpoint.
+const EPISODE_NOT_FOUND = "`NOT_FOUND`: el episodio no existe.";
+const INVALID_BODY = "`VALIDATION_ERROR`: body mal formado (falta un campo, tipo incorrecto o campos de más).";
+const INVALID_STATE = "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5).";
+const PROVIDER_UNAVAILABLE =
+  "`PROVIDER_QUOTA_EXCEEDED`: el proveedor no pudo atender la llamada (cuota diaria, espera del limitador por encima del tope, " +
+  "TTS caído o circuit breaker abierto). Reintentar más tarde; no consume presupuesto.";
+const PROVIDER_FAILED = "`INTERNAL_ERROR`: cualquier otra falla del proveedor. Los datos quedan como estaban.";
+
 // api-contract.md §2/§3/§4. /episodes/:id/manifest (Feature 7, P0) — la
 // mitad P1 de Render (worker de Remotion, Feature 9) sigue sin implementar.
 //
@@ -45,11 +59,11 @@ const SSE_EVENT_DTOS = [
 // nestjs-zod's ZodValidationPipe está registrado global (AppModule) y valida
 // automáticamente cualquier @Body()/@Query() tipado con una clase
 // createZodDto (por reflection del tipo del parámetro) — no hace falta
-// instanciarlo acá para esos casos. El path param `action` es la única
-// excepción real: no es un DTO de objeto, es un enum de string suelto, así
-// que sigue necesitando la instancia manual (new ZodValidationPipe(schema)) —
-// el mismo pipe de nestjs-zod también soporta ese modo, no hace falta un
-// pipe propio del proyecto para esto (ver decision-log.md, spec 001).
+// instanciarlo acá para esos casos. Dos excepciones usan la instancia
+// manual (new ZodValidationPipe(schema)) del mismo pipe de nestjs-zod: el
+// body de resume, que es una unión y no se puede tipar con su DTO
+// (resume-action.dto.ts), y el path param `action` de la ruta de acciones
+// desconocidas (ver unknownAction, al final de las acciones).
 @ApiTags("episodes")
 @Controller("episodes")
 export class EpisodesController {
@@ -62,6 +76,11 @@ export class EpisodesController {
   @Post()
   @ApiOperation({ operationId: "createEpisode" })
   @ZodResponse({ status: 201, type: EpisodeDto })
+  @ApiErrorResponse(400, INVALID_BODY)
+  @ApiErrorResponse(
+    409,
+    "`VOICE_NOT_CONFIGURED`: falta la voz de algún agente candidato para el idioma pedido y el proveedor de TTS activo. No se crea nada."
+  )
   create(@Body() dto: CreateEpisodeDto) {
     return this.episodes.createEpisode(dto.topic, dto.language);
   }
@@ -69,6 +88,7 @@ export class EpisodesController {
   @Get()
   @ApiOperation({ operationId: "listEpisodes" })
   @ZodResponse({ status: 200, type: [EpisodeListItemDto] })
+  @ApiErrorResponse(400, "`VALIDATION_ERROR`: algún valor del filtro `status` no es un EpisodeStatus.")
   list(@Query() query: ListEpisodesQueryDto) {
     return this.episodes.listEpisodes(query.status);
   }
@@ -76,6 +96,7 @@ export class EpisodesController {
   @Get(":id")
   @ApiOperation({ operationId: "getEpisodeDetail" })
   @ZodResponse({ status: 200, type: EpisodeDetailDto })
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
   detail(@Param("id") id: string) {
     return this.episodes.getEpisodeDetail(id);
   }
@@ -85,6 +106,8 @@ export class EpisodesController {
   // tira 404 si el audioAssetId no pertenece a este episodio).
   @Get(":id/audio/:audioAssetId/url")
   @ApiOperation({ operationId: "getEpisodeAudioUrl" })
+  @ZodResponse({ status: 200, type: SignedAudioUrlDto, description: "URL firmada de `/audio-files`, vence a los `AUDIO_URL_TTL_SECONDS`." })
+  @ApiErrorResponse(404, "`NOT_FOUND`: el episodio no existe o el `audioAssetId` no es de un argumento de este episodio.")
   getAudioUrl(@Param("id") id: string, @Param("audioAssetId") audioAssetId: string) {
     return this.tts.getSignedAudioUrl(id, audioAssetId);
   }
@@ -95,43 +118,143 @@ export class EpisodesController {
   @Get(":id/manifest")
   @ApiOperation({ operationId: "getEpisodeManifest" })
   @ZodResponse({ status: 200, type: RemotionManifestDto })
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
+  @ApiErrorResponse(409, "`MANIFEST_NOT_READY`: todavía no hay audio o veredicto para todos los argumentos oficiales.")
   getManifest(@Param("id") id: string) {
     return this.episodes.getManifest(id);
   }
 
-  // Un solo endpoint para las acciones (api-contract.md §3) — cada rama
-  // valida su propio DTO; el path param `action` ya viene acotado a los
-  // valores válidos por ActionNameSchema (cualquier otro valor es 400 antes
-  // de llegar acá). Sin @ZodResponse a propósito (spec 001, alcance): las 7
-  // ramas devuelven 4 shapes distintos (Episode/Argument/AudioAsset y, desde
-  // API-19, el veredicto de EpisodeVerdictSchema) y este
-  // método único no puede declarar uno solo sin mentir sobre las otras —
-  // documentar esto correctamente (unión, o separar el endpoint) queda fuera
-  // del alcance de esta primera pasada.
+  // Acciones de curaduría (api-contract.md §3): un handler por acción, todos
+  // bajo la misma URL de siempre, POST /episodes/:id/actions/<acción> (API-10).
+  // Antes era un único handler con `:action` como path param, que no podía
+  // documentar un body ni una respuesta por acción (devuelven Episode,
+  // Argument, AudioAsset o el veredicto). Con un handler por acción, cada una
+  // tiene su operationId, su body (DTO validado por el pipe global) y su
+  // @ZodResponse, y el dashboard tipa todo desde openapi.json (D5 de la spec
+  // 003). Mantienen el 201 que ya respondían (default de Nest para POST).
+  // Las filas de Prisma que devuelve EpisodeActionsService se serializan acá
+  // (serializeEpisode/serializeArgument/serializeAudioAsset, fechas a ISO):
+  // @ZodResponse exige en compilación que el handler devuelva el tipo del
+  // schema documentado. El JSON resultante es el mismo de antes (Express ya
+  // pasaba los Date a ISO).
+  // Los estados válidos de cada acción los valida EpisodeActionsService
+  // / EpisodeStateService (tabla de api-contract.md §5), no acá.
+
+  @Post(":id/actions/approve")
+  @ApiOperation({ operationId: "approveEpisode", summary: "Aprobar (PENDING_REVIEW → APPROVED). Sin body." })
+  @ZodResponse({ status: 201, type: EpisodeDto, description: "El episodio, ya en APPROVED. La síntesis de audio arranca en segundo plano." })
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
+  @ApiErrorResponse(409, INVALID_STATE)
+  async approve(@Param("id") id: string) {
+    return serializeEpisode(await this.actions.approve(id));
+  }
+
+  @Post(":id/actions/edit")
+  @ApiOperation({ operationId: "editEpisodeArgument", summary: "Editar el texto de un argumento (solo PENDING_REVIEW)." })
+  @ZodResponse({ status: 201, type: ArgumentDto, description: "El argumento editado (`origin: HUMAN_EDITED`)." })
+  @ApiErrorResponse(400, INVALID_BODY)
+  @ApiErrorResponse(404, "`NOT_FOUND`: el episodio no existe o el `argumentId` no es de un round de su debate. No se toca nada.")
+  @ApiErrorResponse(409, INVALID_STATE)
+  async edit(@Param("id") id: string, @Body() dto: EditActionDto) {
+    return serializeArgument(await this.actions.edit(id, dto));
+  }
+
+  @Post(":id/actions/regenerate")
+  @ApiOperation({
+    operationId: "regenerateEpisodeArgument",
+    summary: "Regenerar un argumento con su agente (solo PENDING_REVIEW). Sincrónica: puede tardar ~90 s.",
+  })
+  @ZodResponse({ status: 201, type: ArgumentDto, description: "El argumento con el texto nuevo (`origin: AI_GENERATED`)." })
+  @ApiErrorResponse(400, INVALID_BODY)
+  @ApiErrorResponse(404, "`NOT_FOUND`: el episodio no existe o el `argumentId` no es de un round de su debate. No se toca nada.")
+  @ApiErrorResponse(409, `${INVALID_STATE} \`USAGE_LIMIT_EXCEEDED\`: presupuesto de llamadas LLM agotado.`)
+  @ApiErrorResponse(500, PROVIDER_FAILED)
+  @ApiErrorResponse(503, PROVIDER_UNAVAILABLE)
+  async regenerate(@Param("id") id: string, @Body() dto: RegenerateActionDto) {
+    return serializeArgument(await this.actions.regenerate(id, dto));
+  }
+
+  @Post(":id/actions/reject")
+  @ApiOperation({ operationId: "rejectEpisode", summary: "Rechazar (PENDING_REVIEW o REQUIRES_HUMAN_REVIEW → CANCELLED). Sin body." })
+  @ZodResponse({ status: 201, type: EpisodeDto, description: "El episodio, ya en CANCELLED." })
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
+  @ApiErrorResponse(409, INVALID_STATE)
+  async reject(@Param("id") id: string) {
+    return serializeEpisode(await this.actions.reject(id));
+  }
+
+  // El body depende del `reason` del checkpoint activo (api-contract.md §3):
+  // ResumeActionBodySchema valida que sea alguna de las 3 formas y
+  // EpisodeActionsService.resume, que sea la de ese reason.
+  @Post(":id/actions/resume")
+  @ApiOperation({
+    operationId: "resumeEpisode",
+    summary: "Reanudar desde el checkpoint (solo REQUIRES_HUMAN_REVIEW).",
+    description:
+      "El body depende de `reason` del último checkpoint (GET /episodes/:id): `USAGE_LIMIT_EXCEEDED` → UsageLimitResumeBody " +
+      "(al menos uno de los límites); `INSUFFICIENT_EVIDENCE` → InsufficientEvidenceResumeBody; `MAX_REVISIONS_EXCEEDED`, " +
+      "`VALIDATION_INCONSISTENCY`, `PROVIDER_QUOTA_EXCEEDED` y `VOICE_NOT_CONFIGURED` → EmptyResumeBody (`{}`). " +
+      "Un body válido pero de otro motivo es 400.",
+  })
+  @ApiBody({ type: ResumeActionBodyDto })
+  @ZodResponse({ status: 201, type: EpisodeDto, description: "El episodio, ya en el estado del checkpoint. El pipeline sigue en segundo plano." })
+  @ApiErrorResponse(400, "`VALIDATION_ERROR`: el body no es ninguna de las 3 formas, o no es la que corresponde al `reason` del checkpoint.")
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
+  @ApiErrorResponse(409, `${INVALID_STATE} Se valida antes de tocar los límites (API-15).`)
+  async resume(@Param("id") id: string, @Body(new ZodValidationPipe(ResumeActionBodySchema)) body: ResumeActionBody) {
+    return serializeEpisode(await this.actions.resume(id, body));
+  }
+
+  @Post(":id/actions/regenerate-audio")
+  @ApiOperation({
+    operationId: "regenerateEpisodeAudio",
+    summary: "Regenerar el audio de un segmento (solo READY_FOR_RENDER). Sincrónica.",
+  })
+  @ZodResponse({ status: 201, type: AudioAssetDto, description: "El AudioAsset nuevo; el anterior se borra." })
+  @ApiErrorResponse(
+    400,
+    `${INVALID_BODY} \`INVALID_SEQUENCE_INDEX\`: \`sequenceIndex\` fuera de rango (1-based, mismo orden que \`timeline\` del manifest).`
+  )
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
+  @ApiErrorResponse(
+    409,
+    `${INVALID_STATE} \`USAGE_LIMIT_EXCEEDED\`: presupuesto de TTS agotado. ` +
+      "`VOICE_NOT_CONFIGURED`: falta la voz del agente para el idioma del episodio y el proveedor activo. En todos los casos el segmento queda como estaba."
+  )
+  @ApiErrorResponse(500, PROVIDER_FAILED)
+  @ApiErrorResponse(503, PROVIDER_UNAVAILABLE)
+  async regenerateAudio(@Param("id") id: string, @Body() dto: RegenerateAudioActionDto) {
+    return serializeAudioAsset(await this.actions.regenerateAudio(id, dto));
+  }
+
+  @Post(":id/actions/regenerate-verdict")
+  @ApiOperation({
+    operationId: "regenerateEpisodeVerdict",
+    summary: "Volver a juzgar (solo PENDING_REVIEW). Body `{}` estricto. Sincrónica: puede tardar ~90 s.",
+  })
+  @ZodResponse({ status: 201, type: EpisodeVerdictDto, description: "El veredicto nuevo, con el shape de `debate.verdict` del detalle." })
+  @ApiErrorResponse(400, "`VALIDATION_ERROR`: sin body o con campos de más.")
+  @ApiErrorResponse(404, EPISODE_NOT_FOUND)
+  @ApiErrorResponse(
+    409,
+    `${INVALID_STATE} También si el estado cambió mientras corría la llamada al juez. \`USAGE_LIMIT_EXCEEDED\`: presupuesto de llamadas LLM agotado.`
+  )
+  @ApiErrorResponse(500, "`INTERNAL_ERROR`: cualquier otra falla del juez. El veredicto anterior queda intacto.")
+  @ApiErrorResponse(503, PROVIDER_UNAVAILABLE)
+  regenerateVerdict(@Param("id") id: string, @Body() _body: RegenerateVerdictActionDto) {
+    return this.actions.regenerateVerdict(id);
+  }
+
+  // Cualquier otro valor de `:action`: 400 VALIDATION_ERROR, como antes de
+  // API-10, cuando `action` era path param validado con ActionNameSchema (sin
+  // esta ruta sería un 404 de Nest). Va DESPUÉS de las 7 rutas de arriba:
+  // Express prueba las rutas en el orden en que Nest las registra (el de
+  // declaración de los métodos), así que un nombre válido nunca llega acá y
+  // el pipe siempre falla. Fuera de openapi.json: no es una operación.
   @Post(":id/actions/:action")
-  @ApiOperation({ operationId: "runEpisodeAction" })
-  runAction(
-    @Param("id") id: string,
-    @Param("action", new ZodValidationPipe(ActionNameSchema)) action: ActionName,
-    @Body() body: unknown
-  ) {
-    switch (action) {
-      case "approve":
-        return this.actions.approve(id);
-      case "edit":
-        return this.actions.edit(id, EditActionSchema.parse(body));
-      case "regenerate":
-        return this.actions.regenerate(id, RegenerateActionSchema.parse(body));
-      case "reject":
-        return this.actions.reject(id);
-      case "resume":
-        return this.actions.resume(id, ResumeActionBodySchema.parse(body));
-      case "regenerate-audio":
-        return this.actions.regenerateAudio(id, RegenerateAudioActionSchema.parse(body));
-      case "regenerate-verdict":
-        RegenerateVerdictActionSchema.parse(body);
-        return this.actions.regenerateVerdict(id);
-    }
+  @ApiExcludeEndpoint()
+  unknownAction(@Param("action", new ZodValidationPipe(ActionNameSchema)) action: ActionName): never {
+    throw new Error(`La acción "${action}" tiene handler propio y no debería llegar a la ruta genérica.`);
   }
 
   // Feature 8 — OpenAPI no modela streams SSE (spec 001, restricción

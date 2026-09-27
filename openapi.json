@@ -41,8 +41,28 @@
               }
             }
           },
+          "400": {
+            "description": "`VALIDATION_ERROR`: body mal formado (falta un campo, tipo incorrecto o campos de más).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VOICE_NOT_CONFIGURED`: falta la voz de algún agente candidato para el idioma pedido y el proveedor de TTS activo. No se crea nada.",
             "content": {
               "application/json": {
                 "schema": {
@@ -69,7 +89,9 @@
             "name": "status",
             "required": false,
             "in": "query",
+            "description": "Filtro por estado: valores de EpisodeStatus separados por coma (por ejemplo `PENDING_REVIEW,REQUIRES_HUMAN_REVIEW`). Un valor que no es un EpisodeStatus es 400 `VALIDATION_ERROR`.",
             "schema": {
+              "pattern": "^(?:\\s*(?:CREATED|RESEARCHING|READY_FOR_DEBATE|DEBATING|JUDGING|PENDING_REVIEW|APPROVED|CANCELLED|FAILED|GENERATING_AUDIO|READY_FOR_RENDER|RENDERING|COMPLETED|REQUIRES_HUMAN_REVIEW)\\s*(?:,\\s*(?:CREATED|RESEARCHING|READY_FOR_DEBATE|DEBATING|JUDGING|PENDING_REVIEW|APPROVED|CANCELLED|FAILED|GENERATING_AUDIO|READY_FOR_RENDER|RENDERING|COMPLETED|REQUIRES_HUMAN_REVIEW)\\s*)*)?$",
               "type": "string"
             }
           }
@@ -84,6 +106,16 @@
                   "items": {
                     "$ref": "#/components/schemas/EpisodeListItemDto_Output"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: algún valor del filtro `status` no es un EpisodeStatus.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
                 }
               }
             }
@@ -143,6 +175,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
@@ -179,10 +221,27 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "URL firmada de `/audio-files`, vence a los `AUDIO_URL_TTL_SECONDS`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedAudioUrlDto_Output"
+                }
+              }
+            }
           },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe o el `audioAssetId` no es de un argumento de este episodio.",
             "content": {
               "application/json": {
                 "schema": {
@@ -236,6 +295,26 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`MANIFEST_NOT_READY`: todavía no hay audio o veredicto para todos los argumentos oficiales.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "",
@@ -249,20 +328,12 @@
         ]
       }
     },
-    "/episodes/{id}/actions/{action}": {
+    "/episodes/{id}/actions/approve": {
       "post": {
-        "operationId": "runEpisodeAction",
+        "operationId": "approveEpisode",
         "parameters": [
           {
             "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "action",
             "required": true,
             "in": "path",
             "schema": {
@@ -272,7 +343,14 @@
         ],
         "responses": {
           "201": {
-            "description": ""
+            "description": "El episodio, ya en APPROVED. La síntesis de audio arranca en segundo plano.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeDto_Output"
+                }
+              }
+            }
           },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
@@ -283,9 +361,586 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
           }
         },
-        "summary": "",
+        "summary": "Aprobar (PENDING_REVIEW → APPROVED). Sin body.",
+        "tags": [
+          "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/episodes/{id}/actions/edit": {
+      "post": {
+        "operationId": "editEpisodeArgument",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "El argumento editado (`origin: HUMAN_EDITED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArgumentDto_Output"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: body mal formado (falta un campo, tipo incorrecto o campos de más).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe o el `argumentId` no es de un round de su debate. No se toca nada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Editar el texto de un argumento (solo PENDING_REVIEW).",
+        "tags": [
+          "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/episodes/{id}/actions/regenerate": {
+      "post": {
+        "operationId": "regenerateEpisodeArgument",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "El argumento con el texto nuevo (`origin: AI_GENERATED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArgumentDto_Output"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: body mal formado (falta un campo, tipo incorrecto o campos de más).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe o el `argumentId` no es de un round de su debate. No se toca nada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5). `USAGE_LIMIT_EXCEEDED`: presupuesto de llamadas LLM agotado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR`: cualquier otra falla del proveedor. Los datos quedan como estaban.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`PROVIDER_QUOTA_EXCEEDED`: el proveedor no pudo atender la llamada (cuota diaria, espera del limitador por encima del tope, TTS caído o circuit breaker abierto). Reintentar más tarde; no consume presupuesto.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Regenerar un argumento con su agente (solo PENDING_REVIEW). Sincrónica: puede tardar ~90 s.",
+        "tags": [
+          "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/episodes/{id}/actions/reject": {
+      "post": {
+        "operationId": "rejectEpisode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "El episodio, ya en CANCELLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeDto_Output"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Rechazar (PENDING_REVIEW o REQUIRES_HUMAN_REVIEW → CANCELLED). Sin body.",
+        "tags": [
+          "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/episodes/{id}/actions/resume": {
+      "post": {
+        "description": "El body depende de `reason` del último checkpoint (GET /episodes/:id): `USAGE_LIMIT_EXCEEDED` → UsageLimitResumeBody (al menos uno de los límites); `INSUFFICIENT_EVIDENCE` → InsufficientEvidenceResumeBody; `MAX_REVISIONS_EXCEEDED`, `VALIDATION_INCONSISTENCY`, `PROVIDER_QUOTA_EXCEEDED` y `VOICE_NOT_CONFIGURED` → EmptyResumeBody (`{}`). Un body válido pero de otro motivo es 400.",
+        "operationId": "resumeEpisode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeActionBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "El episodio, ya en el estado del checkpoint. El pipeline sigue en segundo plano.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeDto_Output"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: el body no es ninguna de las 3 formas, o no es la que corresponde al `reason` del checkpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5). Se valida antes de tocar los límites (API-15).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reanudar desde el checkpoint (solo REQUIRES_HUMAN_REVIEW).",
+        "tags": [
+          "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/episodes/{id}/actions/regenerate-audio": {
+      "post": {
+        "operationId": "regenerateEpisodeAudio",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateAudioActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "El AudioAsset nuevo; el anterior se borra.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioAssetDto_Output"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: body mal formado (falta un campo, tipo incorrecto o campos de más). `INVALID_SEQUENCE_INDEX`: `sequenceIndex` fuera de rango (1-based, mismo orden que `timeline` del manifest).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5). `USAGE_LIMIT_EXCEEDED`: presupuesto de TTS agotado. `VOICE_NOT_CONFIGURED`: falta la voz del agente para el idioma del episodio y el proveedor activo. En todos los casos el segmento queda como estaba.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR`: cualquier otra falla del proveedor. Los datos quedan como estaban.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`PROVIDER_QUOTA_EXCEEDED`: el proveedor no pudo atender la llamada (cuota diaria, espera del limitador por encima del tope, TTS caído o circuit breaker abierto). Reintentar más tarde; no consume presupuesto.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Regenerar el audio de un segmento (solo READY_FOR_RENDER). Sincrónica.",
+        "tags": [
+          "episodes"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/episodes/{id}/actions/regenerate-verdict": {
+      "post": {
+        "operationId": "regenerateEpisodeVerdict",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateVerdictActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "El veredicto nuevo, con el shape de `debate.verdict` del detalle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeVerdictDto_Output"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR`: sin body o con campos de más.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: el episodio no existe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`INVALID_STATE_TRANSITION`: el episodio no está en un estado que admita la acción (api-contract.md §5). También si el estado cambió mientras corría la llamada al juez. `USAGE_LIMIT_EXCEEDED`: presupuesto de llamadas LLM agotado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR`: cualquier otra falla del juez. El veredicto anterior queda intacto.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`PROVIDER_QUOTA_EXCEEDED`: el proveedor no pudo atender la llamada (cuota diaria, espera del limitador por encima del tope, TTS caído o circuit breaker abierto). Reintentar más tarde; no consume presupuesto.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Volver a juzgar (solo PENDING_REVIEW). Body `{}` estricto. Sincrónica: puede tardar ~90 s.",
         "tags": [
           "episodes"
         ],
@@ -408,6 +1063,16 @@
               }
             }
           },
+          "400": {
+            "description": "`VALIDATION_ERROR`: `unreadOnly` no es `true` ni `false`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
             "content": {
@@ -456,6 +1121,16 @@
           },
           "401": {
             "description": "`UNAUTHORIZED`: falta la cookie de sesión, está alterada o venció.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND`: la notificación no existe.",
             "content": {
               "application/json": {
                 "schema": {
@@ -803,6 +1478,49 @@
           "crossExaminationRounds"
         ],
         "additionalProperties": false
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "VALIDATION_ERROR",
+          "INVALID_SEQUENCE_INDEX",
+          "UNAUTHORIZED",
+          "INVALID_CREDENTIALS",
+          "FORBIDDEN",
+          "NOT_FOUND",
+          "INVALID_STATE_TRANSITION",
+          "MANIFEST_NOT_READY",
+          "VOICE_NOT_CONFIGURED",
+          "USAGE_LIMIT_EXCEEDED",
+          "TOO_MANY_ATTEMPTS",
+          "LOGIN_BUSY",
+          "PROVIDER_QUOTA_EXCEEDED",
+          "HTTP_ERROR",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "ErrorResponseDto": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
       },
       "EpisodeListItemDto_Output": {
         "type": "object",
@@ -1218,6 +1936,18 @@
         ],
         "additionalProperties": false
       },
+      "SignedAudioUrlDto_Output": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
       "RemotionManifestDto_Output": {
         "type": "object",
         "properties": {
@@ -1379,6 +2109,320 @@
           "agents",
           "timeline",
           "verdict"
+        ],
+        "additionalProperties": false
+      },
+      "EditActionDto": {
+        "type": "object",
+        "properties": {
+          "argumentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "argumentId",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "ArgumentDto_Output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "debateRoundId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "content": {
+            "type": "string"
+          },
+          "audioAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "OFFICIAL",
+              "REJECTED"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "AI_GENERATED",
+              "HUMAN_EDITED"
+            ]
+          },
+          "respondsToId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "debateRoundId",
+          "agentId",
+          "content",
+          "audioAssetId",
+          "status",
+          "origin",
+          "respondsToId",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "RegenerateActionDto": {
+        "type": "object",
+        "properties": {
+          "argumentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "argumentId"
+        ],
+        "additionalProperties": false
+      },
+      "UsageLimitResumeBody": {
+        "type": "object",
+        "properties": {
+          "maxLlmCalls": {
+            "type": "integer",
+            "exclusiveMinimum": true,
+            "maximum": 9007199254740991,
+            "minimum": 0
+          },
+          "maxSearchQueries": {
+            "type": "integer",
+            "exclusiveMinimum": true,
+            "maximum": 9007199254740991,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "InsufficientEvidenceResumeBody": {
+        "type": "object",
+        "properties": {
+          "manualSources": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "snippet": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "url",
+                "title",
+                "snippet"
+              ]
+            }
+          }
+        },
+        "required": [
+          "manualSources"
+        ],
+        "additionalProperties": false
+      },
+      "EmptyResumeBody": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "ResumeActionBodyDto": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/UsageLimitResumeBody"
+          },
+          {
+            "$ref": "#/components/schemas/InsufficientEvidenceResumeBody"
+          },
+          {
+            "$ref": "#/components/schemas/EmptyResumeBody"
+          }
+        ]
+      },
+      "RegenerateAudioActionDto": {
+        "type": "object",
+        "properties": {
+          "sequenceIndex": {
+            "type": "integer",
+            "exclusiveMinimum": true,
+            "maximum": 9007199254740991,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sequenceIndex"
+        ],
+        "additionalProperties": false
+      },
+      "AudioAssetDto_Output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ELEVENLABS",
+              "OPENAI",
+              "GOOGLE_TTS",
+              "LOCAL",
+              "OPENROUTER"
+            ]
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "subtitles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "startMs": {
+                  "type": "number"
+                },
+                "endMs": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "text",
+                "startMs",
+                "endMs"
+              ],
+              "additionalProperties": false
+            },
+            "nullable": true
+          },
+          "voiceId": {
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "storageKey",
+          "provider",
+          "durationMs",
+          "mimeType",
+          "subtitles",
+          "voiceId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "RegenerateVerdictActionDto": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "EpisodeVerdictDto_Output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "judgeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "content": {
+            "type": "string"
+          },
+          "winnerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "judgeId",
+          "content",
+          "winnerId",
+          "createdAt",
+          "stale"
         ],
         "additionalProperties": false
       },
@@ -1624,29 +2668,6 @@
         },
         "required": [
           "type"
-        ]
-      },
-      "ErrorResponseDto": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "object",
-            "properties": {
-              "code": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "code",
-              "message"
-            ]
-          }
-        },
-        "required": [
-          "error"
         ]
       },
       "NotificationDto_Output": {

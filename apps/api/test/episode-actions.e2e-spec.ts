@@ -10,13 +10,24 @@ import { configureApp } from './../src/configure-app';
 import type { Env } from './../src/shared/config/env.schema';
 import { PrismaService } from './../src/shared/prisma/prisma.service';
 import { AgentsService } from './../src/modules/agents/agents.service';
-import { AUDIO_PROVIDER } from './../src/modules/tts/tts.tokens';
+import {
+  AUDIO_PROVIDER,
+  AUDIO_STORAGE,
+} from './../src/modules/tts/tts.tokens';
 import { DailyQuotaExceededError } from './../src/modules/ai/ai.errors';
 import { TtsProviderUnavailableError } from './../src/modules/tts/tts.errors';
 import {
   EpisodeDetailSchema,
   EpisodeVerdictSchema,
 } from './../src/modules/episodes/episode-detail.mapper';
+import { EpisodeSchema } from './../src/modules/episodes/dto/episode.schema';
+import { ArgumentSchema } from './../src/modules/episodes/dto/argument.schema';
+import {
+  AudioAssetSchema,
+  SignedAudioUrlSchema,
+} from './../src/modules/episodes/dto/audio-asset.schema';
+import { ErrorResponseSchema } from './../src/shared/http/error-response.dto';
+import { EpisodeOrchestratorService } from './../src/modules/episodes/episode-orchestrator.service';
 import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 
 // Spec 003: API-10b (mapeo de errores de proveedor y presupuesto), API-14
@@ -29,6 +40,13 @@ import { E2E_CURATOR_PASSWORD, E2E_CURATOR_USERNAME } from './e2e-auth.fixture';
 // provider.synthesize) hasta HttpErrorFilter (review F2-2).
 const agentsMock = { judge: jest.fn(), createDebateAgent: jest.fn() };
 const audioProviderMock = { synthesize: jest.fn() };
+// API-10: storage mockeado para que regenerate-audio no escriba en
+// AUDIO_STORAGE_DIR y la URL firmada sea predecible.
+const audioStorageMock = {
+  save: jest.fn(),
+  getSignedUrl: jest.fn(),
+  delete: jest.fn(),
+};
 
 async function createApp(): Promise<INestApplication<App>> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -38,6 +56,8 @@ async function createApp(): Promise<INestApplication<App>> {
     .useValue(agentsMock)
     .overrideProvider(AUDIO_PROVIDER)
     .useValue(audioProviderMock)
+    .overrideProvider(AUDIO_STORAGE)
+    .useValue(audioStorageMock)
     .compile();
   const app = moduleFixture.createNestApplication<NestExpressApplication>();
   configureApp(app, app.get<ConfigService<Env, true>>(ConfigService));
@@ -461,6 +481,209 @@ describe('Acciones de curaduría (e2e): API-10b, API-14 y API-19', () => {
         where: { episodeId: episode.id },
       });
       expect(usage.ttsRequests).toBe(0);
+    });
+  });
+
+  // API-10: cada acción tiene su operationId y su @ZodResponse en
+  // openapi.json. @ZodResponse no valida la respuesta en runtime (no hay
+  // ZodSerializerInterceptor registrado): documenta y tipa. Estos tests
+  // comparan la respuesta real con el schema documentado, en modo estricto,
+  // para que un campo que el schema no declara también falle.
+  describe('API-10: respuestas de las acciones contra el schema documentado', () => {
+    // El pipeline que approve/resume disparan en segundo plano no es parte
+    // de lo que se prueba acá (llamaría a los agentes mockeados).
+    const stubPipeline = (method: 'runPipeline' | 'runAudioPipeline') =>
+      jest
+        .spyOn(app.get(EpisodeOrchestratorService), method)
+        .mockResolvedValue(undefined);
+
+    it('approve → 201 con el Episode en APPROVED', async () => {
+      const { episode } = await seedReviewedEpisode(prisma);
+      const audioPipeline = stubPipeline('runAudioPipeline');
+      try {
+        const res = await action(episode.id, 'approve').expect(201);
+
+        const body = EpisodeSchema.strict().parse(res.body);
+        expect(body).toMatchObject({ id: episode.id, status: 'APPROVED' });
+        expect(audioPipeline).toHaveBeenCalledWith(episode.id);
+      } finally {
+        audioPipeline.mockRestore();
+      }
+    });
+
+    it('reject → 201 con el Episode en CANCELLED', async () => {
+      const { episode } = await seedReviewedEpisode(prisma);
+
+      const res = await action(episode.id, 'reject').expect(201);
+
+      expect(EpisodeSchema.strict().parse(res.body)).toMatchObject({
+        id: episode.id,
+        status: 'CANCELLED',
+      });
+    });
+
+    it('resume (USAGE_LIMIT_EXCEEDED) → 201 con el Episode en el estado del checkpoint y el límite nuevo', async () => {
+      const { episode } = await seedReviewedEpisode(prisma);
+      await prisma.episode.update({
+        where: { id: episode.id },
+        data: { status: 'REQUIRES_HUMAN_REVIEW' },
+      });
+      await prisma.episodeCheckpoint.create({
+        data: {
+          episodeId: episode.id,
+          fromState: 'DEBATING',
+          reason: 'USAGE_LIMIT_EXCEEDED',
+          snapshot: '{}',
+        },
+      });
+      const pipeline = stubPipeline('runPipeline');
+      try {
+        const res = await action(episode.id, 'resume', {
+          maxLlmCalls: 40,
+        }).expect(201);
+
+        expect(EpisodeSchema.strict().parse(res.body)).toMatchObject({
+          id: episode.id,
+          status: 'DEBATING',
+          maxLlmCalls: 40,
+        });
+        expect(pipeline).toHaveBeenCalledWith(episode.id, undefined);
+      } finally {
+        pipeline.mockRestore();
+      }
+    });
+
+    it('edit y regenerate → 201 con el Argument', async () => {
+      const { episode, argument } = await seedReviewedEpisode(prisma);
+
+      const edited = await action(episode.id, 'edit', {
+        argumentId: argument.id,
+        content: 'Texto del curador.',
+      }).expect(201);
+      expect(ArgumentSchema.strict().parse(edited.body)).toMatchObject({
+        id: argument.id,
+        content: 'Texto del curador.',
+        origin: 'HUMAN_EDITED',
+        status: 'OFFICIAL',
+      });
+
+      const regenerated = await action(episode.id, 'regenerate', {
+        argumentId: argument.id,
+      }).expect(201);
+      expect(ArgumentSchema.strict().parse(regenerated.body)).toMatchObject({
+        id: argument.id,
+        content: 'Argumento regenerado.',
+        status: 'OFFICIAL',
+      });
+    });
+
+    it('regenerate-verdict → 201 con el veredicto; sin body → 400 VALIDATION_ERROR', async () => {
+      const { episode, judge } = await seedReviewedEpisode(prisma);
+      agentsMock.judge.mockResolvedValue({
+        content: 'Veredicto nuevo.',
+        winnerAgentId: null,
+      });
+
+      const res = await action(episode.id, 'regenerate-verdict', {}).expect(
+        201,
+      );
+      expect(EpisodeVerdictSchema.strict().parse(res.body)).toMatchObject({
+        judgeId: judge.id,
+        stale: false,
+      });
+
+      const noBody = await action(episode.id, 'regenerate-verdict').expect(400);
+      expect(ErrorResponseSchema.parse(noBody.body).error.code).toBe(
+        'VALIDATION_ERROR',
+      );
+    });
+
+    it('regenerate-audio → 201 con el AudioAsset nuevo, y su URL firmada → 200', async () => {
+      const { episode, argument } = await seedReviewedEpisode(prisma, {
+        status: 'READY_FOR_RENDER',
+      });
+      audioProviderMock.synthesize.mockResolvedValue({
+        audioBuffer: Buffer.from('wav'),
+        durationMs: 1200,
+        mimeType: 'audio/wav',
+        subtitles: [{ text: 'Argumento', startMs: 0, endMs: 600 }],
+      });
+      audioStorageMock.save.mockResolvedValue(undefined);
+
+      const res = await action(episode.id, 'regenerate-audio', {
+        sequenceIndex: 1,
+      }).expect(201);
+
+      const asset = AudioAssetSchema.strict().parse(res.body);
+      expect(asset).toMatchObject({
+        provider: 'LOCAL',
+        durationMs: 1200,
+        mimeType: 'audio/wav',
+        voiceId: 'x',
+        subtitles: [{ text: 'Argumento', startMs: 0, endMs: 600 }],
+      });
+      expect(
+        await prisma.argument.findUniqueOrThrow({ where: { id: argument.id } }),
+      ).toMatchObject({ audioAssetId: asset.id });
+
+      audioStorageMock.getSignedUrl.mockResolvedValue(
+        `/audio-files/${asset.storageKey}?expires=1&sig=abc`,
+      );
+      const url = await request(app.getHttpServer())
+        .get(`/episodes/${episode.id}/audio/${asset.id}/url`)
+        .set('Cookie', cookie)
+        .expect(200);
+      expect(SignedAudioUrlSchema.strict().parse(url.body)).toEqual({
+        url: `/audio-files/${asset.storageKey}?expires=1&sig=abc`,
+      });
+    });
+
+    it('los errores de las acciones salen con el envelope documentado', async () => {
+      const { episode } = await seedReviewedEpisode(prisma, {
+        status: 'APPROVED',
+      });
+
+      const res = await action(episode.id, 'approve').expect(409);
+
+      expect(ErrorResponseSchema.parse(res.body)).toEqual({
+        error: {
+          code: 'INVALID_STATE_TRANSITION',
+          message: expect.any(String),
+        },
+      });
+    });
+
+    // Las HttpException de Nest ya no arman el code con el nombre de la
+    // clase (BADREQUEST, NOTFOUND): salen con el code del enum de su status.
+    it('HttpException de Nest → code del enum: status inválido en GET /episodes es VALIDATION_ERROR y una ruta inexistente NOT_FOUND', async () => {
+      const invalidFilter = await request(app.getHttpServer())
+        .get('/episodes?status=NO_EXISTE')
+        .set('Cookie', cookie)
+        .expect(400);
+      expect(ErrorResponseSchema.parse(invalidFilter.body).error.code).toBe(
+        'VALIDATION_ERROR',
+      );
+
+      const unknownRoute = await request(app.getHttpServer())
+        .get('/ruta-que-no-existe')
+        .set('Cookie', cookie)
+        .expect(404);
+      expect(ErrorResponseSchema.parse(unknownRoute.body).error.code).toBe(
+        'NOT_FOUND',
+      );
+    });
+
+    // Antes de API-10 `action` era un path param validado con
+    // ActionNameSchema; con un handler por acción, la ruta genérica que queda
+    // al final mantiene ese 400 (sin ella sería un 404).
+    it('acción desconocida → 400 VALIDATION_ERROR, como antes', async () => {
+      const { episode } = await seedReviewedEpisode(prisma);
+
+      const res = await action(episode.id, 'no-existe', {}).expect(400);
+
+      expect(ErrorResponseSchema.parse(res.body).error.code).toBe(
+        'VALIDATION_ERROR',
+      );
     });
   });
 });

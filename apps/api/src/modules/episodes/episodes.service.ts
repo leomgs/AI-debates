@@ -12,7 +12,7 @@ import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EpisodeEventsService } from "./episode-events.service";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EPISODE_DETAIL_INCLUDE, mapEpisodeDetail, EpisodeDetailResponse } from "./episode-detail.mapper";
-import type { SerializedEpisode, SerializedEpisodeListItem } from "./dto/episode.schema";
+import { serializeEpisode, type SerializedEpisode, type SerializedEpisodeListItem } from "./dto/episode.schema";
 
 const VALID_STATUSES = new Set<string>(Object.values(EpisodeStatus));
 
@@ -67,15 +67,7 @@ export class EpisodesService {
       .runPipeline(episode.id)
       .catch((err) => this.logger.error(`runPipeline falló para el episodio ${episode.id}`, err instanceof Error ? err.stack : err));
 
-    // z.date() no es representable en JSON Schema bajo Zod 4 (spec 001,
-    // EpisodeSchema usa z.iso.datetime()) — se serializa acá, en el borde
-    // HTTP, no en Prisma.
-    return {
-      ...episode,
-      createdAt: episode.createdAt.toISOString(),
-      updatedAt: episode.updatedAt.toISOString(),
-      publishedAt: episode.publishedAt ? episode.publishedAt.toISOString() : null,
-    };
+    return serializeEpisode(episode);
   }
 
   async listEpisodes(statusCsv?: string): Promise<SerializedEpisodeListItem[]> {

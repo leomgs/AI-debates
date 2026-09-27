@@ -4,6 +4,7 @@ import { SwaggerModule } from '@nestjs/swagger';
 import { join, resolve } from 'path';
 import type { Request, Response } from 'express';
 import { HttpErrorFilter } from './shared/http/http-error.filter';
+import type { ErrorResponse } from './shared/http/error-response.dto';
 import type { Env } from './shared/config/env.schema';
 import { verifyAudioUrlSignature } from './modules/tts/audio-url-signer';
 import { buildOpenApiDocument } from './shared/http/openapi-document';
@@ -48,7 +49,11 @@ export function configureApp(app: NestExpressApplication, config: ConfigService<
     const expiresAt = Number(req.query.expires);
     const sig = typeof req.query.sig === 'string' ? req.query.sig : '';
     if (!verifyAudioUrlSignature(audioSigningSecret, storageKey, expiresAt, sig)) {
-      res.status(403).json({ error: { code: 'FORBIDDEN', message: 'URL de audio inválida o expirada.' } });
+      // Fuera de Nest (no pasa por HttpErrorFilter): `satisfies` ata el code
+      // al mismo enum que documenta openapi.json (API-10).
+      res.status(403).json({
+        error: { code: 'FORBIDDEN', message: 'URL de audio inválida o expirada.' },
+      } satisfies ErrorResponse);
       return;
     }
     next();

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createZodDto } from "nestjs-zod";
+import type { Episode } from "@prisma/client";
 import { DebateLanguageSchema } from "@ai-trend-debates/contracts";
 import { EpisodeStatusSchema } from "./episode-status.schema";
 
@@ -43,6 +44,18 @@ export const EpisodeSchema = z.object({
 // .../resume devuelven la fila completa (EpisodeActionsService).
 export class EpisodeDto extends createZodDto(EpisodeSchema) {}
 export type SerializedEpisode = z.infer<typeof EpisodeSchema>;
+
+// z.date() no es representable en JSON Schema bajo Zod 4 (spec 001) — las
+// fechas se serializan en el borde HTTP, no en Prisma. Lo usan
+// createEpisode y, desde API-10, las acciones approve/reject/resume.
+export function serializeEpisode(episode: Episode): SerializedEpisode {
+  return {
+    ...episode,
+    createdAt: episode.createdAt.toISOString(),
+    updatedAt: episode.updatedAt.toISOString(),
+    publishedAt: episode.publishedAt ? episode.publishedAt.toISOString() : null,
+  };
+}
 
 // api-contract.md §2 — GET /episodes. Shape ya recortado en
 // EpisodesService.EpisodeListItem (episodes.service.ts) — este schema

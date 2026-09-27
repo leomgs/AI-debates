@@ -9,6 +9,8 @@ import { SequenceIndexOutOfRangeError, TtsProviderUnavailableError, VoiceNotConf
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
 import { ManifestNotReadyError } from "../../modules/render/render.errors";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
+import type { ErrorCode } from "./error-codes";
+import type { ErrorResponse } from "./error-response.dto";
 
 // Reusado por los dos branches que terminan en 400 VALIDATION_ERROR: el
 // ZodError "crudo" del pipe propio (path param `action`) y el que envuelve
@@ -19,6 +21,30 @@ import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } fr
 function formatZodIssue(error: ZodError): string {
   const first = error.issues[0];
   return first ? `${first.path.join(".")}: ${first.message}` : "Payload inválido.";
+}
+
+// API-10: las HttpException de Nest (las que lanza el código, como la
+// UnauthorizedException del SessionGuard o la BadRequestException del
+// filtro de status de GET /episodes, y las propias de Nest, como el 404 de
+// una ruta inexistente) salen con un code del enum según su status. Antes el
+// code se armaba con el nombre de la clase, así que no se podía enumerar:
+// un 404 de ruta salía NOTFOUND y un 400 BADREQUEST. Ahora son NOT_FOUND y
+// VALIDATION_ERROR, los mismos que ya emitían Prisma P2025 y Zod.
+function codeForHttpStatus(status: number): ErrorCode {
+  switch (status) {
+    case 400:
+      return "VALIDATION_ERROR";
+    case 401:
+      return "UNAUTHORIZED";
+    case 403:
+      return "FORBIDDEN";
+    case 404:
+      return "NOT_FOUND";
+    case 500:
+      return "INTERNAL_ERROR";
+    default:
+      return "HTTP_ERROR";
+  }
 }
 
 // Formato de error HTTP consistente en todo el backend (api-contract.md §1,
@@ -39,10 +65,12 @@ export class HttpErrorFilter implements ExceptionFilter {
     }
 
     for (const [name, value] of Object.entries(headers ?? {})) response.setHeader(name, value);
-    response.status(status).json({ error: { code, message } });
+    response.status(status).json({ error: { code, message } } satisfies ErrorResponse);
   }
 
-  private resolve(exception: unknown): { status: number; code: string; message: string; headers?: Record<string, string> } {
+  // `code` tipado con ErrorCode (API-10): el filtro no puede emitir un código
+  // que no esté en el enum que documenta openapi.json.
+  private resolve(exception: unknown): { status: number; code: ErrorCode; message: string; headers?: Record<string, string> } {
     if (exception instanceof InvalidEpisodeTransitionError) {
       return { status: 409, code: "INVALID_STATE_TRANSITION", message: exception.message };
     }
@@ -152,7 +180,7 @@ export class HttpErrorFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const response = exception.getResponse();
       const message = typeof response === "string" ? response : ((response as { message?: string }).message ?? exception.message);
-      return { status, code: exception.name.replace(/Exception$/, "").toUpperCase() || "HTTP_ERROR", message };
+      return { status, code: codeForHttpStatus(status), message };
     }
 
     const message = exception instanceof Error ? exception.message : "Error interno.";

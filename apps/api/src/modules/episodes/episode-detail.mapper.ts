@@ -4,6 +4,7 @@ import { createZodDto } from "nestjs-zod";
 import { DebateLanguageSchema } from "@ai-trend-debates/contracts";
 import { EpisodeStatusSchema } from "./dto/episode-status.schema";
 import { CheckpointReasonSchema } from "./dto/checkpoint-reason.schema";
+import { ArgumentOriginSchema } from "./dto/argument.schema";
 
 // Shape exacto del include usado por EpisodesService.getEpisodeDetail —
 // vive acá (no en episodes.service.ts) para que el mapper y la query que lo
@@ -46,6 +47,9 @@ export const EpisodeVerdictSchema = z.object({
   stale: z.boolean(),
 });
 export type SerializedVerdict = z.infer<typeof EpisodeVerdictSchema>;
+
+// API-10 (@ZodResponse) — POST /episodes/:id/actions/regenerate-verdict.
+export class EpisodeVerdictDto extends createZodDto(EpisodeVerdictSchema) {}
 
 export function serializeVerdict(verdict: Verdict, stale: boolean): SerializedVerdict {
   return {
@@ -130,7 +134,7 @@ export const EpisodeDetailSchema = z.object({
             id: z.string().uuid(),
             agentId: z.string().uuid(),
             content: z.string(),
-            origin: z.enum(["AI_GENERATED", "HUMAN_EDITED"]),
+            origin: ArgumentOriginSchema,
             respondsToId: z.string().uuid().nullable(),
             createdAt: z.iso.datetime(),
           })

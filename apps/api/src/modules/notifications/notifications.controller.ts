@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { ZodResponse } from "nestjs-zod";
+import { ApiErrorResponse } from "../../shared/http/api-error-response.decorator";
 import { NotificationsService } from "./notifications.service";
 import { ListNotificationsQueryDto } from "./dto/list-notifications-query.dto";
 import { MarkAllNotificationsReadDto, NotificationDto } from "./dto/notification.schema";
@@ -20,6 +21,7 @@ export class NotificationsController {
   @Get()
   @ApiOperation({ operationId: "listNotifications" })
   @ZodResponse({ status: 200, type: [NotificationDto] })
+  @ApiErrorResponse(400, "`VALIDATION_ERROR`: `unreadOnly` no es `true` ni `false`.")
   list(@Query() query: ListNotificationsQueryDto) {
     return this.notifications.list(query.unreadOnly ?? true);
   }
@@ -27,6 +29,7 @@ export class NotificationsController {
   @Post(":id/read")
   @ApiOperation({ operationId: "markNotificationRead" })
   @ZodResponse({ status: 201, type: NotificationDto, description: "La notificación, con `readAt` ya seteado." })
+  @ApiErrorResponse(404, "`NOT_FOUND`: la notificación no existe.")
   read(@Param("id") id: string) {
     return this.notifications.markRead(id);
   }

@@ -1,11 +1,17 @@
 import type { ArgumentsHost } from "@nestjs/common";
-import { UnauthorizedException } from "@nestjs/common";
+import * as nestCommon from "@nestjs/common";
+import { HttpException, UnauthorizedException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { ZodError } from "zod";
+import { ZodValidationException } from "nestjs-zod";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
-import { BudgetExceededError } from "../../modules/episodes/episodes.errors";
+import { BudgetExceededError, InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
-import { TtsProviderUnavailableError, VoiceNotConfiguredError } from "../../modules/tts/tts.errors";
+import { SequenceIndexOutOfRangeError, TtsProviderUnavailableError, VoiceNotConfiguredError } from "../../modules/tts/tts.errors";
+import { ManifestNotReadyError } from "../../modules/render/render.errors";
 import { BrokenCircuitError } from "cockatiel";
 import { HttpErrorFilter } from "./http-error.filter";
+import { ErrorCodeSchema } from "./error-codes";
 
 function run(exception: unknown) {
   const response = { status: jest.fn(), json: jest.fn(), setHeader: jest.fn() };
@@ -91,5 +97,71 @@ describe("HttpErrorFilter — voces (spec 004, D15)", () => {
     expect(error.message).toMatch(/idioma EN/);
     expect(error.message).toMatch(/"LOCAL"/);
     expect(error.message).toMatch(/Analista \(ANALYST\), rol JUDGE \(sin fila Agent\)/);
+  });
+});
+
+// API-10: el enum ErrorCode (error-codes.ts) es lo que documenta openapi.json
+// y lo que tipa el dashboard. `resolve` ya está tipado con ErrorCode, así que
+// un code nuevo fuera del enum no compila; esto cubre lo que el tipo no ve:
+// que cada rama del filtro, y cualquier HttpException de Nest, termine en un
+// code del enum en runtime, y que el enum no documente codes que nadie emite.
+describe("HttpErrorFilter — codes documentados en openapi.json (API-10)", () => {
+  // Todas las HttpException que exporta @nestjs/common (NotFoundException,
+  // PayloadTooLargeException, ...): pueden llegar del código o de Nest (una
+  // ruta inexistente es NotFoundException).
+  const nestHttpExceptions = (Object.values(nestCommon) as unknown[])
+    .filter(
+      (value): value is new () => HttpException =>
+        typeof value === "function" && value !== HttpException && value.prototype instanceof HttpException
+    )
+    .map((Exception) => new Exception());
+
+  // Una excepción por rama del filtro, en el mismo orden.
+  const branchExceptions: unknown[] = [
+    new InvalidEpisodeTransitionError("APPROVED", "approve"),
+    new SequenceIndexOutOfRangeError("ep", 9, 3),
+    new ManifestNotReadyError("ep"),
+    new VoiceNotConfiguredError("EN", "LOCAL", ["Analista (ANALYST)"]),
+    new BudgetExceededError("USAGE_LIMIT_EXCEEDED", "llmCalls", 25),
+    new DailyQuotaExceededError("GOOGLE", 500),
+    new RateLimitWaitExceededError("GOOGLE", 120_000, 90_000),
+    new TtsProviderUnavailableError("LOCAL"),
+    new BrokenCircuitError(),
+    new InvalidCredentialsError(),
+    new LoginBusyError(1),
+    new TooManyLoginAttemptsError(840),
+    new ZodError([]),
+    new ZodValidationException(new ZodError([])),
+    new Prisma.PrismaClientKnownRequestError("no existe", { code: "P2025", clientVersion: "test" }),
+    new HttpException("teapot", 418),
+    new Error("cualquier otro"),
+    "ni siquiera un Error",
+  ];
+
+  const emitted = [...branchExceptions, ...nestHttpExceptions].map((exception) => {
+    const body = run(exception).json.mock.calls[0][0] as { error: { code: string } };
+    return body.error.code;
+  });
+
+  it("cubre las HttpException de Nest (sanity check del filtro de exports)", () => {
+    expect(nestHttpExceptions.length).toBeGreaterThan(15);
+  });
+
+  it("todo code que emite el filtro está en el enum ErrorCode", () => {
+    const documented = new Set<string>(ErrorCodeSchema.options);
+    expect(emitted.filter((code) => !documented.has(code))).toEqual([]);
+  });
+
+  it("el enum no documenta codes que el filtro no emite", () => {
+    expect([...new Set(emitted)].sort()).toEqual([...ErrorCodeSchema.options].sort());
+  });
+
+  it("las HttpException genéricas salen con un code fijo por status, no con el nombre de la clase", () => {
+    const codeOf = (exception: unknown) => (run(exception).json.mock.calls[0][0] as { error: { code: string } }).error.code;
+    expect(codeOf(new nestCommon.BadRequestException("status inválido"))).toBe("VALIDATION_ERROR");
+    expect(codeOf(new nestCommon.NotFoundException("Cannot POST /x"))).toBe("NOT_FOUND");
+    expect(codeOf(new nestCommon.ForbiddenException())).toBe("FORBIDDEN");
+    expect(codeOf(new nestCommon.PayloadTooLargeException())).toBe("HTTP_ERROR");
+    expect(run(new nestCommon.PayloadTooLargeException()).status).toHaveBeenCalledWith(413);
   });
 });
