@@ -244,18 +244,15 @@ describe('TtsService', () => {
     });
   });
 
-  describe('resolveVoiceId (spec 004, ADR 0002 punto 4)', () => {
-    const agent = argumentWithAgent().agent as never;
-
-    it('elige la fila de AgentVoice del idioma pedido y del provider activo (TTS_PROVIDER)', () => {
-      expect(service.resolveVoiceId(agent, 'ES')).toBe('test-es-analyst');
-      expect(service.resolveVoiceId(agent, 'EN')).toBe('test-en-analyst');
-    });
-
-    it('sin fila para el idioma y el provider activo tira VoiceNotConfiguredError con idioma, proveedor y agente (D14, D15)', () => {
+  // resolveVoiceId es privada desde 13.7 (el manifest ya no la usa, spec 004
+  // D17 revisado): se ejercita por synthesizeSegment, único camino que la
+  // usa. La elección por idioma (ES/EN) ya la cubren los tests de
+  // synthesizeSegment de más arriba.
+  describe('resolución de voz al sintetizar (spec 004, ADR 0002 punto 4)', () => {
+    it('sin fila para el idioma y el provider activo tira VoiceNotConfiguredError con idioma, proveedor y agente (D14, D15)', async () => {
       let error: unknown;
       try {
-        service.resolveVoiceId(agent, 'PT');
+        await service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never, 'PT');
       } catch (err) {
         error = err;
       }
@@ -269,9 +266,12 @@ describe('TtsService', () => {
       expect(voiceError.message).toMatch(/Analista \(ANALYST\)/);
     });
 
-    it('una voz de otro proveedor para el mismo idioma no cuenta (sin respaldo)', () => {
-      const soloGoogle = { name: 'Juez', role: 'JUDGE', voices: [{ language: 'ES', provider: 'GOOGLE_TTS', voiceId: 'es' }] };
-      expect(() => service.resolveVoiceId(soloGoogle as never, 'ES')).toThrow(VoiceNotConfiguredError);
+    it('una voz de otro proveedor para el mismo idioma no cuenta (sin respaldo)', async () => {
+      const soloGoogle = { id: 'agent-2', name: 'Juez', role: 'JUDGE', voices: [{ language: 'ES', provider: 'GOOGLE_TTS', voiceId: 'es' }] };
+      await expect(service.synthesizeSegment(EPISODE_ID, argumentWithAgent({ agent: soloGoogle }) as never, 'ES')).rejects.toThrow(
+        VoiceNotConfiguredError
+      );
+      expect(provider.synthesize).not.toHaveBeenCalled();
     });
   });
 

@@ -1,6 +1,7 @@
 import { Prisma, Verdict } from "@prisma/client";
 import { z } from "zod";
 import { createZodDto } from "nestjs-zod";
+import { DebateLanguageSchema } from "@ai-trend-debates/contracts";
 import { EpisodeStatusSchema } from "./dto/episode-status.schema";
 import { CheckpointReasonSchema } from "./dto/checkpoint-reason.schema";
 
@@ -70,12 +71,14 @@ export const EpisodeDetailSchema = z.object({
   // hasta que EpisodeRecoveryService lo retome al reiniciar (AC 3.39).
   pipelineActive: z.boolean(),
   // API-1, parte 1 (spec 003, AC 3.26-3.29): cabecera del detalle y nombres
-  // de los agentes del timeline y del veredicto. `language` (parte 2) llega
-  // con la migración de la spec 004 (tasks.md §13.7).
+  // de los agentes del timeline y del veredicto.
   topic: z.object({
     id: z.string().uuid(),
     title: z.string(),
   }),
+  // API-1, parte 2 (spec 004, AC 4.18): idioma del debate, desde
+  // Episode.language.
+  language: DebateLanguageSchema,
   createdAt: z.iso.datetime(),
   // API-7a (D10): distintivo "Publicado". null hasta que exista la acción
   // `publish` (API-7).
@@ -161,6 +164,7 @@ export function mapEpisodeDetail(
     status: episode.status,
     pipelineActive: runtime.pipelineActive,
     topic: { id: episode.debate.topic.id, title: episode.debate.topic.title },
+    language: episode.language,
     createdAt: episode.createdAt.toISOString(),
     publishedAt: episode.publishedAt ? episode.publishedAt.toISOString() : null,
     participants: episode.participants.map((p) => ({

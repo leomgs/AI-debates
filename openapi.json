@@ -657,6 +657,14 @@
       }
     },
     "schemas": {
+      "DebateLanguage": {
+        "type": "string",
+        "enum": [
+          "ES",
+          "EN",
+          "PT"
+        ]
+      },
       "CreateEpisodeDto": {
         "type": "object",
         "properties": {
@@ -664,12 +672,24 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 300
+          },
+          "language": {
+            "default": "ES",
+            "$ref": "#/components/schemas/DebateLanguage"
           }
         },
         "required": [
           "topic"
         ],
         "additionalProperties": false
+      },
+      "DebateLanguage_Output": {
+        "type": "string",
+        "enum": [
+          "ES",
+          "EN",
+          "PT"
+        ]
       },
       "EpisodeDto_Output": {
         "type": "object",
@@ -708,6 +728,9 @@
               "COMPLETED",
               "REQUIRES_HUMAN_REVIEW"
             ]
+          },
+          "language": {
+            "$ref": "#/components/schemas/DebateLanguage_Output"
           },
           "createdAt": {
             "type": "string",
@@ -767,6 +790,7 @@
           "title",
           "remotionManifest",
           "status",
+          "language",
           "createdAt",
           "updatedAt",
           "publishedAt",
@@ -810,6 +834,9 @@
           "title": {
             "type": "string"
           },
+          "language": {
+            "$ref": "#/components/schemas/DebateLanguage_Output"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -826,6 +853,7 @@
           "id",
           "status",
           "title",
+          "language",
           "createdAt",
           "publishedAt"
         ],
@@ -878,6 +906,9 @@
               "title"
             ],
             "additionalProperties": false
+          },
+          "language": {
+            "$ref": "#/components/schemas/DebateLanguage_Output"
           },
           "createdAt": {
             "type": "string",
@@ -1176,6 +1207,7 @@
           "status",
           "pipelineActive",
           "topic",
+          "language",
           "createdAt",
           "publishedAt",
           "participants",
@@ -1185,14 +1217,6 @@
           "debate"
         ],
         "additionalProperties": false
-      },
-      "DebateLanguage_Output": {
-        "type": "string",
-        "enum": [
-          "ES",
-          "EN",
-          "PT"
-        ]
       },
       "RemotionManifestDto_Output": {
         "type": "object",
@@ -1243,7 +1267,10 @@
                   ]
                 },
                 "voiceId": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [

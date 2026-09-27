@@ -5,14 +5,19 @@ import { RemotionManifestSchema } from '@ai-trend-debates/contracts';
 const EPISODE_ID = '11111111-1111-4111-8111-111111111111';
 const AGENT_A = 'agent-a';
 const AGENT_B = 'agent-b';
+const JUDGE = 'agent-judge';
 
 function baseInput(overrides: Partial<BuildManifestInput> = {}): BuildManifestInput {
   return {
     episodeId: EPISODE_ID,
     topic: '¿La IA reemplazará a los programadores?',
+    language: 'ES',
+    // Ids de voz visiblemente ficticios (spec 004, D14). El juez no tiene
+    // segmentos, así que no tiene voz guardada: null (D17 revisado).
     participants: [
-      { agentId: AGENT_A, name: 'Analyst', avatarUrl: 'https://cdn/analyst.png', voiceId: 'es_ES-davefx-medium' },
-      { agentId: AGENT_B, name: 'Contrarian', avatarUrl: null, voiceId: 'es_MX-ald-medium' },
+      { agentId: AGENT_A, name: 'Analyst', avatarUrl: 'https://cdn/analyst.png', voiceId: 'test-es-analyst' },
+      { agentId: AGENT_B, name: 'Contrarian', avatarUrl: null, voiceId: 'test-es-contrarian' },
+      { agentId: JUDGE, name: 'Judge', avatarUrl: null, voiceId: null },
     ],
     officialArguments: [
       {
@@ -46,11 +51,11 @@ describe('RenderService.buildManifest (Feature 7)', () => {
     const manifest = service.buildManifest(baseInput());
 
     expect(manifest.episodeId).toBe(EPISODE_ID);
-    // language: "ES" fijo hasta la spec 004, paso 7 (ver render.service.ts).
     expect(manifest.meta).toEqual({ topic: baseInput().topic, language: 'ES', durationEstimatedSec: 7 }); // (4000+3000)/1000
     expect(manifest.agents).toEqual([
-      { id: AGENT_A, name: 'Analyst', avatarUrl: 'https://cdn/analyst.png', voiceId: 'es_ES-davefx-medium' },
-      { id: AGENT_B, name: 'Contrarian', avatarUrl: null, voiceId: 'es_MX-ald-medium' },
+      { id: AGENT_A, name: 'Analyst', avatarUrl: 'https://cdn/analyst.png', voiceId: 'test-es-analyst' },
+      { id: AGENT_B, name: 'Contrarian', avatarUrl: null, voiceId: 'test-es-contrarian' },
+      { id: JUDGE, name: 'Judge', avatarUrl: null, voiceId: null },
     ]);
     expect(manifest.timeline).toEqual([
       {
@@ -110,6 +115,23 @@ describe('RenderService.buildManifest (Feature 7)', () => {
   it('verdict.winnerAgentId es null si el debate no tuvo ganador (Verdict.winnerId opcional)', () => {
     const manifest = service.buildManifest(baseInput({ verdict: { winnerId: null, content: 'Empate técnico.' } }));
     expect(manifest.verdict.winnerAgentId).toBeNull();
+  });
+
+  // Spec 004, AC 4.18: meta.language sale del idioma del episodio que recibe,
+  // no de un valor fijo.
+  it('meta.language es el language del input', () => {
+    expect(service.buildManifest(baseInput({ language: 'EN' })).meta.language).toBe('EN');
+    expect(service.buildManifest(baseInput({ language: 'PT' })).meta.language).toBe('PT');
+  });
+
+  // Spec 004 (D17 revisado, AC 4.16): voiceId nullable en el contrato.
+  it('un agente sin voz guardada (voiceId null) cumple el contrato; omitir voiceId no', () => {
+    const manifest = service.buildManifest(baseInput());
+    // Solo la voz: los ids de este spec no son uuid, así que se valida el
+    // campo en sí y no el agente completo.
+    const VoiceIdSchema = RemotionManifestSchema.shape.agents.element.shape.voiceId;
+    expect(manifest.agents.map((a) => VoiceIdSchema.safeParse(a.voiceId).success)).toEqual([true, true, true]);
+    expect(VoiceIdSchema.safeParse(undefined).success).toBe(false);
   });
 
   // Spec 004, AC 4.18/4.19: meta.language es obligatorio en el contrato.

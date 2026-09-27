@@ -4,7 +4,7 @@ import { DebateLanguage, EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { DebateService } from "../debate/debate.service";
-import { AGENT_WITH_VOICES_INCLUDE, TtsService } from "../tts/tts.service";
+import { TtsService } from "../tts/tts.service";
 import type { AudioSubtitleCue } from "../tts/audio-provider.interface";
 import { RenderService } from "../render/render.service";
 import type { RemotionManifest } from "@ai-trend-debates/contracts";
@@ -48,8 +48,8 @@ export class EpisodesService {
   // activo. Si falta alguna, VoiceNotConfiguredError (409
   // VOICE_NOT_CONFIGURED) sin haber creado ninguna fila. El orden completo
   // es: validación de Zod del body (400, en el borde HTTP) -> voces (409) ->
-  // inserts. `language` llega por parámetro con default ES: el DTO HTTP que
-  // lo acepta es del paso 13.7, hasta entonces el controller no lo manda.
+  // inserts. `language` llega del DTO HTTP (CreateEpisodeSchema, default ES,
+  // AC 4.1, 4.2); el default del parámetro es para callers internos.
   async createEpisode(topic: string, language: DebateLanguage = "ES"): Promise<SerializedEpisode> {
     const candidates = await this.participants.findCandidateAgents();
     await this.tts.assertVoicesConfigured(
@@ -82,7 +82,7 @@ export class EpisodesService {
     const statuses = this.parseStatusFilter(statusCsv);
     const episodes = await this.prisma.episode.findMany({
       where: statuses ? { status: { in: statuses } } : undefined,
-      select: { id: true, status: true, title: true, createdAt: true, publishedAt: true },
+      select: { id: true, status: true, title: true, language: true, createdAt: true, publishedAt: true },
       orderBy: { createdAt: "desc" },
     });
     return episodes.map((e) => ({
@@ -132,20 +132,21 @@ export class EpisodesService {
   // después, reusando TtsService.getSignedAudioUrl (AC 6.1) — RenderService
   // no conoce TtsService.
   //
-  // Voz de cada agente (spec 004, D17, AC 4.16): la que quedó en
-  // AudioAsset.voiceId de sus segmentos, así el manifest de un episodio ya
-  // sintetizado no cambia si después se modifica el seed. Si un agente
-  // tiene segmentos con voces distintas (un regenerate-audio posterior a un
-  // cambio de voz, spec 004 pregunta B), se informa la de su primer
-  // segmento en el orden del timeline. Solo para los agentes sin ningún
-  // AudioAsset.voiceId (assets anteriores a la migración, o el juez, que no
-  // tiene segmentos) se resuelve por el idioma del episodio; si ahí falta la
-  // fila, VoiceNotConfiguredError (409), nunca un 500.
+  // meta.language sale de Episode.language (spec 004, AC 4.18).
   //
-  // Las voces se resuelven recién después de RenderService.
-  // assertManifestReady (review de 13.6): un episodio que todavía no tiene
-  // audio o veredicto responde MANIFEST_NOT_READY aunque además le falte
-  // alguna voz, porque lo que le falta primero es llegar al audio.
+  // Voz de cada agente (spec 004, D17 revisado, AC 4.16): la que quedó en
+  // AudioAsset.voiceId de sus segmentos, así el manifest de un episodio ya
+  // sintetizado no cambia si después se modifica o se borra una voz del
+  // seed. Si un agente tiene segmentos con voces distintas (un
+  // regenerate-audio posterior a un cambio de voz, spec 004 pregunta B), se
+  // informa la de su primer segmento en el orden del timeline. Un agente sin
+  // ninguna voz guardada (el juez, que no tiene segmentos, o assets
+  // anteriores a la migración sin voiceId) figura con null. El manifest
+  // nunca consulta AgentVoice, así que nunca responde VOICE_NOT_CONFIGURED
+  // (D15): tampoco un episodio publicado en el showcase.
+  //
+  // RenderService.assertManifestReady corre antes de cargar participantes y
+  // URLs (review de 13.6): sin audio o veredicto, MANIFEST_NOT_READY.
   async getManifest(episodeId: string): Promise<RemotionManifest> {
     const episode = await this.prisma.episode.findUniqueOrThrow({
       where: { id: episodeId },
@@ -166,19 +167,18 @@ export class EpisodesService {
 
     const participants = await this.prisma.episodeParticipant.findMany({
       where: { episodeId },
-      include: { agent: { include: AGENT_WITH_VOICES_INCLUDE } },
+      include: { agent: { select: { id: true, name: true, avatarUrl: true } } },
     });
 
     const manifest = this.render.buildManifest({
       episodeId,
       topic: episode.title,
+      language: episode.language,
       participants: participants.map((p) => ({
         agentId: p.agent.id,
         name: p.agent.name,
         avatarUrl: p.agent.avatarUrl,
-        voiceId:
-          orderedArguments.find((a) => a.agentId === p.agent.id && a.audioAsset?.voiceId)?.audioAsset?.voiceId ??
-          this.tts.resolveVoiceId(p.agent, episode.language),
+        voiceId: orderedArguments.find((a) => a.agentId === p.agent.id && a.audioAsset?.voiceId)?.audioAsset?.voiceId ?? null,
       })),
       officialArguments,
       verdict,

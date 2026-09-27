@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createZodDto } from "nestjs-zod";
+import { DebateLanguageSchema } from "@ai-trend-debates/contracts";
 import { EpisodeStatusSchema } from "./episode-status.schema";
 
 // Mirror 1:1 de schema.prisma:Episode (spec 001, alcance: respuestas de
@@ -18,6 +19,8 @@ export const EpisodeSchema = z.object({
   // shape que el campo nunca tiene en la práctica.
   remotionManifest: z.unknown().nullable(),
   status: EpisodeStatusSchema,
+  // Spec 004 (AC 4.18): idioma del debate, fijo desde la creación (AC 4.3).
+  language: DebateLanguageSchema,
   // string ISO, no z.date(): Zod 4 no puede representar z.date() en JSON
   // Schema ("Date cannot be represented in JSON Schema", nestjs-zod no
   // expone override para esto — issue conocido de la librería, confirmado
@@ -48,6 +51,8 @@ export const EpisodeListItemSchema = z.object({
   id: z.string().uuid(),
   status: EpisodeStatusSchema,
   title: z.string(),
+  // Spec 004 (AC 4.18; API-1 parte 2): distintivo de idioma en la lista.
+  language: DebateLanguageSchema,
   createdAt: z.iso.datetime(),
   // API-7a (spec 003, AC 3.17): distintivo "Publicado" en la lista.
   publishedAt: z.iso.datetime().nullable(),

@@ -706,7 +706,7 @@ describe("EpisodesModule (integración)", () => {
       await prisma.agentVoice.deleteMany({ where: { language: { not: "ES" } } });
     });
 
-    // AC 4.29 (parte de servicio; la HTTP es del paso 13.7) y AC 4.4.
+    // AC 4.29 (parte de servicio; la HTTP está en test/episodes.e2e-spec.ts) y AC 4.4.
     describe("createEpisode (D15, AC 4.4 y 4.29)", () => {
       let runPipelineSpy: jest.SpyInstance;
 
@@ -846,29 +846,104 @@ describe("EpisodesModule (integración)", () => {
       expect((await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } })).ttsRequests).toBe(usageBefore.ttsRequests);
     });
 
-    // D17, AC 4.16: cambiar AgentVoice (lo que haría un seed nuevo) no cambia
-    // el manifest de un episodio ya sintetizado.
-    it("el manifest informa la voz de AudioAsset.voiceId aunque después cambie AgentVoice", async () => {
-      await loadTestVoices("EN");
-      const { episode } = await episodeReadyForAudio("EN");
-      await awaitAudioPipeline(() => actions.approve(episode.id));
+    // D17 revisado, AC 4.16 (paso 13.7): el manifest informa la voz guardada
+    // en AudioAsset.voiceId (la del primer segmento del agente) o null, y
+    // nunca lee AgentVoice. Así, cambiar o borrar una voz del seed no altera
+    // ni rompe el manifest de un episodio ya sintetizado. Episodio EN con
+    // voces de prueba distintas por rol, para distinguir cada voz.
+    describe("manifest de un episodio READY_FOR_RENDER (D17 revisado, AC 4.16)", () => {
+      async function readyForRender() {
+        await loadTestVoices("EN");
+        const created = await episodeReadyForAudio("EN");
+        await awaitAudioPipeline(() => actions.approve(created.episode.id));
+        expect((await prisma.episode.findUniqueOrThrow({ where: { id: created.episode.id } })).status).toBe("READY_FOR_RENDER");
+        const participants = await prisma.episodeParticipant.findMany({ where: { episodeId: created.episode.id } });
+        const judgeId = participants.find((p) => p.isJudge)!.agentId;
+        const debaterIds = participants.filter((p) => !p.isJudge).map((p) => p.agentId);
+        return { ...created, judgeId, debaterIds };
+      }
 
-      const before = await episodesService.getManifest(episode.id);
-      const debaterIds = (await prisma.episodeParticipant.findMany({ where: { episodeId: episode.id, isJudge: false } })).map(
-        (p) => p.agentId
-      );
-      await prisma.agentVoice.updateMany({
-        where: { agentId: { in: debaterIds }, language: "EN" },
-        data: { voiceId: "test-en-voz-cambiada" },
+      it("el juez figura en agents con voiceId null, cada debatiente con la voz de sus assets y meta.language es el del episodio", async () => {
+        const { episode, judgeId, debaterIds } = await readyForRender();
+
+        const manifest = await episodesService.getManifest(episode.id);
+
+        expect(manifest.meta.language).toBe("EN");
+        expect(manifest.agents).toHaveLength(3);
+        expect(manifest.agents.find((a) => a.id === judgeId)?.voiceId).toBeNull();
+        for (const debaterId of debaterIds) {
+          const agent = await prisma.agent.findUniqueOrThrow({ where: { id: debaterId } });
+          expect(manifest.agents.find((a) => a.id === debaterId)?.voiceId).toBe(testVoiceId("EN", agent.role!));
+        }
       });
 
-      const after = await episodesService.getManifest(episode.id);
+      it("cambiar la voz del juez y la de un debatiente en AgentVoice no altera el manifest", async () => {
+        const { episode, judgeId, debaterIds } = await readyForRender();
+        const before = await episodesService.getManifest(episode.id);
 
-      expect(after.agents).toEqual(before.agents);
-      for (const agent of after.agents.filter((a) => debaterIds.includes(a.id))) {
-        expect(agent.voiceId).not.toBe("test-en-voz-cambiada");
-        expect(agent.voiceId).toMatch(/^test-en-/);
-      }
+        await prisma.agentVoice.updateMany({
+          where: { agentId: { in: [judgeId, debaterIds[0]] }, language: "EN" },
+          data: { voiceId: "test-en-voz-cambiada" },
+        });
+
+        const after = await episodesService.getManifest(episode.id);
+        expect(after.agents).toEqual(before.agents);
+        expect(after.agents.map((a) => a.voiceId)).not.toContain("test-en-voz-cambiada");
+      });
+
+      it("borrar todas las filas AgentVoice del juez deja el manifest igual, sin VOICE_NOT_CONFIGURED", async () => {
+        const { episode, judgeId } = await readyForRender();
+        const before = await episodesService.getManifest(episode.id);
+        const judgeVoices = await prisma.agentVoice.findMany({ where: { agentId: judgeId } });
+
+        await prisma.agentVoice.deleteMany({ where: { agentId: judgeId } });
+        try {
+          const after = await episodesService.getManifest(episode.id);
+          expect(after).toEqual(before);
+        } finally {
+          // Las filas ES son del setup compartido (seedAgents): se restauran.
+          await prisma.agentVoice.createMany({ data: judgeVoices.filter((v) => v.language === "ES") });
+        }
+      });
+
+      // Assets anteriores a la migración que quedaron sin voiceId (pregunta B).
+      it("un debatiente cuyos assets no tienen voiceId figura con null, aunque tenga voz en AgentVoice", async () => {
+        const { episode, debaterIds } = await readyForRender();
+        const [debaterId, otherId] = debaterIds;
+        const segments = await segmentsWithAgent(episode.debateId);
+        await prisma.audioAsset.updateMany({
+          where: { id: { in: segments.filter((s) => s.agentId === debaterId).map((s) => s.audioAssetId!) } },
+          data: { voiceId: null },
+        });
+
+        const manifest = await episodesService.getManifest(episode.id);
+
+        expect(manifest.agents.find((a) => a.id === debaterId)?.voiceId).toBeNull();
+        expect(manifest.agents.find((a) => a.id === otherId)?.voiceId).not.toBeNull();
+      });
+
+      // Spec 004, pregunta B: un regenerate-audio posterior a un cambio de voz
+      // deja al agente con voces mixtas; el manifest informa la de su primer
+      // segmento en el orden del timeline.
+      it("un agente con voces mixtas informa la de su primer segmento", async () => {
+        const { episode } = await readyForRender();
+        const segments = await segmentsWithAgent(episode.debateId);
+        const agentId = segments[0].agentId;
+        const originalVoice = segments[0].audioAsset!.voiceId;
+        const laterIndex = segments.findIndex((s, i) => i > 0 && s.agentId === agentId);
+        expect(laterIndex).toBeGreaterThan(0);
+
+        await prisma.agentVoice.update({
+          where: { agentId_language_provider: { agentId, language: "EN", provider: "LOCAL" } },
+          data: { voiceId: "test-en-voz-nueva" },
+        });
+        const regenerated = await actions.regenerateAudio(episode.id, { sequenceIndex: laterIndex + 1 });
+        expect(regenerated.voiceId).toBe("test-en-voz-nueva");
+
+        const manifest = await episodesService.getManifest(episode.id);
+
+        expect(manifest.agents.find((a) => a.id === agentId)?.voiceId).toBe(originalVoice);
+      });
     });
 
     // AC 4.15 y 4.28: sin voz en la fase de audio -> VOICE_NOT_CONFIGURED

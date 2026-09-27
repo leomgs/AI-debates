@@ -63,7 +63,7 @@ export class EpisodesController {
   @ApiOperation({ operationId: "createEpisode" })
   @ZodResponse({ status: 201, type: EpisodeDto })
   create(@Body() dto: CreateEpisodeDto) {
-    return this.episodes.createEpisode(dto.topic);
+    return this.episodes.createEpisode(dto.topic, dto.language);
   }
 
   @Get()

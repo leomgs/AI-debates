@@ -35,7 +35,14 @@ export const RemotionManifestAgentSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   avatarUrl: z.string().nullable(),
-  voiceId: z.string(),
+  // Spec 004 (D17 revisado, AC 4.16): la voz guardada en los AudioAsset del
+  // agente (la de su primer segmento en el orden del timeline), o `null` si
+  // no tiene ninguna guardada (el juez, que no tiene segmentos, o assets
+  // anteriores a la migración sin `voiceId`). El manifest nunca consulta
+  // AgentVoice. Desviación documentada de Feature 7 (features.md, congelado,
+  // lo define como string obligatorio), mismo precedente que `audioUrl` y
+  // `meta.language`. Es informativo: packages/video no lo usa.
+  voiceId: z.string().nullable(),
 });
 
 export const RemotionManifestTimelineEntrySchema = z.object({

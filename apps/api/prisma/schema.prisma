@@ -460,7 +460,8 @@ model AudioAsset {
   // manifest de un episodio ya sintetizado no cambie si después se modifica
   // el seed. La migración de la spec 004 completó los assets existentes con
   // la voz LOCAL que tenía su agente (pregunta B); null = no se sabe cuál
-  // se usó, y se resuelve por idioma.
+  // se usó, y el manifest informa null (spec 004, D17 revisado: nunca
+  // resuelve por idioma).
   voiceId String?
 
   createdAt DateTime @default(now())

@@ -17,6 +17,12 @@
       "name": "Contrarian",
       "avatarUrl": null,
       "voiceId": "es_ES-sharvard-medium"
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000a3",
+      "name": "Judge",
+      "avatarUrl": null,
+      "voiceId": null
     }
   ],
   "timeline": [

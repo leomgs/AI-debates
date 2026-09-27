@@ -12,15 +12,15 @@ import { SequenceIndexOutOfRangeError, VoiceNotConfiguredError } from "./tts.err
 // Include del Agent con las voces que puede usar resolveVoiceId. Trae todas
 // las filas del agente (a lo sumo idiomas × proveedores): el idioma lo elige
 // resolveVoiceId con el del episodio, no el include (spec 004, paso 13.6).
-// Exportado para que EpisodesService.getManifest cargue el agente igual que
-// acá.
-export const AGENT_WITH_VOICES_INCLUDE = {
+// Sin exportar desde 13.7: el manifest ya no resuelve voces (spec 004, D17
+// revisado), así que solo se usa para sintetizar.
+const AGENT_WITH_VOICES_INCLUDE = {
   voices: true,
 } satisfies Prisma.AgentInclude;
 
 // Lo mínimo que necesita resolveVoiceId: las voces del agente y con qué
 // nombrarlo en el error si falta la suya.
-export type AgentWithVoices = Pick<Agent, "name" | "role"> & {
+type AgentWithVoices =Pick<Agent, "name" | "role"> & {
   voices: Pick<AgentVoice, "language" | "provider" | "voiceId">[];
 };
 
@@ -145,12 +145,12 @@ export class TtsService {
   }
 
   // Voz de un agente para el idioma del episodio y el proveedor activo
-  // (ADR 0002 punto 4). Pública porque EpisodesService.getManifest la usa
-  // para los agentes sin AudioAsset.voiceId (spec 004, D17), sin duplicar
-  // esta resolución fuera de TtsService. Recibe las voces que carga
+  // (ADR 0002 punto 4). Privada desde 13.7: solo se usa para sintetizar; el
+  // manifest informa la voz guardada en AudioAsset.voiceId y nunca resuelve
+  // por idioma (spec 004, D17 revisado). Recibe las voces que carga
   // AGENT_WITH_VOICES_INCLUDE. Sin fila no hay respaldo: devolver undefined
   // haría que Echogarden elija otra voz sin avisar (D14).
-  resolveVoiceId(agent: AgentWithVoices, language: DebateLanguage): string {
+  private resolveVoiceId(agent: AgentWithVoices, language: DebateLanguage): string {
     const activeProvider = this.activeProvider();
     const voice = agent.voices.find((v) => v.language === language && v.provider === activeProvider);
     if (!voice) throw new VoiceNotConfiguredError(language, activeProvider, [agentLabel(agent)]);
