@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,9 +46,19 @@ export function CreateEpisodeForm() {
   const queryClient = useQueryClient();
   const [topic, setTopic] = useState("");
   const [language, setLanguage] = useState<DebateLanguage>(DEFAULT_DEBATE_LANGUAGE);
+  const topicRef = useRef<HTMLTextAreaElement>(null);
+  const languageRefs = useRef(new Map<DebateLanguage, HTMLInputElement>());
+  // Guarda sincrónica contra el doble envío (N1): `disabled` y el estado de
+  // la mutación recién se ven en el render siguiente, y dos eventos de
+  // submit pueden llegar antes. Se libera solo si falla: tras un éxito el
+  // formulario navega y no se vuelve a enviar.
+  const submittingRef = useRef(false);
 
   const mutation = useMutation({
     mutationFn: createEpisode,
+    onError: () => {
+      submittingRef.current = false;
+    },
     onSuccess: (episode) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.episodes.all });
       // AC 3.24: al detalle del episodio recién creado.
@@ -65,11 +75,25 @@ export function CreateEpisodeForm() {
   const topicError = errorView?.field === "topic" ? errorView : null;
   const languageError = errorView?.field === "language" ? errorView : null;
   const formError = errorView?.field === "form" ? errorView : null;
+  const errorField = errorView?.field ?? null;
+
+  // Foco tras un error (AC 3.77): mientras se envía, los controles están
+  // deshabilitados y el foco se pierde en el <body>. Al llegar el error se
+  // lleva al control que corresponde: el idioma elegido si el error es del
+  // selector, el tópico en los demás casos. Se dispara con cada error nuevo.
+  // El idioma enviado es el elegido: cambiar de idioma limpia el error.
+  const sentLanguage = mutation.variables?.language ?? null;
+  useEffect(() => {
+    if (errorField === null) return;
+    const target = errorField === "language" && sentLanguage ? languageRefs.current.get(sentLanguage) : topicRef.current;
+    target?.focus();
+  }, [mutation.error, errorField, sentLanguage]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     // AC 3.23: sin envíos duplicados (doble click o Enter repetido).
-    if (busy || !topicInfo.valid) return;
+    if (submittingRef.current || busy || !topicInfo.valid) return;
+    submittingRef.current = true;
     // El idioma se manda siempre (AC 3.22; en el tipo generado es requerido).
     mutation.mutate({ topic: topicInfo.value, language });
   }
@@ -85,6 +109,7 @@ export function CreateEpisodeForm() {
       <div className="space-y-2">
         <Label htmlFor={TOPIC_ID}>Tópico</Label>
         <Textarea
+          ref={topicRef}
           id={TOPIC_ID}
           name="topic"
           rows={3}
@@ -133,6 +158,10 @@ export function CreateEpisodeForm() {
               )}
             >
               <input
+                ref={(element) => {
+                  if (element) languageRefs.current.set(option, element);
+                  else languageRefs.current.delete(option);
+                }}
                 type="radio"
                 name="language"
                 value={option}
