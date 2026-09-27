@@ -12,6 +12,14 @@ const apiInternalUrl = resolveApiInternalUrl();
 // backoff entre intentos. 3 × (90 s + generación) queda en unos 5-6 minutos;
 // 10 minutos deja margen. El SSE no depende de esto (heartbeat cada 15 s,
 // API-13), pero también queda cubierto.
+//
+// SSE y compresión (spike de la F2, Restricciones técnicas de la spec 003):
+// la compresión de Next (`compress`, activa por defecto) también se aplica a
+// las respuestas del rewrite, y con gzip un `text/event-stream` llega entero
+// recién al cerrarse. Lo que lo evita es el `Cache-Control: no-transform`
+// que Nest pone en todo @Sse (el middleware de compresión lo respeta). Si la
+// API dejara de mandarlo, la vista en vivo quedaría sin eventos hasta el
+// final de la ejecución.
 const PROXY_TIMEOUT_MS = 10 * 60 * 1000;
 
 const nextConfig: NextConfig = {
