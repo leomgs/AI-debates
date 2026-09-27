@@ -1,14 +1,16 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { LoaderCircle } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api/client";
 import { unwrap } from "@/lib/api/errors";
 import {
   STATUS_FILTER_PARAM,
+  emptyGroupMessage,
   groupEpisodes,
   listRefetchInterval,
   parseStatusFilter,
@@ -28,10 +30,8 @@ async function fetchEpisodes(statusCsv: string | null): Promise<EpisodeListItem[
 }
 
 // Lista /studio (spec 003, sección 3). El filtro vive en la URL (AC 3.19):
-// se lee con useSearchParams y se cambia con router.replace, así que se
-// puede compartir y recargar.
+// se lee con useSearchParams, así que se puede compartir y recargar.
 export function EpisodeList() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const statuses = parseStatusFilter(searchParams.getAll(STATUS_FILTER_PARAM));
   const statusCsv = serializeStatusFilter(statuses);
@@ -41,11 +41,22 @@ export function EpisodeList() {
     queryFn: () => fetchEpisodes(statusCsv),
     // AC 3.21: se refresca sola (10 s, D19) mientras haya algo "En curso".
     refetchInterval: (current) => listRefetchInterval(current.state.data),
+    // Al cambiar el filtro, la lista anterior queda a la vista (con un
+    // indicador) hasta que llega la nueva, en vez de volver al skeleton.
+    placeholderData: keepPreviousData,
   });
 
+  // History API nativa y no router.replace: el router navega en una
+  // transición (con el layout force-dynamic, un round-trip al servidor) y
+  // useSearchParams devuelve el valor viejo hasta que termina, así que dos
+  // clicks rápidos pisaban la selección anterior. replaceState se sincroniza
+  // con useSearchParams en el momento y no pide nada al servidor (guía de
+  // Next 16.3.6, "Linking and Navigating", "Native History API").
   function setFilter(next: EpisodeStatus[]) {
-    router.replace(studioListHref(searchParams.toString(), next), { scroll: false });
+    window.history.replaceState(null, "", studioListHref(searchParams.toString(), next));
   }
+
+  const updating = query.isPlaceholderData;
 
   return (
     <section className="space-y-6">
@@ -59,24 +70,36 @@ export function EpisodeList() {
         </div>
       </div>
 
-      {statuses.length > 0 && (
-        <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          Filtrando por: {statuses.map((status) => EPISODE_STATUS_UI[status].label).join(", ")}
-          <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setFilter([])}>
-            Quitar filtro
-          </Button>
+      <div className="flex min-h-5 flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {statuses.length > 0 && (
+          <p className="flex flex-wrap items-center gap-2">
+            Filtrando por: {statuses.map((status) => EPISODE_STATUS_UI[status].label).join(", ")}
+            <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setFilter([])}>
+              Quitar filtro
+            </Button>
+          </p>
+        )}
+        <p role="status" className="flex items-center gap-1.5">
+          {updating && (
+            <>
+              <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+              Actualizando la lista…
+            </>
+          )}
         </p>
-      )}
+      </div>
 
-      <EpisodeListBody
-        episodes={query.data}
-        isPending={query.isPending}
-        error={query.isError ? query.error : null}
-        isFetching={query.isFetching}
-        onRetry={() => query.refetch()}
-        filtered={statuses.length > 0}
-        onClearFilter={() => setFilter([])}
-      />
+      <div aria-busy={updating} className={cn("transition-opacity", updating && "opacity-60")}>
+        <EpisodeListBody
+          episodes={query.data}
+          isPending={query.isPending}
+          error={query.isError ? query.error : null}
+          isFetching={query.isFetching}
+          onRetry={() => query.refetch()}
+          statusFilter={statuses}
+          onClearFilter={() => setFilter([])}
+        />
+      </div>
     </section>
   );
 }
@@ -87,7 +110,7 @@ function EpisodeListBody({
   error,
   isFetching,
   onRetry,
-  filtered,
+  statusFilter,
   onClearFilter,
 }: {
   episodes: EpisodeListItem[] | undefined;
@@ -95,7 +118,7 @@ function EpisodeListBody({
   error: unknown;
   isFetching: boolean;
   onRetry: () => void;
-  filtered: boolean;
+  statusFilter: readonly EpisodeStatus[];
   onClearFilter: () => void;
 }) {
   // AC 3.20: mientras carga, un placeholder de la lista.
@@ -115,7 +138,7 @@ function EpisodeListBody({
     return (
       <>
         {refreshError}
-        {filtered ? (
+        {statusFilter.length > 0 ? (
           <div className="rounded-md border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
             <p>Ningún episodio coincide con el filtro.</p>
             <Button variant="link" onClick={onClearFilter}>
@@ -139,7 +162,11 @@ function EpisodeListBody({
   return (
     <div className="space-y-8">
       {refreshError}
-      <EpisodeGroup group="requires-action" episodes={groups["requires-action"]} />
+      <EpisodeGroup
+        group="requires-action"
+        episodes={groups["requires-action"]}
+        emptyMessage={emptyGroupMessage("requires-action", statusFilter)}
+      />
       {groups["in-progress"].length > 0 && <EpisodeGroup group="in-progress" episodes={groups["in-progress"]} />}
       {groups.finished.length > 0 && <EpisodeGroup group="finished" episodes={groups.finished} />}
     </div>
@@ -147,8 +174,17 @@ function EpisodeListBody({
 }
 
 // "Requiere acción" se destaca, lleva contador y nunca se oculta: vacía dice
-// "Nada pendiente" (AC 3.18). Los otros grupos solo se muestran con episodios.
-function EpisodeGroup({ group, episodes }: { group: StudioGroup; episodes: EpisodeListItem[] }) {
+// "Nada pendiente", salvo que el filtro excluya sus estados (AC 3.18). Los
+// otros grupos solo se muestran con episodios.
+function EpisodeGroup({
+  group,
+  episodes,
+  emptyMessage,
+}: {
+  group: StudioGroup;
+  episodes: EpisodeListItem[];
+  emptyMessage?: string;
+}) {
   const headingId = `episodes-group-${group}`;
   const highlighted = group === "requires-action";
   return (
@@ -168,7 +204,7 @@ function EpisodeGroup({ group, episodes }: { group: StudioGroup; episodes: Episo
         </span>
       </h2>
       {episodes.length === 0 ? (
-        <p className="px-3 py-2 text-sm text-muted-foreground">Nada pendiente</p>
+        <p className="px-3 py-2 text-sm text-muted-foreground">{emptyMessage}</p>
       ) : (
         <ul className="divide-y">
           {episodes.map((episode) => (

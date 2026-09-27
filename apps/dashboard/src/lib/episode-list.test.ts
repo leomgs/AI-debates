@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  emptyGroupMessage,
   groupEpisodes,
   listRefetchInterval,
   parseStatusFilter,
@@ -46,6 +47,21 @@ describe("groupEpisodes (AC 3.16)", () => {
     const input = [episode("a", "FAILED", "2026-01-01T00:00:00.000Z"), episode("b", "FAILED", "2026-02-01T00:00:00.000Z")];
     groupEpisodes(input);
     expect(input.map((e) => e.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("emptyGroupMessage (AC 3.18, M5)", () => {
+  it("Requiere acción vacía sin filtro: Nada pendiente", () => {
+    expect(emptyGroupMessage("requires-action", [])).toBe("Nada pendiente");
+  });
+
+  it("con un filtro que incluye un estado del grupo: Nada pendiente", () => {
+    expect(emptyGroupMessage("requires-action", ["PENDING_REVIEW", "FAILED"])).toBe("Nada pendiente");
+    expect(emptyGroupMessage("requires-action", ["REQUIRES_HUMAN_REVIEW"])).toBe("Nada pendiente");
+  });
+
+  it("con un filtro que excluye los estados del grupo: Sin episodios en este filtro", () => {
+    expect(emptyGroupMessage("requires-action", ["FAILED", "DEBATING"])).toBe("Sin episodios en este filtro");
   });
 });
 

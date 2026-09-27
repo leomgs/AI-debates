@@ -31,6 +31,17 @@ export function groupEpisodes(episodes: readonly EpisodeListItem[]): GroupedEpis
   return groups;
 }
 
+/**
+ * Texto de "Requiere acción" vacía (AC 3.18). "Nada pendiente" solo es
+ * cierto si el filtro incluye algún estado de ese grupo (o no hay filtro);
+ * con un filtro que los excluye, el grupo está vacío por el filtro.
+ */
+export function emptyGroupMessage(group: StudioGroup, statusFilter: readonly EpisodeStatus[]): string {
+  const filterCoversGroup =
+    statusFilter.length === 0 || statusFilter.some((status) => EPISODE_STATUS_UI[status].group === group);
+  return group === "requires-action" && filterCoversGroup ? "Nada pendiente" : "Sin episodios en este filtro";
+}
+
 /** La lista se refresca sola mientras haya algún episodio "En curso" (AC 3.21). */
 export function listRefetchInterval(episodes: readonly EpisodeListItem[] | undefined): number | false {
   const anyInProgress = episodes?.some((episode) => EPISODE_STATUS_UI[episode.status].group === "in-progress") ?? false;
