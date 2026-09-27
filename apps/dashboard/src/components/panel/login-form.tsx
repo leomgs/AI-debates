@@ -2,6 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { TriangleAlert } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +45,13 @@ export function LoginForm({ nextPath, sessionExpired }: { nextPath: string; sess
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {sessionExpired && !mutation.isError && (
-        <p role="status" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        // Solo tokens del tema (D21): en oscuro, text-foreground sobre
+        // bg-primary/10 (primary es casi blanco) queda con alto contraste.
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-sm text-foreground"
+        >
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           Tu sesión venció. Si estabas haciendo una acción, no se ejecutó: iniciá sesión y repetila.
         </p>
       )}
