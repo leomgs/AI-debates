@@ -2,7 +2,7 @@
 
 Documento de secuenciación puramente del front. Ver `README.md` de esta carpeta para qué queda afuera (eso vive en los docs de raíz del repo o en `frontend-notes.md`). No agrega alcance: cada fase sale del plan F1-F4 de `../../../docs/product/003-dashboard-ui.md` ("Plan de implementación") y cada ítem cita su AC 3.x, API-n o decisión (D-n) de esa spec. El detalle ítem por ítem vive en `tasks.md` de esta carpeta.
 
-Última revisión: 2026-09-26, quinta pasada (F1 implementada y mergeada a `master` con fast-forward desde `feat/dashboard-f1`; checkboxes de la Fase 1 sincronizados con `tasks.md` §1, con las verificaciones en navegador pendientes y la 404 del showcase diferida a F4; la Fase 2 suma el estado de sus dependencias de backend y qué se puede adelantar antes de API-17). Cuarta pasada, 2026-09-25 (spec 003 sin preguntas abiertas: D17 veredicto desactualizado + "Volver a juzgar" con API-19 bloqueante de F2, D18 sin origen de ediciones en el showcase, D19 intervalos de polling centralizados, D20 `/docs` solo fuera de producción; AC 3.81-3.86; rango AC 3.1-3.86). Tercera pasada del mismo día: pregunta 7 cerrada con D16 (showcase bajo `/[locale]`, `es` único valor), AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz; preguntas A y B de la spec 004 resueltas. Segunda pasada: spec 003 ajustada por la spec 004 (API-7a y API-17 bloqueantes de F2, API-18, AC 3.78/3.79, selector y distintivos de idioma, 6 motivos). Revisión previa: 2026-09-25 (spec 003 escrita y revisada por `architect`; auth resuelta por ADR 0001; fases reescritas según F1-F4).
+Última revisión: 2026-09-27, sexta pasada (F1 completa: el usuario hizo las verificaciones en navegador y todas pasaron). Quinta pasada, 2026-09-26 (F1 implementada y mergeada a `master` con fast-forward desde `feat/dashboard-f1`; checkboxes de la Fase 1 sincronizados con `tasks.md` §1, con las verificaciones en navegador pendientes y la 404 del showcase diferida a F4; la Fase 2 suma el estado de sus dependencias de backend y qué se puede adelantar antes de API-17). Cuarta pasada, 2026-09-25 (spec 003 sin preguntas abiertas: D17 veredicto desactualizado + "Volver a juzgar" con API-19 bloqueante de F2, D18 sin origen de ediciones en el showcase, D19 intervalos de polling centralizados, D20 `/docs` solo fuera de producción; AC 3.81-3.86; rango AC 3.1-3.86). Tercera pasada del mismo día: pregunta 7 cerrada con D16 (showcase bajo `/[locale]`, `es` único valor), AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz; preguntas A y B de la spec 004 resueltas. Segunda pasada: spec 003 ajustada por la spec 004 (API-7a y API-17 bloqueantes de F2, API-18, AC 3.78/3.79, selector y distintivos de idioma, 6 motivos). Revisión previa: 2026-09-25 (spec 003 escrita y revisada por `architect`; auth resuelta por ADR 0001; fases reescritas según F1-F4).
 
 ## Objetivo
 
@@ -31,7 +31,7 @@ El gap de `decision-log.md` #1 queda cerrado por **ADR 0001** (`../../../docs/ad
 
 ## Fases
 
-### Fase 1 (F1) — Base: auth, origen único, cliente tipado, layouts — IMPLEMENTADA Y MERGEADA (2026-09-26), con verificaciones en navegador pendientes
+### Fase 1 (F1) — Base: auth, origen único, cliente tipado, layouts — COMPLETA (mergeada 2026-09-26, verificada en navegador 2026-09-27)
 
 Objetivo: que exista la app real con login, rutas protegidas, un cliente tipado generado desde `openapi.json` y los dos layouts raíz (panel y showcase), sin pantallas de negocio todavía.
 
@@ -45,23 +45,23 @@ Objetivo: que exista la app real con login, rutas protegidas, un cliente tipado 
 - **Surgido del review** (fuera del plan original, sin alcance de producto nuevo): `proxy.ts` redirige con 308 cualquier path con mayúsculas a su versión en minúsculas, y el panel y el showcase son `force-dynamic`, para que `/ES` o `/Studio` no pisen el caché ISR ni salteen el chequeo de la cookie. Consecuencia: un `locale` inválido (`/en`, `/xx`) responde 404 con la página por defecto de Next, en inglés; el usuario lo aceptó explícitamente hasta la F4 (`decision-log.md` entrada 6, "Costo aceptado").
 - [x] Stack de D4 instalado; `apps/dashboard/turbo.json` con `generate:api` (Restricciones técnicas, "Turborepo y tipos"). Se sumó Vitest para los tests unitarios del front
 - [x] Rewrites + `experimental.proxyTimeout` por encima del peor caso de `regenerate-verdict` en `next.config` (ADR 0001 punto 3; Restricciones técnicas, "Rewrites y SSE"). Verificado con curl: `/api/*` y `/audio-files/*` llegan a Nest y no caen en `[locale]`
-- [~] Cliente tipado con `openapi-fetch` (D11) y manejo global del `401` (AC 3.7). El cliente y el redirect a `/login?next=…&expired=1` están hechos y probados con tests de `QueryClient`; falta ver en un navegador el aviso de sesión vencida
-- [~] `src/proxy.ts` + `/login` + logout (AC 3.1-3.9). Verificado con curl a través del rewrite: redirect a `/login?next=` y validación de `next` (AC 3.1), `401 INVALID_CREDENTIALS` (AC 3.2), `Max-Age` de 7 días en la cookie (AC 3.3), logout `204` (AC 3.4), `401 UNAUTHORIZED` en los endpoints no públicos (AC 3.5), `429` con `Retry-After` (AC 3.8), y la URL interna ausente del HTML y de los chunks (AC 3.9). Faltan las pruebas en navegador (ver "Pendiente para cerrar la F1")
+- [x] Cliente tipado con `openapi-fetch` (D11) y manejo global del `401` (AC 3.7). El cliente y el redirect a `/login?next=…&expired=1` están hechos y probados con tests de `QueryClient`; el aviso de sesión vencida se verificó en navegador el 2026-09-27 (cookie alterada a mano)
+- [x] `src/proxy.ts` + `/login` + logout (AC 3.1-3.9). Verificado con curl a través del rewrite: redirect a `/login?next=` y validación de `next` (AC 3.1), `401 INVALID_CREDENTIALS` (AC 3.2), `Max-Age` de 7 días en la cookie (AC 3.3), logout `204` (AC 3.4), `401 UNAUTHORIZED` en los endpoints no públicos (AC 3.5), `429` con `Retry-After` (AC 3.8), y la URL interna ausente del HTML y de los chunks (AC 3.9). Pruebas en navegador hechas el 2026-09-27 (ver "Pendiente para cerrar la F1")
 - [x] Separar los layouts raíz: `(panel)` con `lang="es"` y `[locale]` con `lang={locale}` (solo `es`), `/` → 307 a `/es`, 404 global con `global-not-found` (AC 3.79 a; D16). Verificado con curl: `lang="es"` en `/login`, `/studio` y `/studio/new`; `/en`, `/pt` y `/xx` responden 404
 - [ ] **Diferido a F4**: 404 del showcase en español y con `lang` en el HTML inicial (`tasks.md` §4, AC 3.68 y AC 3.80). Hoy el status es 404 correcto, pero un `locale` inválido muestra la 404 por defecto de Next en inglés, y un `notFound()` en `/es/e/[id]` sale sin `lang`. Aceptado por el usuario hasta F4; no bloquea el criterio de F1
 - [x] Layout del panel con navegación, incluido el enlace al showcase en `/es`, y layout del showcase sin controles del panel (AC 3.6, AC 3.15). `/studio` y `/studio/new` son placeholders hasta F2
 
-**Pendiente para cerrar la F1** (a mano, en un navegador real; lo hace el usuario; ver los `[~]` de `tasks.md` §1):
-- [ ] `/login` de punta a punta, con vuelta a `next` (AC 3.1, AC 3.2, AC 3.8)
-- [ ] "Cerrar sesión" desde el botón del panel (AC 3.4)
-- [ ] Aviso de sesión vencida ante un `401` (AC 3.7)
-- [ ] Persistencia de la sesión con recargas (AC 3.3)
-- [ ] Pestaña de red: ninguna request sale hacia la URL interna de la API (AC 3.9)
-- [ ] Teclado y foco en `/login` y en la navegación del panel (AC 3.77, transversal)
+**Pendiente para cerrar la F1** (a mano, en un navegador real; lo hizo el usuario el 2026-09-27 con `pnpm dev`, todo OK):
+- [x] `/login` de punta a punta, con vuelta a `next` (AC 3.1, AC 3.2, AC 3.8)
+- [x] "Cerrar sesión" desde el botón del panel (AC 3.4)
+- [x] Aviso de sesión vencida ante un `401` (AC 3.7)
+- [x] Persistencia de la sesión con recargas (AC 3.3)
+- [x] Pestaña de red: ninguna request sale hacia la URL interna de la API (AC 3.9)
+- [x] Teclado y foco en `/login` y en la navegación del panel (AC 3.77, transversal)
 
 **Criterio de completitud** (spec, F1): `pnpm build` en verde; AC 3.1-3.9, AC 3.15 y AC 3.79 (a) cumplidos; `/` redirige a `/es` y `/en` responde 404; un cambio en `openapi.json` que rompa un tipo usado hace fallar el build del dashboard; un import prohibido hace fallar `check-boundaries`.
 
-**Estado del criterio** (2026-09-26): `pnpm build` en verde; renombrar un valor usado de `openapi.json` rompe el build (`TS2353`); un import prohibido hace fallar `check-boundaries` y corta `pnpm build`; `/` → 307 a `/es` y `/en` → 404 (con la página por defecto de Next, ver el ítem diferido); AC 3.6, AC 3.15 y AC 3.79 (a) cumplidos. AC 3.1-3.9 están cumplidos en todo lo que se puede verificar con curl y tests; AC 3.3, AC 3.7, AC 3.9 y los flujos de interfaz de AC 3.1 y AC 3.4 esperan la prueba en navegador. La F1 queda cerrada en código y se da por completa cuando se tilde la lista "Pendiente para cerrar la F1".
+**Estado del criterio** (2026-09-26): `pnpm build` en verde; renombrar un valor usado de `openapi.json` rompe el build (`TS2353`); un import prohibido hace fallar `check-boundaries` y corta `pnpm build`; `/` → 307 a `/es` y `/en` → 404 (con la página por defecto de Next, ver el ítem diferido); AC 3.6, AC 3.15 y AC 3.79 (a) cumplidos. AC 3.1-3.9 cumplidos: verificados con curl y tests, y en navegador el 2026-09-27 (AC 3.3, AC 3.7, AC 3.9 y los flujos de interfaz de AC 3.1 y AC 3.4), junto con teclado y foco (AC 3.77). **La F1 está completa.**
 
 ### Fase 2 (F2) — Panel de curación (privado) — sin empezar
 
