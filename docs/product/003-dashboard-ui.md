@@ -52,6 +52,7 @@ Cada decisión incluye su razón. La razón es parte del contrato: una alternati
 - **D18 — El showcase no muestra qué partes editó el curador (fija, usuario).** El origen de cada argumento (`AI_GENERATED`/`HUMAN_EDITED`) se ve solo en el panel. Razón: el showcase presenta el debate final como pieza editorial, no como registro de auditoría; la trazabilidad de ediciones es una herramienta del curador (Feature 5, Feature 10). Confirma AC 3.69 tal como está.
 - **D19 — Intervalos de polling: 30 s para el inbox, 10 s para el detalle en las fases sin SSE (fija, usuario).** Se definen como constantes centralizadas del dashboard, no repartidas por pantalla. Razón: 30 s alcanza para enterarse de que un episodio requiere atención sin generar tráfico constante; 10 s hace que el paso de `APPROVED`/`GENERATING_AUDIO` a `READY_FOR_RENDER` se vea casi en el momento. No hay restricción de hosting que obligue a otros valores, y tenerlos centralizados hace trivial cambiarlos.
 - **D20 — `/docs` (Swagger) se desactiva en producción (fija, usuario).** Swagger solo se monta fuera de producción. Razón: el contrato vive commiteado en `openapi.json` (spec 001), así que en producción `/docs` no aporta nada y expondría públicamente la superficie completa de la API, que además queda fuera del `SessionGuard`. Se implementa como parte de API-8.
+- **D21 — Tema oscuro fijo en todo el dashboard (fija, usuario, 2026-09-27).** El panel, el login, el showcase y la 404 global usan siempre la paleta oscura de shadcn (clase `dark` en el `<html>` de los tres layouts raíz y `color-scheme: dark`), sin seguir la preferencia del sistema operativo ni ofrecer selector. Razón: el usuario no quiere fondos blancos en ninguna pantalla, y un tema único evita el parpadeo del primer render y duplicar la verificación visual. Queda fuera la 404 por defecto de Next que muestran los `locale` inválidos hasta la F4 (no pasa por nuestros layouts). Un selector claro/oscuro queda en nice-to-have.
 
 ## No-objetivos
 
@@ -369,7 +370,7 @@ Casos que el happy path no muestra y que la UI tiene que contemplar:
 - Notificaciones del navegador (Notification API) además del inbox.
 - Búsqueda por texto en la lista de episodios; paginación (hoy `listEpisodes` no pagina).
 - Descarga del `.mp4` o del manifest desde el panel.
-- Modo oscuro.
+- Selector de tema claro/oscuro (hoy el tema es oscuro fijo, D21).
 - Métricas agregadas (costo total, episodios por estado en el tiempo).
 
 ## Cambios requeridos en la API

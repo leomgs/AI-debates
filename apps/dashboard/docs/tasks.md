@@ -196,6 +196,7 @@ Se verifican al cerrar cada fase sobre sus pantallas.
 - [ ] Panel usable a 1280 px (AC 3.76)
 - [ ] Teclado y foco atrapado en diálogos, verificado (AC 3.77)
 - [ ] Ningún tipo de la API escrito a mano (D5), incluido `DebateLanguage` — revisión al cerrar cada fase
+- [x] Tema oscuro fijo en todo el dashboard (D21, 2026-09-27): clase `dark` en el `<html>` de `(panel)`, `[locale]` y `global-not-found`, y `color-scheme: dark` en `globals.css`. Las pantallas nuevas usan los tokens de shadcn (`bg-background`, `text-muted-foreground`, etc.) y no colores fijos, para no reintroducir fondos blancos
 
 ## 6. Backlog — nice-to-have (no se implementa sin pedirlo)
 

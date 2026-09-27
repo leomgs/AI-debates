@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 
 export default function PanelRootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={`${fontVariables} h-full antialiased`}>
+    <html lang="es" className={`${fontVariables} dark h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <QueryProvider>{children}</QueryProvider>
       </body>

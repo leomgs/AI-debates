@@ -40,7 +40,7 @@ export default async function ShowcaseRootLayout({ children, params }: LayoutPro
   if (!isShowcaseLocale(locale)) notFound();
 
   return (
-    <html lang={locale} className={`${fontVariables} h-full antialiased`}>
+    <html lang={locale} className={`${fontVariables} dark h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <header className="border-b">
           <div className="mx-auto flex w-full max-w-5xl items-center px-4 py-4">

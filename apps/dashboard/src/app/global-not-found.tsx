@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 
 export default function GlobalNotFound() {
   return (
-    <html lang="es" className={`${fontVariables} h-full antialiased`}>
+    <html lang="es" className={`${fontVariables} dark h-full antialiased`}>
       <body className="flex min-h-full flex-col items-center justify-center gap-4 px-4 text-center">
         <h1 className="text-2xl font-semibold">Página no encontrada</h1>
         <p className="text-muted-foreground">La dirección no existe o ya no está disponible.</p>
