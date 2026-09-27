@@ -22,7 +22,7 @@ Dependencias de backend/workspace de la spec 003, trackeadas en `tasks.md` de la
   - API-19: `debate.verdict.stale: boolean` en `GET /episodes/:id` (AC 3.81). Acción `POST /episodes/:id/actions/regenerate-verdict` con body `{}` obligatorio (sin body o con campos de más → `400 VALIDATION_ERROR`); responde `201` con el veredicto nuevo en el shape de `debate.verdict` y `stale: false`, y `verdict.id` cambia en cada vuelta. Es sincrónica (espera de RPM de hasta unos 90 s más reintentos). Errores: `409 INVALID_STATE_TRANSITION` (fuera de `PENDING_REVIEW` o si el estado cambió durante la llamada), `409 USAGE_LIMIT_EXCEEDED`, `503 PROVIDER_QUOTA_EXCEEDED`, `500 INTERNAL_ERROR` (AC 3.85). Todavía no está en `openapi.json` como acción tipada: el path param `action` y las respuestas por acción los documenta API-10
   - API-10b: `regenerate` y `regenerate-audio` ya responden `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` (antes `500`; AC 3.50, 3.62). API-14: `edit`/`regenerate` con un `argumentId` de otro episodio → `404 NOT_FOUND` (AC 3.50: refrescar el detalle)
   - `RemotionManifest.meta.language` ya es obligatorio (`DebateLanguage` en `@ai-trend-debates/contracts`); sale `"ES"` hasta que la spec 004 agregue el idioma por episodio
-- [ ] API-17 (y el `language` de API-1) lo entrega la spec 004: `tasks.md` de la raíz §13. Sus preguntas abiertas A y B ya están resueltas; lo que queda es trabajo de backend en serie (voces `EN`/`PT`, migración, TTS, API)
+- [x] API-17 (y el `language` de API-1) — **hecho 2026-09-27** (raíz, `decision-log.md` entradas 36-38). Lo entregó la spec 004: `tasks.md` de la raíz §13. Sus preguntas abiertas A y B ya están resueltas; lo que queda es trabajo de backend en serie (voces `EN`/`PT`, migración, TTS, API)
 - [ ] Antes de F3: `packages/video` como librería con audio real + catálogo de pnpm (Restricciones técnicas, puntos 1-4)
 - [ ] Antes de F4: API-7; API-8 en producción con TTL de audio 3600 s (D12) y sin `/docs` (D20); ajuste de `coding-rules.md` §1
 
@@ -84,7 +84,7 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§
 - [ ] Estados vacío/carga/error (AC 3.20, AC 3.73)
 - [ ] Auto-refresco de 10 s (constantes, D19) mientras haya episodios "En curso" (AC 3.21)
 
-**Crear `/studio/new` (sección 4)** — requiere API-17:
+**Crear `/studio/new` (sección 4)** — requiere API-17 (hecho 2026-09-27). Nota del review de 13.7: `openapi-typescript` (con `defaultNonNullable`) genera `CreateEpisodeDto.language` como **requerido** porque el schema tiene `default: "ES"`; la API lo acepta omitido (AC 4.2), pero el formulario siempre lo manda (AC 3.22), así que no hace falta cambiar la generación. Crear un episodio `EN`/`PT` responde `409 VOICE_NOT_CONFIGURED` mientras no haya voces (spec 004, D20, AC 4.29): es el caso de AC 3.78. En el manifest, `agents[].voiceId` puede ser `null` (el juez siempre).
 - [ ] Formulario `topic` con contador y validación 1-300 tras recortar (AC 3.22)
 - [ ] Selector de idioma con Español, English y Português, Español preseleccionado, siempre enviado en `createEpisode`, con nota de que el idioma no se puede cambiar después (AC 3.22; D15; AC 4.20)
 - [ ] Envío sin duplicados y navegación al detalle (AC 3.23, AC 3.24)
