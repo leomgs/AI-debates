@@ -39,3 +39,7 @@ Estado: **aceptado** (2026-09-25). Origen: spec `docs/product/004-debate-languag
 - **Json anidado `Record<lang, Record<provider, string>>` en `Agent.voiceId`**: la migración sería solo de datos, sin reconstruir la tabla. A cambio, exige parsear con Zod en dos niveles en cada lectura y no distingue un placeholder de una voz real.
 - **Json `Record<provider, Record<lang, string>>`**: tiene los mismos problemas, y además el chequeo de D7 tiene que recorrer todas las entradas de un proveedor.
 - **Usar la voz `ES` como respaldo**: descartado por D6, porque produce audio inservible sin ningún error.
+
+## Notas posteriores
+
+- **2026-09-27**: las referencias "spec 004, D6/D7" de Contexto, Consecuencias y Alternativas corresponden a la numeración de la primera versión de la spec; hoy son D14 (sin respaldo silencioso) y D15 (`VOICE_NOT_CONFIGURED`). Por decisión del usuario (spec 004, D20), en el MVP `AgentVoice` solo tiene filas `ES`; `EN` y `PT` quedan en el enum y se rechazan con el `409` del punto 4 hasta que la mejora "Voces EN/PT" cargue sus voces. No cambia ninguna decisión de este ADR.

@@ -2,30 +2,33 @@
 
 Tracking del estado de implementación. No repite el diseño (eso vive en `architecture.md` / `features.md` / `api-contract.md` / `coding-rules.md`) — solo lista qué está hecho y qué falta, módulo por módulo, para saber en qué seguir sin releer todo el proyecto.
 
-Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-26.
+Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-27.
 
-## Dónde retomar (última sesión: 2026-09-26 — F1 del dashboard mergeada; antes, bloque F2-2 del backend: API-10b, API-14, API-15 y API-19)
+## Dónde retomar (última sesión: 2026-09-27 — spec 004 ajustada por D20, voces `EN`/`PT` a mejora posterior; antes, F1 del dashboard mergeada y verificada, y bloque F2-2 del backend: API-10b, API-14, API-15 y API-19)
 
 **ESTADO AL CORTAR LA SESIÓN (2026-09-27)**. Leer esto primero.
+- **Decisión 2026-09-27 — voces `EN`/`PT` fuera del MVP (spec 004, D20)**: elegir las 5 voces `en_US`, cargar la asignación `PT` con repetición y el spike de velocidad/tono pasan a la mejora posterior "Voces EN/PT" (§13.11, no se implementa sin pedirlo). Interino: el enum sigue `ES`/`EN`/`PT`, y crear un episodio `EN` o `PT` responde `409 VOICE_NOT_CONFIGURED` sin crear filas (AC 4.29, nuevo); el seed del MVP carga solo `ES` (`LOCAL` con las 5 voces actuales y `GOOGLE_TTS` con `"es"`, AC 4.25); AC 4.30 (seed 5×3), AC 4.17 y las partes smoke `EN`/`PT` de AC 4.7/4.8 pasan a la mejora. API-17 se sigue entregando con el MVP. Pasó por el pipeline `product-analyst` (ajuste de la spec) → `architect` (aprobado con cambios, aplicados; nota nueva al final del ADR 0002) → `roadmap-planner` (este archivo y `roadmap.md`). **Nuevo punto de partida del backend: §13.4 (migración de idioma)**, que ya no espera ninguna elección de voces.
 - **F1 del dashboard mergeada** a `master` (fast-forward desde `feat/dashboard-f1`, `aa07477`, 2026-09-26): auth, origen único, cliente tipado y layouts, con los dos ítems de Workspace de §12.1 incluidos. Pasó dos revisiones de `code-reviewer` y una aclaración del ADR 0001 hecha por `architect` (alcance de `src/proxy.ts`); proceso y hallazgos en `apps/dashboard/docs/decision-log.md` entrada 6. El usuario aceptó que `/en` y `/xx` respondan con la 404 por defecto de Next, en inglés, hasta la F4 (`apps/dashboard/docs/tasks.md` §4).
 - [x] **F1 verificada en un navegador real por el usuario (2026-09-27), todo OK: la F1 del dashboard está completa** (`apps/dashboard/docs/roadmap.md`, Fase 1, "Pendiente para cerrar la F1"): `/login` de punta a punta con vuelta a `next`, "Cerrar sesión", aviso de sesión vencida ante un `401`, persistencia de la sesión con recargas (AC 3.3), pestaña de red (AC 3.9), y teclado y foco. Se levanta todo con `pnpm dev` desde la raíz y se entra por `http://localhost:3001/login` (ver abajo).
 - **`pnpm dev` desde la raíz levanta los dos servers** (commit `d4c32b1`): la API en `127.0.0.1:3000` (script `dev` nuevo = `nest start --watch`) y el dashboard en `localhost:3001` (`next dev -p 3001`, porque el 3000 es de la API). `setup.md` §4. Ojo: en Windows, al cortar puede quedar algún `node.exe` escuchando en 3000/3001; si al volver a arrancar da puerto ocupado, matarlo.
 - [x] **Push hecho** por el usuario (2026-09-27): `origin/master` al día, con la F1 del dashboard y `pnpm dev`.
 - [x] **Limpieza hecha** (2026-09-27): borrados el worktree `.claude/worktrees/agent-a7be1375e0e9d9cb9` y las ramas ya mergeadas `feat/dashboard-f1`, `feat/backend-bloque-f2-2`, `docs/roadmap-f1` y `worktree-agent-a7be1375e0e9d9cb9`.
-- **Al retomar, elegir**: (a) backend §13 paso 1 (voces `EN`/`PT` + spike de tono), camino crítico de la F2; o (b) en paralelo, la parte de la F2 del dashboard que no depende de API-17, empezando por el spike de SSE a través del rewrite.
+- **Al retomar, elegir**: (a) backend §13.4 (migración de idioma), primer paso del camino crítico de la F2 (13.4 → 13.6 → 13.7); o (b) en paralelo, la parte de la F2 del dashboard que no depende de API-17, empezando por el spike de SSE a través del rewrite.
 - **Bloque F2-2 mergeado** a `master` (fast-forward `81fe20a..754b5cf`, 2026-09-26). Pasó la revisión de `code-reviewer` y sus correcciones están aplicadas: `stale` anclado al momento de la foto del juez con `>=`, `$transaction` sin aislamiento documentado en `coding-rules.md` §2, `BrokenCircuitError` → 503 y el e2e de TTS por `AUDIO_PROVIDER`. Verificado: build en verde, 317 unit, 41 e2e y `check:boundaries` OK (re-verificado sobre la rama antes del merge).
 - [x] **Ventana de falso negativo de `stale`: se decidió la opción (b) y se corrigió en la misma rama, con un segundo review aplicado** (entrada 35 de `decision-log.md`, "Ventana de `stale` cerrada"). Había dos casos. `editByHuman` y `reviseDraft` archivaban en `ArgumentHistory` **antes** de actualizar el contenido: un juez que tomaba su foto (`judgedFrom`) entre las dos queries evaluaba el texto viejo con `stale: false`. Y `regenerate` sobre un argumento no `OFFICIAL` (por ejemplo, `REJECTED`) hacía `reviseDraft` + `promoteToOfficial` por separado: un juez entre el historial y el promote no veía el argumento. Ahora los tres caminos (`reviseDraft`, `editByHuman` y el nuevo `regenerateArgument`, que promueve a `OFFICIAL` en el mismo update) leen la versión previa, actualizan y **después** archivan, dentro de una `$transaction` mínima. El loop de enmienda sigue con `reviseDraft`, sin promover. Hay tests unit del orden y de integración del intercalado para `edit` y `regenerate`, sin sleeps. Queda aceptado el mismo trade-off de `replaceVerdict`: la transacción no aísla (`coding-rules.md` §2).
 - [x] Merge fast-forward de `feat/backend-bloque-f2-2` a `master`, tras el re-review de `code-reviewer`.
-- **Siguiente: backend para cerrar la F2** (sección 13, spec 004):
-  - paso 1: elegir 5 voces `en_US` y la asignación `PT` con repetición, más el spike de tono;
-  - paso 4: migración de idioma (`AgentVoice`, `Episode.language`, `AudioAsset.voiceId`), que es la tercera de la cola e incluye los índices de `stale` anotados en §13.4;
-  - pasos 6 y 7: TTS por idioma y `language` en la API. Cierran API-17 y la parte 2 de API-1.
-  - Los pasos 5b, 5c, 8 y 9 (prompts sin voseo y pipeline con idioma) no bloquean la F2.
+- **Siguiente: backend para cerrar la F2** (sección 13, spec 004; el paso 1 ya no tiene pendientes para el MVP, D20):
+  - paso 4: migración de idioma (`AgentVoice`, `Episode.language`, `AudioAsset.voiceId`), que es la tercera de la cola e incluye los índices de `stale` anotados en §13.4; seed solo con voces `ES`;
+  - pasos 6 y 7: TTS por idioma y `language` en la API, incluido el `409 VOICE_NOT_CONFIGURED` de `EN`/`PT` (AC 4.29, que se cierra en 13.7 con una llamada HTTP real). Cierran API-17 y la parte 2 de API-1.
+  - Camino crítico hacia API-17, en serie: 13.4 → 13.6 → 13.7 (13.3 y 13.5a ya hechos).
+  - Los pasos 5b, 5c, 8 y 9 (prompts sin voseo, pipeline con idioma, smoke `ES`, docs) cierran el MVP de la spec 004 pero no bloquean la F2. 5b y 5c se pueden hacer después de 13.4; en serie con 13.6, porque 5c y 13.6 tocan `episode-orchestrator.service.ts`.
   - API-10 (§12.2), recomendada antes de la F2: sin ella, `runEpisodeAction` no tiene body ni respuesta tipados en `openapi.json`, así que el front no puede construir las pantallas con acciones (curaduría, "Volver a juzgar", resolución de motivos) sin escribir tipos a mano (D5). Conviene después del paso 6 (`roadmap.md`, "Orden crítico", punto 7).
 - **En paralelo, el front**: la F2 del dashboard sigue bloqueada por API-17, pero una parte se puede adelantar con lo que ya está en `master` (constantes de polling, spike de SSE, detalle y vista en vivo, aviso de veredicto desactualizado, lista e inbox, todo sin el distintivo de idioma): `apps/dashboard/docs/roadmap.md`, Fase 2, "Qué se puede adelantar antes de API-17".
 - **Flujo acordado**: cada bloque va en su propia rama → `backend-engineer`/`frontend-engineer` → verificación propia (build + tests) → `code-reviewer` → correcciones → merge fast-forward a `master`. Commits sin línea de atribución.
 
-**Última tarea (2026-09-26)**: F1 del dashboard mergeada a `master` con fast-forward desde `feat/dashboard-f1`, después de dos revisiones de `code-reviewer` y de la aclaración del ADR 0001 (`proxy.ts` puede normalizar y rutear URLs sin datos ni secretos). Roadmaps y tasks sincronizados (este archivo, `roadmap.md` y `apps/dashboard/docs/`). Después se agregó `pnpm dev` para levantar API y dashboard juntos. El 2026-09-27 el usuario verificó la F1 en navegador (todo OK) y quedó completa.
+**Última tarea (2026-09-27)**: ajuste de la spec 004 por D20 (voces `EN`/`PT` a la mejora posterior "Voces EN/PT"), por el pipeline `product-analyst` → `architect` → `roadmap-planner`. No se tocó código. Sincronizados este archivo (§5, §12.2 API-17 y §13, con la subsección nueva 13.11) y `roadmap.md`.
+
+**Antes (2026-09-26)**: F1 del dashboard mergeada a `master` con fast-forward desde `feat/dashboard-f1`, después de dos revisiones de `code-reviewer` y de la aclaración del ADR 0001 (`proxy.ts` puede normalizar y rutear URLs sin datos ni secretos). Roadmaps y tasks sincronizados (este archivo, `roadmap.md` y `apps/dashboard/docs/`). Después se agregó `pnpm dev` para levantar API y dashboard juntos. El 2026-09-27 el usuario verificó la F1 en navegador (todo OK) y quedó completa.
 
 **Antes, el mismo día (2026-09-26)**: bloque F2-2 del backend implementado en la rama `feat/backend-bloque-f2-2`, en serie sobre `episode-actions.service.ts` (sección 12.2): API-10b (`BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED`; `DailyQuotaExceededError`, `RateLimitWaitExceededError` y `TtsProviderUnavailableError` → `503 PROVIDER_QUOTA_EXCEEDED`), API-14 (`argumentId` ajeno → `404`), API-15 (`resume` valida el estado antes de tocar límites) y API-19 (`regenerate-verdict`, tabla `VerdictHistory` sin FK a `Agent`, `debate.verdict.stale`). Segunda migración de la cola aplicada sobre `dev.db` (solo `CREATE TABLE`, datos intactos). Proceso y hallazgos en `decision-log.md` entrada 35. Lo que queda para la F2 del lado del backend: la sección 13 (pasos 4, 6 y 7, que cierran API-17 y el `language` de API-1).
 
@@ -205,7 +208,7 @@ Entidad: `AudioAsset`. **Diseño completo decidido 2026-09-09** (`decision-log.m
 
 **Orden de build** (5 etapas verificables, mismo criterio que `EpisodesModule` — decision-log #10/#20): (1) schema + esqueleto del módulo — **completa**, (2) Local/Echogarden de punta a punta hasta `READY_FOR_RENDER` — **completa y verificada contra el motor real**, (3) regeneración atómica + URLs firmadas — **completa y verificada contra el motor y el servidor reales** (decision-log #25). (4) Google como segundo proveedor y (5) OpenRouter quedan en backlog — no son requisito P0 de `features.md` Feature 6.
 
-**Voces por idioma (spec 004, ADR 0002)**: el `Json` de `Agent.voiceId` se reemplaza por la tabla `AgentVoice(agentId, language, provider, voiceId)`, y mientras no exista un segundo `AudioProvider` enlazado el backend solo arranca con `TTS_PROVIDER=LOCAL`. Catálogo real de Echogarden vits consultado el 2026-09-25 (spec 004, pregunta A): `es` 7 voces (solo 2 `es_MX`, ninguna de otra región latinoamericana), `en` 35 (23 `en_US`), `pt` 3 (todas masculinas). Decisión del usuario: **`ES`** conserva las 5 voces actuales de este seed (mezcla `es_ES`/`es_MX`) hasta que exista un segundo motor de TTS — D5 rige el texto, no el timbre; **`EN`** lleva 5 voces `en_US` distintas; **`PT`** repite voces (juez con voz propia, debatientes compartiendo las dos `pt_BR`), con un spike de velocidad/tono y todas masculinas como limitación conocida. Las voces `EN`/`PT` elegidas se documentan acá cuando se fijen (sección 13.1). Cualquier proveedor del backlog de arriba (Google, OpenRouter, Chatterbox) tiene que levantar la restricción de `LOCAL`, cargar sus voces verificadas en `AgentVoice` y es lo que habilita pasar `ES` a voces `es_MX`/latinoamericanas.
+**Voces por idioma (spec 004, ADR 0002)**: el `Json` de `Agent.voiceId` se reemplaza por la tabla `AgentVoice(agentId, language, provider, voiceId)`, y mientras no exista un segundo `AudioProvider` enlazado el backend solo arranca con `TTS_PROVIDER=LOCAL`. Catálogo real de Echogarden vits consultado el 2026-09-25 (spec 004, pregunta A): `es` 7 voces (solo 2 `es_MX`, ninguna de otra región latinoamericana), `en` 35 (23 `en_US`), `pt` 3 (todas masculinas). Decisión del usuario: **`ES`** conserva las 5 voces actuales de este seed (mezcla `es_ES`/`es_MX`) hasta que exista un segundo motor de TTS — D5 rige el texto, no el timbre; **`EN`** llevará 5 voces `en_US` distintas; **`PT`** repetirá voces (juez con voz propia, debatientes compartiendo las dos `pt_BR`), con un spike de velocidad/tono y todas masculinas como limitación conocida. **Por D20 (2026-09-27), las voces `EN`/`PT` salen del MVP**: en el MVP `AgentVoice` solo tiene filas `ES` (`LOCAL` con las 5 voces actuales y `GOOGLE_TTS` con `"es"`), y elegir y cargar las `EN`/`PT` es la mejora posterior "Voces EN/PT" (sección 13.11), que las documenta acá cuando se fijen. Cualquier proveedor del backlog de arriba (Google, OpenRouter, Chatterbox) tiene que levantar la restricción de `LOCAL`, cargar sus voces verificadas en `AgentVoice` y es lo que habilita pasar `ES` a voces `es_MX`/latinoamericanas.
 
 ## 6. Render (`modules/render/`)
 
@@ -341,7 +344,7 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 - [x] **API-1 (parte 1)** — `getEpisodeDetail` trae tópico, `createdAt` y participantes (id, nombre/persona, `isJudge`) (AC 3.26-3.29, 3.32, 3.51 — agente afectado en `VALIDATION_INCONSISTENCY`, participantes en `VOICE_NOT_CONFIGURED`). Cierra API-9. Hacerla junto con API-7a (mismo mapeo de detalle y listado). Hecho: `topic { id, title }`, `createdAt` y `participants[] { agentId, name, role, isJudge }` (debatientes primero, juez al final); `role` es la persona (`ANALYST`, ...) o `JUDGE`
 - [ ] **API-1 (parte 2)** — `language` en `getEpisodeDetail` y en `listEpisodes` (AC 3.17 idioma, 3.26 idioma). **Lo entrega la sección 13, paso 7** (AC 4.18), porque la columna nace en la migración de la spec 004; no se implementa por separado acá.
 - [x] **API-7a** — columna `Episode.publishedAt` (nullable, `null` hasta que exista `publish`) + migración aplicada con `migrate deploy` (`decision-log.md` #21) + exposición en `getEpisodeDetail` y `listEpisodes` (AC 3.17, 3.26 distintivo "Publicado"; D10). Primera de la cola de migraciones: API-7a → `VerdictHistory` (API-19) → sección 13, paso 4. Hecho: migración `20260925120000_add_episode_published_at` (solo `ADD COLUMN`), aplicada sobre `dev.db` con los datos intactos; también en `EpisodeSchema` (la fila que devuelven `createEpisode` y las acciones)
-- [ ] **API-17** — idioma del debate: `language` en `CreateEpisodeDto` (default `ES`), `409 VOICE_NOT_CONFIGURED` en `createEpisode`, `CheckpointReason.VOICE_NOT_CONFIGURED` reanudable con `{}`, `meta.language` en `RemotionManifest`, todo en `openapi.json` (AC 3.22, 3.51 fila `VOICE_NOT_CONFIGURED`, 3.67, 3.78). **Lo entrega la sección 13** (pasos 3, 4, 6 y 7); se marca hecho cuando esos cuatro pasos lo estén.
+- [ ] **API-17** — idioma del debate: `language` en `CreateEpisodeDto` (default `ES`), `409 VOICE_NOT_CONFIGURED` en `createEpisode`, `CheckpointReason.VOICE_NOT_CONFIGURED` reanudable con `{}`, `meta.language` en `RemotionManifest`, todo en `openapi.json` (AC 3.22, 3.51 fila `VOICE_NOT_CONFIGURED`, 3.67, 3.78). **Lo entrega la sección 13** (pasos 3, 4, 6 y 7); se marca hecho cuando esos cuatro pasos lo estén. No depende de la mejora "Voces EN/PT" (13.11, D20): en el MVP, `EN` y `PT` responden `409 VOICE_NOT_CONFIGURED` (AC 4.29), que es lo que el dashboard muestra con AC 3.78.
 - [x] **API-5** — schema de respuesta de `listNotifications`, `markNotificationRead` y `markAllNotificationsRead` en `openapi.json` (AC 3.10-3.14). Hecho: `NotificationDto` (fechas ISO, `readAt` nullable); `markAllNotificationsRead` pasó de responder sin body a `{ count }` (los dos POST siguen en `201`)
 - [x] **API-12** — `pipelineActive: boolean` en `getEpisodeDetail`; `streamEpisodeEvents` completa enseguida si el pipeline no está activo (AC 3.32, 3.35, 3.38, 3.39). Hecho: contador en memoria por episodio en `EpisodeEventsService` (`begin` síncrono al entrar a `runPipeline`/`runAudioPipeline`, `complete` en el `finally`); ya no queda un `Subject` colgado por pedir el SSE de un episodio frenado. Tras el review: el flag se lee antes de la query del detalle, `stream()` decide en la suscripción (`defer`) y el SSE responde `204` sin pipeline activo y `404` si el episodio no existe
 - [x] **API-13** — evento SSE `heartbeat` cada 15 s mientras el pipeline está activo, como séptimo DTO SSE en `openapi.json`, + `Cache-Control: no-transform` en el stream (AC 3.33; ADR 0001 punto 6). `no-transform` ya lo manda Nest 11 en todo `@Sse` (no hizo falta código; lo cubre un e2e)
@@ -405,22 +408,19 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 
 API-9 está cerrado vía API-1 (no requiere trabajo propio).
 
-## 13. Idioma del debate por episodio (`docs/product/004-debate-language.md`) — en curso (13.3 y 13.5a hechos)
+## 13. Idioma del debate por episodio (`docs/product/004-debate-language.md`) — en curso (13.1, 13.3 y 13.5a hechos; voces `EN`/`PT` pasadas a mejora posterior, D20)
 
-Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan incompletas respecto de esta spec). Spec escrita por `product-analyst` y revisada por `architect` el 2026-09-25, con sus preguntas abiertas A y B resueltas por el usuario el mismo día; voces según `docs/adr/0002-voces-por-agente-e-idioma.md` (aceptado, reemplaza el punto 1 de `decision-log.md` #20). Una subsección por paso del "Plan de implementación" de la spec, con los AC 4.x que cubre. **Entrega API-17 (y el `language` de API-1) de la sección 12, bloqueante de la F2 del dashboard**; el orden respecto de la sección 12 está en `roadmap.md`, Fase 7, "Orden crítico entre la Fase 6 y la Fase 7". Ningún paso depende ya de decisiones del usuario. Los AC de backend se verifican con LLM y TTS mockeados; la salida real, con smoke tests.
+Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan incompletas respecto de esta spec). Spec escrita por `product-analyst` y revisada por `architect` el 2026-09-25, con sus preguntas abiertas A y B resueltas por el usuario el mismo día; voces según `docs/adr/0002-voces-por-agente-e-idioma.md` (aceptado, reemplaza el punto 1 de `decision-log.md` #20). **Ajustada el 2026-09-27 (D20, decisión del usuario)**: elegir y cargar las voces `EN`/`PT` sale del MVP y pasa a la mejora posterior "Voces EN/PT" (13.11); en el MVP `AgentVoice` solo tiene filas `ES`, y crear un episodio `EN` o `PT` responde `409 VOICE_NOT_CONFIGURED` sin crear filas (AC 4.29). El ajuste pasó por `architect` (aprobado con cambios, aplicados; nota al final del ADR 0002). Una subsección por paso del "Plan de implementación" de la spec, con los AC 4.x que cubre, más 13.11 para la mejora. **Entrega API-17 (y el `language` de API-1) de la sección 12, bloqueante de la F2 del dashboard**; camino crítico hacia API-17: 13.4 → 13.6 → 13.7; el orden respecto de la sección 12 está en `roadmap.md`, Fase 7, "Orden crítico entre la Fase 6 y la Fase 7". Ningún paso del MVP depende ya de decisiones del usuario. Los AC de backend se verifican con LLM y TTS mockeados; la salida real, con smoke tests.
 
-### 13.1. Paso 1 — Elegir las voces (pregunta A resuelta)
+### 13.1. Paso 1 — Voces: el MVP no requiere voces nuevas — HECHO
 
+Por D20 (2026-09-27), lo que quedaba de este paso (voces `EN`, asignación `PT`, spike de tono y su documentación en §5) pasó a la mejora posterior 13.11.
 - [x] Consultar el catálogo real con `Echogarden.requestVoiceList({ engine: 'vits', language })` para `es`, `en` y `pt` (2026-09-25): `es` 7 voces (solo 2 `es_MX`, ninguna de otra región latinoamericana), `en` 35, `pt` 3, todas masculinas (spec 004, "Preguntas abiertas", A)
-- [ ] `ES`: sin voces nuevas; se conservan las 5 actuales del seed (mezcla `es_ES`/`es_MX`), que la migración copia como `ES` (D5: la variante rige el texto, no el timbre)
-- [ ] `EN`: elegir 5 voces `en_US` distintas (4 debatientes + juez), tier medium o high, con nombres completos y exactos (Echogarden busca por prefijo). Base de AC 4.25
-- [ ] `PT`: fijar la asignación con repetición: juez con voz propia, los 4 debatientes compartiendo las dos `pt_BR` (`pt_BR-edresson-low`, `pt_BR-faber-medium`). Una fila por agente en `AgentVoice`, aunque la voz se repita (AC 4.25). Todas masculinas: limitación conocida
-- [ ] Spike `PT`: verificar si Echogarden permite variar velocidad y tono en vits para diferenciar a los debatientes que comparten voz (no verificado). No bloquea el seed ni API-17; si funciona y requiere cambios en `AudioProvider` o en el schema, pasar por `architect` antes de implementarlo
-- [ ] Documentar las voces `EN`/`PT` y la asignación en la sección 5 de este archivo; `GOOGLE_TTS` con `"es"`/`"en"`/`"pt"`, `OPENROUTER` sin filas (D14)
+- [x] `ES`: sin voces nuevas; se conservan las 5 actuales del seed (mezcla `es_ES`/`es_MX`) (D5: la variante rige el texto, no el timbre). Decidido; la copia como `ES` la hace la migración de 13.4 y se trackea ahí
 
 ### 13.2. Paso 2 — Resolver las preguntas abiertas A y B — HECHO
 
-- [x] Pregunta A: voces (resuelta 2026-09-25, decisión del usuario; aplicada en 13.1)
+- [x] Pregunta A: voces (resuelta 2026-09-25, decisión del usuario; aplicada en 13.1 para `ES`; la parte `EN`/`PT` queda como referencia para 13.11, D20)
 - [x] Pregunta B: la migración completa `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente (resuelta 2026-09-25, decisión del usuario; aplicada en 13.4)
 - [x] Registradas en la spec 004 y en el ADR 0002
 
@@ -431,15 +431,15 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 - [x] `packages/video/fixtures/debate.sample.json` con `"language": "ES"`; `pnpm video:studio` sigue renderizando sin `.env` ni base (AC 4.19). Verificado con `remotion compositions` y un render real de un frame (`remotion still`)
 - [x] `check-boundaries` pasa: `packages/video` sigue sin importar nada de `apps/api` (AC 4.19)
 
-### 13.4. Paso 4 — Schema y migración (requiere 13.1 para el seed `EN`/`PT`, y las migraciones de API-7a y `VerdictHistory` ya aplicadas)
+### 13.4. Paso 4 — Schema y migración (requiere las migraciones de API-7a y `VerdictHistory`, ya aplicadas) — primer paso del camino crítico de la F2
 
 - [ ] Revisar los episodios existentes en `dev.db` (`SELECT id, title, status FROM Episode`) por si alguno quedó mal etiquetado como español (Edge cases, "Episodio en curso durante la migración")
 - [ ] `schema.prisma`: enum `DebateLanguage`, modelo `AgentVoice` con `@@id([agentId, language, provider])` y `onDelete: Cascade`, sin `Agent.voiceId`, `Episode.language @default(ES)`, `AudioAsset.voiceId String?`, `CheckpointReason.VOICE_NOT_CONFIGURED` (ADR 0002 puntos 1, 2, 4, 6)
 - [ ] Índices para `debate.verdict.stale` (review de API-19, 2026-09-26): la consulta de `DebateService.isVerdictStale` (`ArgumentHistory` del debate con `createdAt >=` el veredicto) corre en cada `GET /episodes/:id`, es decir cada 10 s por episodio abierto con el polling del detalle (D19). Esta migración (la próxima de la cola) agrega `@@index([argumentId, createdAt])` en `ArgumentHistory` y `@@index([debateId])` en `DebateRound`. No se agregaron en la rama de API-19 para no sumar otra migración a la cola
-- [ ] Migración manual (ADR 0002 punto 7): crear `AgentVoice`; copiar las voces actuales como `ES` con `json_each`, excluyendo `'TBD'`; completar `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente, **antes** de reconstruir `Agent` (pregunta B; AC 4.16); reconstruir `Agent` sin `voiceId` con el patrón `PRAGMA` de `20260909120000_agent_voiceid_json_add_openrouter` (FKs de `Argument`, `Verdict` y `EpisodeParticipant`; **`VerdictHistory` no tiene FK a `Agent`**, decisión de API-19 del 2026-09-26: es un archivo y guarda `judgeId`/`winnerId` como texto, igual que `Verdict.winnerId`, así que no suma nada a la reconstrucción); `Episode.language NOT NULL DEFAULT 'ES'`. Aplicada con `migrate deploy` (#21)
-- [ ] Seed: upsert por `(agentId, language, provider)`: `ES` con las 5 voces actuales, `EN` y `PT` con las de 13.1; sin `"TBD"` ni filas `OPENROUTER`; idempotente; corregir el comentario obsoleto de `seed.ts:49-51` sobre `Agent.name` (AC 4.25)
-- [ ] Consulta directa: todos los episodios existentes en `ES` (AC 4.5); 5 agentes × 3 idiomas con una fila `LOCAL` cada uno, sin `TBD` ni `OPENROUTER`, y el seed corrido dos veces no cambia nada (AC 4.25); los `AudioAsset` anteriores a la migración tienen `voiceId` no nulo (pregunta B)
-- [ ] Ajustar los tests que crean agentes con `voiceId` (por ejemplo, `episodes.integration.spec.ts:46`)
+- [ ] Migración manual (ADR 0002 punto 7), en este orden (spec, Restricciones técnicas, "Migración"): crear `AgentVoice`; copiar las voces actuales como `ES` con `json_each`, excluyendo `'TBD'` (quedan filas `LOCAL` y `GOOGLE_TTS`); completar `AudioAsset.voiceId` de los assets existentes con la voz `LOCAL` que tenía su agente, **antes** de reconstruir `Agent`, porque lee `Agent.voiceId` (pregunta B; AC 4.16); reconstruir `Agent` sin `voiceId` con el patrón `PRAGMA` de `20260909120000_agent_voiceid_json_add_openrouter` (FKs de `Argument`, `Verdict` y `EpisodeParticipant`; **`VerdictHistory` no tiene FK a `Agent`**, decisión de API-19 del 2026-09-26: es un archivo y guarda `judgeId`/`winnerId` como texto, igual que `Verdict.winnerId`, así que no suma nada a la reconstrucción); `Episode.language NOT NULL DEFAULT 'ES'`. Aplicada con `migrate deploy` (#21)
+- [ ] Seed: upsert por `(agentId, language, provider)`; en el MVP solo `ES`: `LOCAL` con las 5 voces actuales y `GOOGLE_TTS` con `"es"`. Sin filas `EN`/`PT` para ningún proveedor (van a 13.11), sin `"TBD"` ni filas `OPENROUTER`; idempotente; corregir el comentario obsoleto de `seed.ts:49-51` sobre `Agent.name` (AC 4.25)
+- [ ] Consulta directa: todos los episodios existentes en `ES` (AC 4.5); 5 agentes × `ES` con exactamente una fila `LOCAL` (la misma voz que antes de migrar) y una `GOOGLE_TTS` con `"es"`, ninguna fila `EN`/`PT`, sin `TBD` ni `OPENROUTER`; una base migrada y una base nueva (`migrate reset` + seed, sobre una base aparte y nunca sobre `dev.db`) quedan con las mismas filas; el seed corrido dos veces no cambia nada (AC 4.25); los `AudioAsset` anteriores a la migración tienen `voiceId` no nulo (pregunta B)
+- [ ] Ajustar los tests que crean agentes con `voiceId` (`episodes.integration.spec.ts:54,58`, hoy con `voiceId: "voice-test"`): sin `Agent.voiceId` y con filas `AgentVoice` `ES`/`LOCAL` para los 5 agentes en el setup; sin ellas, `createEpisode` recibe el `409` de D15 (spec, Restricciones técnicas, "Tests y scripts")
 
 ### 13.5. Paso 5 — Pipeline
 
@@ -449,9 +449,9 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 
 **5b. Prompts (requiere 5a y 13.4)**
 - [ ] Reescribir sin voseo, a español neutro con tuteo: `agents.personas.ts` (incluido `ROUND_FRAMING` `:155-159` y `:168,184`), `agents.service.ts`, `fact-check.service.ts`, `research.service.ts` y el `debaterSummary` del seed (AC 4.26)
-- [ ] `buildLanguageInstruction(language)` en `shared/personas`: una línea por idioma, redactada en el idioma de destino; la de `ES` nombra la variante (neutro latinoamericano, tuteo, sin regionalismos) (AC 4.27; D11)
+- [ ] `buildLanguageInstruction(language)` en `shared/personas`: una línea por idioma, redactada en el idioma de destino, para los 3 idiomas desde el MVP; la de `ES` nombra la variante (neutro latinoamericano, tuteo, sin regionalismos) (AC 4.27; D11)
 - [ ] Instrucción como regla del system prompt y como última línea del prompt de usuario en `argue`, `respond`, `amend`, `regenerate` y `judge` (incluido el `judge` de `regenerate-verdict`, API-19); tests que inspeccionan el prompt para `ES`, `EN` y `PT` (AC 4.6)
-- [ ] En las evaluadoras (claims, fact-check, filtro editorial) y en la extracción de hechos del research: idioma del texto evaluado y de los campos libres (`statement`, `analysis`, `violatedRule`, `reason`, hechos); tests del prompt (AC 4.7; D7, D9)
+- [ ] En las evaluadoras (claims, fact-check, filtro editorial) y en la extracción de hechos del research: idioma del texto evaluado y de los campos libres (`statement`, `analysis`, `violatedRule`, `reason`, hechos); tests del prompt para `ES`, `EN` y `PT` (AC 4.7 parte tests; D7, D9)
 - [ ] Texto de respaldo `"Violación de reglas editoriales."` (`episode-orchestrator.service.ts:371`) en el idioma del episodio (D7)
 - [ ] `CONTRARIAN.voice` (`agents.personas.ts:67`) sin la frase literal en español; reemplazo por descripción neutra (AC 4.9)
 - [ ] Búsqueda en el código sin formas de voseo ("sos", "querés", "presentá", "generá", "devolvé"...) + revisión (AC 4.26)
@@ -460,13 +460,14 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 - [ ] `DebateContext.language`, completado por `EpisodeContextService` desde `Episode.language` (AC 4.10, 4.12)
 - [ ] `FactCheckService.extractClaims`/`check`/`editorialReview` con `language` como último parámetro (`fact-check.service.ts:100,121,149`) (AC 4.7)
 - [ ] `ResearchService.research(topicId, language, manualSources?)`; ajustar `scripts/smoke-test-argument.ts` (`:31`, `:44`) (AC 4.13)
-- [ ] Tests del orquestador: episodio `EN` reanudado desde `DEBATING`, `JUDGING` y `GENERATING_AUDIO` conserva el idioma (AC 4.10); episodio `PT` retomado por `EpisodeRecoveryService` (AC 4.11); `regenerate` en `PENDING_REVIEW` sobre `EN` usa el contexto compartido (AC 4.12); `resume` de `INSUFFICIENT_EVIDENCE` en `EN` extrae hechos en inglés (AC 4.13)
+- [ ] Tests del orquestador: episodio `EN` reanudado desde `DEBATING`, `JUDGING` y `GENERATING_AUDIO` conserva el idioma (AC 4.10); episodio `PT` retomado por `EpisodeRecoveryService` (AC 4.11); `regenerate` en `PENDING_REVIEW` sobre `EN` usa el contexto compartido (AC 4.12); `resume` de `INSUFFICIENT_EVIDENCE` en `EN` extrae hechos en inglés (AC 4.13). Los que pasan por audio o por `createEpisode` en `EN`/`PT` cargan en su setup filas `AgentVoice` de prueba con ids visiblemente ficticios (D14, p. ej. `test-en-analyst`), nunca con forma de catálogo vits y nunca en el seed
 
 ### 13.6. Paso 6 — TTS (requiere 13.4)
 
+Los tests de `EN`/`PT` de este paso (AC 4.14 y los que pasan por `createEpisode`) cargan en su setup filas `AgentVoice` de prueba con ids visiblemente ficticios (D14, p. ej. `test-en-analyst`), nunca en el seed.
 - [ ] `TtsService.resolveVoiceId(agent, language)` contra `AgentVoice` y `LOCAL`; `synthesizeSegment(episodeId, argument, language)` y `regenerateSegmentByIndex(episodeId, sequenceIndex, language)` (AC 4.14)
 - [ ] `assertVoicesConfigured(agentIds, language)` + `VoiceNotConfiguredError` (mensaje con idioma, proveedor y agentes sin voz) (ADR 0002 punto 4)
-- [ ] `createEpisode` valida los 5 agentes candidatos (4 de `DEBATER_PERSONAS` + `JUDGE`) **antes del primer insert** → `409 VOICE_NOT_CONFIGURED`, sin filas creadas (AC 4.4)
+- [ ] `createEpisode`: después de la validación de Zod y **antes del primer insert** (`research.createTopic`), valida los 5 agentes candidatos (los 4 roles de `DEBATER_PERSONAS` + `JUDGE`, resueltos por `role` como en `EpisodeParticipantsService`); si falta la fila `Agent` de un rol, cuenta como agente sin voz y el error lo nombra por su rol → `409 VOICE_NOT_CONFIGURED`, sin filas creadas (AC 4.4; D15)
 - [ ] Mapeo HTTP `409 VOICE_NOT_CONFIGURED` en el filtro de errores; en `regenerate-audio`, el segmento queda como estaba (AC 4.15)
 - [ ] `handlePipelineError`: `catch` de `VoiceNotConfiguredError` **antes** del de `TtsProviderUnavailableError` (`episode-orchestrator.service.ts:584`) → `REQUIRES_HUMAN_REVIEW` con `VOICE_NOT_CONFIGURED`; ningún segmento sintetizado con otra voz (AC 4.15)
 - [ ] `applyResumeBody` (`episode-actions.service.ts:189-197`): `VOICE_NOT_CONFIGURED` con `EmptyResumeSchema`; body no vacío → `400 VALIDATION_ERROR`; `resume` retoma solo los segmentos pendientes (AC 4.15)
@@ -474,35 +475,63 @@ Post-MVP, fuera de `features.md` (congelado, no se edita: Features 1 y 7 quedan 
 - [ ] Arranque falla con `TTS_PROVIDER` distinto de `LOCAL`, con mensaje que explica por qué; test de configuración (AC 4.24; D16)
 - [ ] `AudioAsset.voiceId` con la voz usada; `manifest.agents[].voiceId` sale de ahí y, para assets sin `voiceId`, de la resolución por idioma; test de que cambiar el seed no altera el manifest ya sintetizado (AC 4.16; D17)
 - [ ] Tests que inspeccionan el `voiceId` que recibe el `AudioProvider` en la fase de audio y en `regenerate-audio` (AC 4.14)
+- [ ] Test de integración de AC 4.29 a nivel servicio: base con solo filas `ES` (como la deja el seed del MVP); `createEpisode` en `EN` y en `PT` → `VoiceNotConfiguredError` que nombra el idioma, `LOCAL` y los 5 agentes, sin `Topic`/`Debate`/`Episode`/`EpisodeUsage`; con `ES` o sin idioma, crea el episodio. Otro caso: falta la fila `Agent` de un rol → el error lo nombra por su rol. La parte HTTP necesita el DTO de 13.7: AC 4.29 se cierra ahí
 
 ### 13.7. Paso 7 — API (requiere 13.3, 13.4 y 13.6)
 
 - [ ] `CreateEpisodeSchema = { topic, language: DebateLanguageSchema.default("ES") }.strict()`; valor inválido → `400 VALIDATION_ERROR` sin crear `Topic`/`Debate`/`Episode`/`EpisodeUsage`; omitido → `ES` (AC 4.1, 4.2)
 - [ ] `language` en `EpisodeSchema`, `EpisodeListItemSchema` (y en el `select` de `episodes.service.ts:60`), `EpisodeDetailSchema`/`mapEpisodeDetail` y `BuildManifestInput` (AC 4.18). **Cierra API-1 parte 2**. Mismo mapper que `debate.verdict.stale` de API-19: mergear en serie
+- [ ] `meta.language` del manifest sale de `Episode.language`; borrar la constante `MANIFEST_LANGUAGE_UNTIL_EPISODE_LANGUAGE` (13.3)
 - [ ] `CheckpointReasonSchema` suma `VOICE_NOT_CONFIGURED` (AC 4.18)
 - [ ] Ninguna acción acepta ni modifica `language`; un `resume` con `language` → `400 VALIDATION_ERROR` por `.strict()` (AC 4.3; `publish`/`unpublish` se cubren en 12.4 cuando existan)
+- [ ] Test HTTP de AC 4.29 y del orden de D15: sobre una base con solo filas `ES`, `POST /episodes` con `language: "EN"` y `"PT"` → `409 VOICE_NOT_CONFIGURED` (idioma, `LOCAL` y los 5 agentes), sin filas creadas; con `ES` u omitido → crea el episodio; con `language` inválido → `400 VALIDATION_ERROR` antes del chequeo de voces (orden `400` Zod → `409` voces → inserts)
+- [ ] Llamada HTTP real (curl o `/docs`) contra `dev.db` sembrada con el seed del MVP: `EN` y `PT` → `409 VOICE_NOT_CONFIGURED`, `ES` → crea. **Cierra AC 4.29**
 - [ ] `pnpm openapi:generate`: enum `DebateLanguage` en `createEpisode`, `EpisodeDto`, detalle, listado y manifest; verificar si nestjs-zod genera `DebateLanguage_Output` además; dos corridas sin diff (AC 4.18). **Con esto, API-17 queda cumplido**
 
-### 13.8. Paso 8 — Smoke tests reales (requiere 13.5-13.7)
+### 13.8. Paso 8 — Smoke test real `ES` (requiere 13.5-13.7)
 
-- [ ] Un episodio `ES`, uno `EN` y uno `PT` hasta `READY_FOR_RENDER` (`scripts/smoke-test-episode.ts`, `scripts/smoke-test-tts.ts` o equivalentes)
-- [ ] Argumentos oficiales y veredicto en el idioma del episodio; contar por proveedor LLM cuántos salieron en otro idioma (AC 4.8)
-- [ ] `ES` sin voseo (AC 4.27)
-- [ ] Revisar a mano los `feedback.details` de `EN` y `PT` por rechazos atribuibles al idioma (AC 4.7)
-- [ ] Escuchar el audio y verificar `subtitles` no vacíos y coherentes con el texto en `EN` y `PT` (AC 4.17)
+Los smoke tests `EN`/`PT` pasaron a la mejora 13.11 (D20). La llamada real que confirma el `409` de `EN`/`PT` (AC 4.29) está en 13.7.
+- [ ] Un episodio `ES` hasta `READY_FOR_RENDER` (`scripts/smoke-test-episode.ts`, `scripts/smoke-test-tts.ts` o equivalentes)
+- [ ] Argumentos oficiales y veredicto en español, sin frases en otro idioma; contar por proveedor LLM cuántos salieron en otro idioma (AC 4.8 parte `ES`)
+- [ ] Sin voseo: los argumentos usan tuteo (AC 4.27)
+- [ ] Escuchar el audio y revisar los `subtitles` y los `feedback.details` (spec, Plan, paso 8, MVP)
 - [ ] Un episodio creado antes de la migración sigue abriendo detalle y manifest y figura como `ES` (spec, "Criterio de aceptación")
 - [ ] Resultados en `decision-log.md`
 
 ### 13.9. Paso 9 — Docs
 
 - [ ] `api-contract.md` §2: request y respuesta de `POST /episodes` con `language` (ejemplo nuevo)
-- [ ] `api-contract.md` §1: código de error `VOICE_NOT_CONFIGURED`
+- [ ] `api-contract.md` §1: código de error `VOICE_NOT_CONFIGURED`, aclarando que en el MVP es la respuesta de `createEpisode` para `EN`/`PT` (D20)
 - [ ] `setup.md`: pre-descarga de voces y `TTS_PROVIDER` limitado a `LOCAL`
 - [ ] `decision-log.md`: entrada de la implementación, con la nota de que el punto 1 de #20 queda reemplazado por el ADR 0002. `features.md` no se toca
 
 ### 13.10. Paso 10 — Dashboard
 
 - [ ] AC 4.20-4.23: se implementan dentro de la spec 003 y se trackean en `apps/dashboard/docs/tasks.md` (F2: AC 4.20 = AC 3.22, AC 4.21 = AC 3.78, AC 4.22 = AC 3.17/3.26; F4: AC 4.23 = AC 3.66/3.67). No se trackean acá
+
+### 13.11. Mejora posterior "Voces EN/PT" (D20) — no es MVP, no se implementa sin pedirlo
+
+Decisión del usuario del 2026-09-27 (spec 004, D20 y "MVP vs. nice-to-have", "Mejora posterior: Voces EN/PT"). No incluye código nuevo de pipeline, API ni dashboard: con el MVP de la sección 13 implementado, cada idioma se habilita solo con el seed. **Criterio para retomarla** (spec): el curador decide producir episodios en inglés o portugués, con el MVP de esta spec ya implementado (existe `AgentVoice` y AC 4.29 pasa). También se puede retomar cuando exista un segundo motor de TTS (§5), que podría cambiar la elección de voces `PT` (y las de `ES`, pregunta A). Referencia: el catálogo consultado el 2026-09-25 (13.1) y las opciones de la pregunta A de la spec. La mejora se considera implementada cuando pasan AC 4.30, AC 4.17, la parte smoke de AC 4.7 y la parte `EN`/`PT` de AC 4.8, con resultados en `decision-log.md`.
+
+**Voces** (antes en 13.1)
+- [ ] `EN`: elegir 5 voces `en_US` distintas (4 debatientes + juez), tier medium o high, con nombres completos y exactos del catálogo vits (Echogarden busca por prefijo)
+- [ ] `PT`: fijar la asignación con repetición: juez con voz propia (`pt_PT-tugao-medium` o una `pt_BR`, a definir en ese momento), los 4 debatientes compartiendo `pt_BR-edresson-low` y `pt_BR-faber-medium`. Una fila por agente en `AgentVoice`, aunque la voz se repita. Todas masculinas: limitación conocida
+- [ ] Spike `PT`: verificar si Echogarden permite variar velocidad y tono en vits para diferenciar a los debatientes que comparten voz (no verificado). Si funciona y requiere cambios en `AudioProvider` o en el schema, pasar por `architect` antes de implementarlo
+- [ ] Confirmar las variantes `en_US`/`pt_BR` de D5 con las voces elegidas; si el catálogo no alcanza, volver a D5
+- [ ] Documentar las voces `EN`/`PT` y la asignación en la sección 5 de este archivo
+
+**Seed** (antes en 13.4)
+- [ ] Seed: filas `EN` y `PT` para `LOCAL` con las voces elegidas (upsert por `(agentId, language, provider)`, idempotente, sin `"TBD"` ni filas `OPENROUTER`, D14)
+- [ ] Filas `GOOGLE_TTS` con `"en"` y `"pt"`: con esta mejora o con el proveedor Google (§5), lo que ocurra primero (no tienen efecto mientras rija D16)
+- [ ] Consulta directa: cada uno de los 5 agentes con exactamente una fila `LOCAL` por idioma (`ES`, `EN`, `PT`), cada `voiceId` un nombre completo y exacto del catálogo vits, sin `TBD` ni `OPENROUTER`; seed idempotente (AC 4.30)
+- [ ] `createEpisode` en `EN` y `PT` crea el episodio sin `409` (AC 4.30). El test de integración de AC 4.29 (13.6, con su propia base con solo `ES`) se conserva
+
+**Smoke tests reales** (antes en 13.8)
+- [ ] Un episodio `EN` y uno `PT` hasta `READY_FOR_RENDER` (AC 4.30)
+- [ ] Argumentos oficiales y veredicto en el idioma del episodio; contar por proveedor LLM cuántos salieron en otro idioma (AC 4.8 parte `EN`/`PT`); en `PT`, revisar cómo cita el veredicto los tipos de ronda (spec, Edge cases)
+- [ ] Revisar a mano los `feedback.details` de `EN` y `PT` por rechazos atribuibles al idioma (AC 4.7 parte smoke)
+- [ ] Escuchar el audio y verificar `subtitles` no vacíos y coherentes con el texto en `EN` y `PT` (AC 4.17)
+- [ ] Resultados en `decision-log.md`, y revisión de D10 para `EN`/`PT` con esa medición. Si justifica validar el idioma de salida, es trabajo aparte que decide el usuario, no parte de esta mejora
 
 ## Referencias
 
