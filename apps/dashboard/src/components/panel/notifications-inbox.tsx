@@ -43,12 +43,13 @@ export function NotificationsInbox() {
     refetchOnWindowFocus: true,
   });
 
-  // Historial completo, solo con el inbox abierto (AC 3.11).
+  // Historial completo, solo con el inbox abierto (AC 3.11). Con `enabled`
+  // en false tampoco corre el intervalo.
   const history = useQuery({
     queryKey: queryKeys.notifications.history,
     queryFn: () => fetchNotifications(false),
     enabled: open,
-    refetchInterval: open ? POLLING_INTERVALS_MS.inbox : false,
+    refetchInterval: POLLING_INTERVALS_MS.inbox,
   });
 
   const invalidateNotifications = () => queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
@@ -57,7 +58,10 @@ export function NotificationsInbox() {
     mutationFn: async (id: string) =>
       unwrap(await api.POST("/notifications/{id}/read", { params: { path: { id } } })),
     // El contador baja en el momento; el refetch de onSettled corrige si falló.
-    onMutate: (id) => {
+    // Antes se cancela el polling en vuelo del contador, para que una
+    // respuesta vieja no pise el cambio optimista.
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.notifications.unread });
       queryClient.setQueryData<Notification[]>(queryKeys.notifications.unread, (current) =>
         current?.filter((notification) => notification.id !== id),
       );
@@ -67,8 +71,12 @@ export function NotificationsInbox() {
 
   const markAllRead = useMutation({
     mutationFn: async () => unwrap(await api.POST("/notifications/read-all")),
-    // AC 3.13: el contador queda en 0 sin recargar.
-    onSuccess: () => queryClient.setQueryData<Notification[]>(queryKeys.notifications.unread, []),
+    // AC 3.13: el contador queda en 0 sin recargar. Mismo patrón optimista
+    // que markRead; si falla, el refetch de onSettled lo restaura.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.notifications.unread });
+      queryClient.setQueryData<Notification[]>(queryKeys.notifications.unread, []);
+    },
     onSettled: invalidateNotifications,
   });
 
