@@ -23,7 +23,7 @@ El usuario quiere **elegir el idioma del debate al crear el episodio**: inglés,
 | `regenerate` en `PENDING_REVIEW` | `EpisodeActionsService.regenerate` (tiene su propia copia de `buildDebateContext`) | El contexto del debate |
 | `regenerate-audio` en `READY_FOR_RENDER` | `EpisodeActionsService.regenerateAudio` → `TtsService.regenerateSegmentByIndex` | La voz de cada agente |
 | `resume` de `INSUFFICIENT_EVIDENCE` | `runResearchPhase` → `ResearchService.research`, que vuelve a buscar en Tavily | El tópico |
-| Manifest (preview y showcase) | `EpisodesService.getManifest`, que se arma en cada request | Las voces que informa `agents[].voiceId` |
+| Manifest (preview y showcase) | `EpisodesService.getManifest`, que se arma en cada request | `meta.language` y las voces que informa `agents[].voiceId` (guardadas en `AudioAsset`, D17) |
 
 Si el idioma no queda guardado, se pierde en el primer corte.
 
@@ -67,13 +67,14 @@ Cada decisión incluye su razón. Una alternativa propuesta a mitad de la implem
 - **D15 — Un idioma sin voces para el proveedor activo se rechaza con `VOICE_NOT_CONFIGURED` (fija, ADR 0002).**
   - En HTTP: `409 VOICE_NOT_CONFIGURED`, en `createEpisode` y en `regenerate-audio`. Orden en `createEpisode`: primero la validación de Zod (`400 VALIDATION_ERROR`, AC 4.1), después el chequeo de voces y recién después el primer insert (`research.createTopic`). El chequeo cubre a los **5 agentes candidatos**: los 4 roles de `DEBATER_PERSONAS` más `JUDGE`, resueltos por `role` como en `EpisodeParticipantsService`, porque todavía no se sabe cuáles 2 debatientes se van a sortear. Si falta la fila `Agent` de algún rol candidato, cuenta como agente sin voz y el `409` lo nombra por su rol.
   - En el pipeline: `REQUIRES_HUMAN_REVIEW` con el `CheckpointReason` nuevo `VOICE_NOT_CONFIGURED`, que se reanuda con body vacío después de cargar la voz.
+  - El manifest (preview y showcase) nunca responde `VOICE_NOT_CONFIGURED`: no consulta `AgentVoice` (D17).
   - Razón: el audio es la última fase. Descubrir la falta de voz después de gastar el presupuesto de LLM y la curaduría es el peor momento posible. En el pipeline todavía puede pasar si alguien borra voces después de crear el episodio.
 - **D16 — El arranque falla si `TTS_PROVIDER` no es `LOCAL`, mientras no exista un segundo `AudioProvider` (fija, ADR 0002).** Razón, verificada por `architect`:
   - `tts.module.ts:20-26` enlaza siempre Echogarden, pero la voz se resuelve según `TTS_PROVIDER` (`tts.service.ts:123,129`).
   - Con `GOOGLE_TTS`, Echogarden recibe `"es"`/`"en"` y los busca por prefijo (`Synthesis.js:1054-1073`) sin dar error.
   - `AudioAsset.provider` queda mal etiquetado.
   - La validación de D15 tiene que consultar el mismo proveedor que realmente sintetiza.
-- **D17 — `AudioAsset.voiceId` guarda la voz realmente usada (fija, ADR 0002).** El manifest toma la voz de ahí. Para los assets viejos (`null`), usa la resolución por idioma. Razón: así el manifest de un episodio ya sintetizado, o publicado, no cambia de voz si después se modifica el seed.
+- **D17 — `AudioAsset.voiceId` guarda la voz realmente usada (fija, ADR 0002).** `manifest.agents[].voiceId` informa la voz guardada en los `AudioAsset` de los segmentos del agente (si tiene segmentos con voces distintas, la de su primer segmento en el orden del timeline). Para un agente sin ninguna voz guardada (el juez, que no tiene segmentos, o un agente cuyos assets son anteriores a la migración y quedaron sin `voiceId`), el manifest informa `null`. El manifest nunca consulta `AgentVoice` y nunca responde `VOICE_NOT_CONFIGURED`. Razón: así el manifest de un episodio ya sintetizado, o publicado, no cambia si después se modifica o se borra una voz del seed. `voiceId` es informativo: `packages/video` no lo usa.
 - **D20 — Las voces `EN` y `PT` salen del MVP y pasan a la mejora "Voces EN/PT" (fija, usuario, 2026-09-27).**
   - Qué sale del MVP: elegir las 5 voces `en_US`, cargar la asignación `PT` con repetición (juez con voz propia; los 4 debatientes comparten `pt_BR-edresson-low` y `pt_BR-faber-medium`) y el spike de velocidad y tono de vits para `PT`. El catálogo consultado el 2026-09-25 y la asignación `PT` acordada se conservan como referencia en la pregunta A.
   - Qué queda en el MVP: todo lo demás (enum, `Episode.language`, `AgentVoice`, migración que copia las voces actuales como `ES`, prompts sin voseo con instrucción de idioma para los 3 idiomas, `language` por parámetro en el pipeline, TTS con resolución por idioma y `VOICE_NOT_CONFIGURED`, y `language` en la API y el manifest). En el MVP, `AgentVoice` solo tiene filas `ES`.
@@ -152,12 +153,12 @@ Los AC 4.10 a 4.13 son del MVP y se verifican con tests con el LLM y el `AudioPr
 
 - **AC 4.14** — En la fase de audio y en `regenerate-audio`, cada segmento se sintetiza con la voz de `AgentVoice` que corresponde al agente, al idioma del episodio y a `LOCAL`. Verificable con tests que inspeccionan el `voiceId` que recibe el `AudioProvider` (MVP, con filas de prueba para `EN`/`PT`).
 - **AC 4.15** — Si en la fase de audio falta la voz de un agente para el idioma del episodio, no se sintetiza ningún segmento con otra voz. El episodio pasa a `REQUIRES_HUMAN_REVIEW` con motivo `VOICE_NOT_CONFIGURED` (no `PROVIDER_QUOTA_EXCEEDED`). Después de cargar la voz, `resume` con body vacío retoma solo los segmentos pendientes. Un `resume` con body no vacío devuelve `400 VALIDATION_ERROR`. En `regenerate-audio`, el mismo caso devuelve `409 VOICE_NOT_CONFIGURED` y el segmento queda como estaba.
-- **AC 4.16** — Cada `AudioAsset` nuevo guarda en `voiceId` la voz usada, y `manifest.agents[].voiceId` informa esa voz. Para assets sin `voiceId` (anteriores a la migración), el manifest informa la voz resuelta por idioma. Si se cambia una voz en el seed, el manifest de un episodio ya sintetizado no cambia.
+- **AC 4.16** — Cada `AudioAsset` nuevo guarda en `voiceId` la voz usada, y `manifest.agents[].voiceId` informa esa voz. Un agente sin ninguna voz guardada (el juez, o un agente con assets sin `voiceId`) figura en `manifest.agents` con `voiceId: null`. Si se cambia o se borra una voz en el seed, incluida la del juez, el manifest de un episodio ya sintetizado no cambia y sigue respondiendo `200`. Verificable con tests de integración: cambiar la voz de un debatiente y la del juez, y borrar la fila `AgentVoice` del juez, sobre un episodio `READY_FOR_RENDER`.
 - **AC 4.17** — **[mejora Voces EN/PT]** Con `LOCAL`, cada segmento de un episodio `EN` o `PT` trae `subtitles` no vacíos, y la secuencia de palabras corresponde al texto del segmento. Verificable en el smoke test real. (Los subtítulos `ES` ya funcionan hoy y no cambian.)
 
 ### API y contratos
 
-- **AC 4.18** — `openapi.json` expone el enum `DebateLanguage` en la entrada de `createEpisode` y en las respuestas de `EpisodeDto`, `getEpisodeDetail`, `listEpisodes` y `RemotionManifest` (`meta.language`, obligatorio). El nuevo valor `VOICE_NOT_CONFIGURED` aparece en el enum de `CheckpointReason`. Regenerar dos veces no produce diff (criterio de la spec 001). Se acepta que nestjs-zod 5.5 duplique el enum como `DebateLanguage`/`DebateLanguage_Output`, pero hay que verificar con `openapi:generate` qué genera realmente.
+- **AC 4.18** — `openapi.json` expone el enum `DebateLanguage` en la entrada de `createEpisode` y en las respuestas de `EpisodeDto`, `getEpisodeDetail`, `listEpisodes` y `RemotionManifest` (`meta.language`, obligatorio). `RemotionManifest.agents[].voiceId` sale como nullable. El nuevo valor `VOICE_NOT_CONFIGURED` aparece en el enum de `CheckpointReason`. Regenerar dos veces no produce diff (criterio de la spec 001). Se acepta que nestjs-zod 5.5 duplique el enum como `DebateLanguage`/`DebateLanguage_Output`, pero hay que verificar con `openapi:generate` qué genera realmente.
 - **AC 4.19** — `DebateLanguageSchema` vive en `packages/contracts`, y `packages/video` sigue sin importar nada de `apps/api` (`check-boundaries` pasa). El fixture `packages/video/fixtures/debate.sample.json` suma `"language": "ES"`, y `pnpm video:studio` sigue renderizando sin `.env` ni base de datos.
 
 ### Dashboard (dependencia de la spec 003, se implementa dentro de ella)
@@ -194,7 +195,7 @@ Los AC 4.10 a 4.13 son del MVP y se verifican con tests con el LLM y el `AudioPr
 - **Veredicto que cita la ronda**: los tipos de ronda viajan como `OPENING`/`REBUTTAL`/`CROSS_EXAMINATION`, así que el veredicto en portugués puede citarlos en inglés. Es aceptable, pero conviene revisarlo en el smoke test `PT` de la mejora.
 - **Primera síntesis con una voz nueva**: Echogarden descarga el modelo de cada voz la primera vez (~15-100 MB). Sin red, falla como `PROVIDER_QUOTA_EXCEEDED` (problema previo, fuera de alcance). `setup.md` tiene que mencionar la pre-descarga.
 - **Voz borrada después de crear el episodio**: el episodio pasó el chequeo de D15 al crearse, pero en la fase de audio falta la fila. Frena con `VOICE_NOT_CONFIGURED` (AC 4.15).
-- **Cambio de voz en el seed con episodios ya sintetizados**: el manifest no cambia gracias a `AudioAsset.voiceId` (D17). En cambio, `regenerate-audio` usa la voz actual, así que un segmento regenerado puede sonar con otra voz que el resto del mismo agente en ese episodio (ver pregunta abierta B).
+- **Cambio de voz en el seed con episodios ya sintetizados**: el manifest no cambia gracias a `AudioAsset.voiceId` (D17). En cambio, `regenerate-audio` usa la voz actual, así que un segmento regenerado puede sonar con otra voz que el resto del mismo agente en ese episodio (ver pregunta abierta B). Tampoco cambia ni falla si se borra la fila: el manifest no lee `AgentVoice` (D17).
 - **Catálogo `es_MX` limitado**: hoy el seed usa solo 2 voces `es_MX` (`es_MX-claude-high` y `es_MX-ald-medium`), y el catálogo español tiene 7 voces en total entre `es_ES` y `es_MX` (`decision-log.md` #22). Resuelto en la pregunta A: `ES` conserva la mezcla actual hasta que exista otro motor (D5).
 - **Episodio en curso durante la migración**: un episodio en `DEBATING` que se retoma después de migrar queda en `ES`. Antes de migrar se revisan los episodios existentes (Plan, paso 4).
 - **Longitud del texto según el idioma**: no cambia los límites (`ArgumentDraftSchema` admite hasta 2000 caracteres), pero sí la duración del audio.
@@ -207,7 +208,7 @@ Los AC 4.10 a 4.13 son del MVP y se verifican con tests con el LLM y el `AudioPr
 - `Episode.language` persistido e inmutable (`ES`/`EN`/`PT`), con default `ES` y migración de los existentes (AC 4.1-4.5).
 - Prompts en español neutro con tuteo, más la instrucción de idioma para los 3 idiomas en las llamadas generativas y evaluadoras, y textos internos en el idioma del episodio (AC 4.6, 4.7 parte tests, 4.8 parte `ES`, 4.9, 4.26, 4.27).
 - Continuidad del idioma en resume, recovery, `regenerate` y `regenerate-audio`, con el contexto compartido (AC 4.10-4.13, con tests mockeados).
-- `AgentVoice` solo con filas `ES` (`LOCAL` con las 5 voces actuales y `GOOGLE_TTS` con `"es"`), `VOICE_NOT_CONFIGURED`, falla de arranque con otro proveedor y `AudioAsset.voiceId` (AC 4.4, 4.14-4.16, 4.24, 4.25, 4.28).
+- `AgentVoice` solo con filas `ES` (`LOCAL` con las 5 voces actuales y `GOOGLE_TTS` con `"es"`), `VOICE_NOT_CONFIGURED`, falla de arranque con otro proveedor y `AudioAsset.voiceId`, con el manifest informando solo voces guardadas (AC 4.4, 4.14-4.16, 4.24, 4.25, 4.28).
 - Comportamiento interino de `EN`/`PT`: `409 VOICE_NOT_CONFIGURED` sin crear filas (AC 4.29).
 - Idioma en la API, en `openapi.json` y en el manifest (AC 4.18, 4.19). Con esto se cumple API-17 de la spec 003.
 - Selector y distintivos en el dashboard, dentro de la spec 003 (AC 4.20-4.23).
@@ -255,10 +256,11 @@ Diseño aprobado en la revisión de `architect` y en el ADR 0002.
 - **Contratos**:
   - `DebateLanguageSchema = z.enum(["ES","EN","PT"]).meta({ id: "DebateLanguage" })` vive en `packages/contracts`.
   - `RemotionManifestSchema.meta.language` es obligatorio.
+  - `RemotionManifestAgentSchema.voiceId` pasa a `z.string().nullable()` (D17).
   - `CreateEpisodeSchema = { topic, language: DebateLanguageSchema.default("ES") }.strict()`, y Prisma lleva `@default(ES)`.
   - `language` se agrega a `EpisodeSchema`, a `EpisodeListItemSchema` (y al `select` de `episodes.service.ts:60`), a `EpisodeDetailSchema`/`mapEpisodeDetail` y a `BuildManifestInput`.
   - `CheckpointReasonSchema` suma `VOICE_NOT_CONFIGURED`.
-  - `features.md` Feature 7 está congelado y no lista `meta.language`. Se agrega como extensión documentada, con el mismo precedente que `audioUrl` (`decision-log.md` #27).
+  - `features.md` Feature 7 está congelado y no lista `meta.language` ni `voiceId` nullable. Ambos se agregan como extensión documentada, con el mismo precedente que `audioUrl` (`decision-log.md` #27).
 - **Checkpoint nuevo**: `VOICE_NOT_CONFIGURED` requiere estos cambios:
   - el enum `CheckpointReason` de Prisma;
   - `CheckpointReasonSchema`;
@@ -274,7 +276,7 @@ Diseño aprobado en la revisión de `architect` y en el ADR 0002.
   4. Reconstruir `Agent` sin `voiceId`, con el patrón de `20260909120000_agent_voiceid_json_add_openrouter` (FKs de `Argument`, `Verdict` y `EpisodeParticipant`; `VerdictHistory` no tiene FK a `Agent`).
   5. Agregar `Episode.language NOT NULL DEFAULT 'ES'`.
   - El seed hace upsert por `(agentId, language, provider)` y en el MVP solo carga `ES` (`LOCAL` con las 5 voces actuales y `GOOGLE_TTS` con `"es"`). Se corrige su comentario obsoleto (`seed.ts:49-51` dice que `Agent.name` no es `@unique`, pero `schema.prisma:182` sí lo es).
-- **Tests y scripts**: cambian los tests que crean agentes con `voiceId` (por ejemplo, `episodes.integration.spec.ts:54,58`), y los scripts que llaman a `research` (`apps/api/scripts/smoke-test-argument.ts:31`) o arman un `DebateContext` a mano (`:44`). Los tests de integración que crean episodios `ES` tienen que cargar filas `AgentVoice` `ES`/`LOCAL` para los 5 agentes; si no, reciben el `409` de D15. Los tests de `EN`/`PT` del MVP cargan sus propias filas de `AgentVoice` de prueba con el `AudioProvider` mockeado; esas filas no van al seed y siguen la regla de ids ficticios de D14.
+- **Tests y scripts**: cambian los tests que crean agentes con `voiceId` (por ejemplo, `episodes.integration.spec.ts:46`), y los scripts que llaman a `research` (`apps/api/scripts/smoke-test-argument.ts:31`) o arman un `DebateContext` a mano (`:44`). Los tests de integración que crean episodios `ES` tienen que cargar filas `AgentVoice` `ES`/`LOCAL` para los 5 agentes; si no, reciben el `409` de D15. Los tests de `EN`/`PT` del MVP cargan sus propias filas de `AgentVoice` de prueba con el `AudioProvider` mockeado; esas filas no van al seed y siguen la regla de ids ficticios de D14.
 
 ## Plan de implementación
 
@@ -289,7 +291,7 @@ Diseño aprobado en la revisión de `architect` y en el ADR 0002.
    - **5b.** Reescribir los prompts sin voseo, agregar `buildLanguageInstruction` para los 3 idiomas y neutralizar `CONTRARIAN.voice` (AC 4.6, 4.7, 4.9, 4.26, 4.27).
    - **5c.** Pasar `language` a `FactCheckService`, `ResearchService` y `DebateContext` según la regla de flujo (AC 4.10-4.13).
 6. **TTS**: `AgentVoice`, `resolveVoiceId(agent, language)`, `assertVoicesConfigured`, `VoiceNotConfiguredError` con sus dos mapeos (HTTP y checkpoint), falla de arranque con `TTS_PROVIDER` distinto de `LOCAL` y `AudioAsset.voiceId` (AC 4.4, 4.14-4.16, 4.24, 4.28; AC 4.29 se cierra con el paso 7).
-7. **API**: DTOs y respuestas, más `pnpm openapi:generate`. Verificar cómo queda nombrado el enum (AC 4.18, 4.19, y AC 4.29 con una llamada HTTP real). Con este paso se cumple API-17 de la spec 003.
+7. **API**: DTOs y respuestas, más `pnpm openapi:generate`. Verificar cómo queda nombrado el enum (AC 4.18, 4.19, y AC 4.29 con una llamada HTTP real). `RemotionManifestAgentSchema.voiceId` pasa a `z.string().nullable()` (D17), extensión documentada de Feature 7 como `audioUrl` y `meta.language`; el manifest informa solo voces guardadas en `AudioAsset` y deja de resolver por idioma (AC 4.16). Con este paso se cumple API-17 de la spec 003.
 8. **Smoke tests reales**:
    - *MVP*: un episodio `ES` hasta `READY_FOR_RENDER`: escuchar el audio, revisar los subtítulos y los `feedback.details`, confirmar el tuteo y anotar los resultados en `decision-log.md` (AC 4.8 parte `ES`, 4.27).
    - *[mejora Voces EN/PT]*: un episodio `EN` y uno `PT` hasta `READY_FOR_RENDER` (AC 4.7 parte smoke, 4.8 parte `EN`/`PT`, 4.17, 4.30).
@@ -305,7 +307,7 @@ La spec (MVP) se considera implementada cuando todo lo siguiente da verde:
 - `check-boundaries` pasa, y `pnpm video:studio` renderiza el fixture sin `.env` ni base de datos.
 - Tests automatizados de AC 4.1-4.6, 4.7 (parte tests), 4.9-4.16, 4.18, 4.24, 4.28 y 4.29 en verde.
 - Consulta directa a la base que confirma AC 4.5 y 4.25 (solo `ES`, igual en base migrada y base nueva), y búsqueda en el código que confirma AC 4.26.
-- Smoke test real en `ES` hasta `READY_FOR_RENDER` (AC 4.8 parte `ES`, 4.27), con resultados en `decision-log.md`. La llamada HTTP real que confirma el `409` de `EN`/`PT` (AC 4.29) se hace en el paso 7.
+- Smoke test real en `ES` hasta `READY_FOR_RENDER` (AC 4.8 parte `ES`, 4.27), con resultados en `decision-log.md`, y llamada real que confirma el `409` de `EN`/`PT` (AC 4.29).
 - Un episodio creado antes de la migración sigue abriendo su detalle y su manifest, y figura como `ES`.
 - AC 4.20-4.23 verificados cuando se implementen las pantallas de la spec 003.
 
@@ -315,13 +317,14 @@ La mejora "Voces EN/PT" se considera implementada cuando pasan AC 4.30, AC 4.17,
 
 - **ADR 0002** (`docs/adr/0002-voces-por-agente-e-idioma.md`): tabla `AgentVoice`, `VOICE_NOT_CONFIGURED`, arranque solo con `LOCAL`, `AudioAsset.voiceId` y la migración.
 - **Spec 001**: el idioma y el nuevo `CheckpointReason` entran en los DTOs y en `openapi.json`.
-- **Spec 002**: `DebateLanguageSchema` y `meta.language` viven en `packages/contracts`, y el fixture de `packages/video` se actualiza.
+- **Spec 002**: `DebateLanguageSchema`, `meta.language` y `agents[].voiceId` nullable viven en `packages/contracts`, y el fixture de `packages/video` se actualiza. `packages/video` no usa `voiceId` (D17).
 - **Spec 003** (`003-dashboard-ui.md`). **Otro agente hace estos cambios en paralelo. Esta spec no la toca, solo los lista**:
   - §7 (resolución de `REQUIRES_HUMAN_REVIEW`): nueva fila para `VOICE_NOT_CONFIGURED`. Explica que falta la voz de un agente para el idioma del episodio y ofrece "Reanudar" (body `{}`) después de cargar la voz, y "Rechazar".
   - API-10: suma el código de error `VOICE_NOT_CONFIGURED`.
   - AC 3.22 ("un único campo `topic`") y el no-objetivo "`createEpisode` solo acepta `topic`": se modifican para incluir el selector de idioma (AC 4.20). Además, `/studio/new` tiene que manejar el `409 VOICE_NOT_CONFIGURED` (AC 4.21). Con D20, el selector ofrece las 3 opciones y `EN`/`PT` terminan en el mensaje de AC 3.78 hasta la mejora "Voces EN/PT"; la 003 ya lo cubre sin cambios.
   - API-17 (bloqueante de la F2): lo entrega el MVP de esta spec (pasos 3, 6 y 7) y no depende de la mejora "Voces EN/PT".
   - API-1 (detalle) y `listShowcaseEpisodes` (API-7): suman `language` (AC 4.22, 4.23).
+  - Preview y showcase (D2, AC 3.59, AC 3.67 de la 003): el manifest de un episodio `READY_FOR_RENDER` o publicado nunca responde `VOICE_NOT_CONFIGURED` (D17).
   - Pregunta 7 (idioma del showcase): esta spec da el dato para "sigue el idioma de cada episodio", pero no la resuelve.
   - Nota: `apps/dashboard/src/app/layout.tsx:23` tiene `lang="en"`, aunque el panel es en español (D8 de la 003).
   - Su nice-to-have "selector de idioma" se refiere al idioma de la UI, no al del debate.
@@ -408,3 +411,4 @@ Recomendación: en `ES`, **(b)**, porque la distinción entre voces pesa más en
   - **M4**: D14 aplica a la base real; los tests usan ids visiblemente ficticios que nunca van al seed.
   - **M5**: orden en `createEpisode` (Zod → chequeo de voces → primer insert), candidatos resueltos por `role`, y una fila `Agent` faltante cuenta como agente sin voz (nuevo edge case).
   - **m1**: estado "implementada en parte" (pasos 3 y 5a, marcados como hechos en el Plan). **m2**: razón de D3 reformulada. **m3**: AC 4.29 conserva su test de integración después de la mejora. **m4**: AC 4.29 se cierra en el paso 7 con una llamada HTTP real (se quitó del smoke del paso 8). **m6**: los tests de integración `ES` cargan filas `AgentVoice` `ES`/`LOCAL`.
+- **2026-09-27, revisión de 13.6: D17/AC 4.16 revisados por `architect` (manifest sin fallback por idioma, `voiceId` nullable).** Surgió del code review del paso 13.6: el manifest resolvía por idioma contra `AgentVoice` la voz de los agentes sin `AudioAsset.voiceId`, incluido el juez (que nunca tiene segmentos). Así, cambiar la voz del juez en el seed alteraba el manifest de un episodio ya sintetizado, y borrarla hacía responder `409 VOICE_NOT_CONFIGURED` a un episodio `READY_FOR_RENDER`, incluido el showcase público (spec 003, D2, AC 3.59, AC 3.67). Cambios: D17 y AC 4.16 reescritos (el manifest nunca lee `AgentVoice`; `agents[].voiceId` es la voz guardada o `null`); D15 aclara que el manifest nunca responde `VOICE_NOT_CONFIGURED`; AC 4.18 y "Contratos" suman `agents[].voiceId` nullable; el paso 7 del Plan lo implementa; se actualizaron el edge case de cambio de voz, la tabla de reentradas, el MVP y las dependencias con las specs 002 y 003. La pregunta B no cambia.

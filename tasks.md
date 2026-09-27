@@ -479,17 +479,24 @@ Los tests de `EN`/`PT` de este paso (AC 4.14 y los que pasan por `createEpisode`
 - [ ] `AudioAsset.voiceId` con la voz usada; `manifest.agents[].voiceId` sale de ahí y, para assets sin `voiceId`, de la resolución por idioma; test de que cambiar el seed no altera el manifest ya sintetizado (AC 4.16; D17)
 - [ ] Tests que inspeccionan el `voiceId` que recibe el `AudioProvider` en la fase de audio y en `regenerate-audio` (AC 4.14)
 - [ ] Test de integración de AC 4.29 a nivel servicio: base con solo filas `ES` (como la deja el seed del MVP); `createEpisode` en `EN` y en `PT` → `VoiceNotConfiguredError` que nombra el idioma, `LOCAL` y los 5 agentes, sin `Topic`/`Debate`/`Episode`/`EpisodeUsage`; con `ES` o sin idioma, crea el episodio. Otro caso: falta la fila `Agent` de un rol → el error lo nombra por su rol. La parte HTTP necesita el DTO de 13.7: AC 4.29 se cierra ahí
+- [x] Interino conocido (review de 13.6): el manifest resuelve por idioma la voz del juez y la de los agentes sin `AudioAsset.voiceId`. Un cambio en el seed del juez altera el manifest, y un borrado responde `409`. Se corrige en 13.7 (D17 revisado, ADR 0002, nota del 2026-09-27).
 
 ### 13.7. Paso 7 — API (requiere 13.3, 13.4 y 13.6)
 
 - [ ] `CreateEpisodeSchema = { topic, language: DebateLanguageSchema.default("ES") }.strict()`; valor inválido → `400 VALIDATION_ERROR` sin crear `Topic`/`Debate`/`Episode`/`EpisodeUsage`; omitido → `ES` (AC 4.1, 4.2)
 - [ ] `language` en `EpisodeSchema`, `EpisodeListItemSchema` (y en el `select` de `episodes.service.ts:60`), `EpisodeDetailSchema`/`mapEpisodeDetail` y `BuildManifestInput` (AC 4.18). **Cierra API-1 parte 2**. Mismo mapper que `debate.verdict.stale` de API-19: mergear en serie
 - [ ] `meta.language` del manifest sale de `Episode.language`; borrar la constante `MANIFEST_LANGUAGE_UNTIL_EPISODE_LANGUAGE` (13.3)
-- [ ] `CheckpointReasonSchema` suma `VOICE_NOT_CONFIGURED` (AC 4.18)
+- [x] `CheckpointReasonSchema` suma `VOICE_NOT_CONFIGURED` (AC 4.18) (hecho en 13.6; el schema vive en `apps/api/src/modules/episodes/dto/checkpoint-reason.schema.ts`, no en `packages/contracts`)
 - [ ] Ninguna acción acepta ni modifica `language`; un `resume` con `language` → `400 VALIDATION_ERROR` por `.strict()` (AC 4.3; `publish`/`unpublish` se cubren en 12.4 cuando existan)
 - [ ] Test HTTP de AC 4.29 y del orden de D15: sobre una base con solo filas `ES`, `POST /episodes` con `language: "EN"` y `"PT"` → `409 VOICE_NOT_CONFIGURED` (idioma, `LOCAL` y los 5 agentes), sin filas creadas; con `ES` u omitido → crea el episodio; con `language` inválido → `400 VALIDATION_ERROR` antes del chequeo de voces (orden `400` Zod → `409` voces → inserts)
 - [ ] Llamada HTTP real (curl o `/docs`) contra `dev.db` sembrada con el seed del MVP: `EN` y `PT` → `409 VOICE_NOT_CONFIGURED`, `ES` → crea. **Cierra AC 4.29**
-- [ ] `pnpm openapi:generate`: enum `DebateLanguage` en `createEpisode`, `EpisodeDto`, detalle, listado y manifest; verificar si nestjs-zod genera `DebateLanguage_Output` además; dos corridas sin diff (AC 4.18). **Con esto, API-17 queda cumplido**
+- [ ] `RemotionManifestAgentSchema.voiceId` → `z.string().nullable()` en `packages/contracts`, con un comentario que lo registre como desviación documentada de Feature 7, igual que `audioUrl` y `meta.language` (D17, AC 4.16)
+- [ ] `BuildManifestInput.participants[].voiceId: string | null` en `RenderService`; `render.service.spec.ts` suma un participante con `voiceId: null`
+- [ ] `EpisodesService.getManifest`: `voiceId` = el primer `audioAsset.voiceId` no nulo del agente en el orden del timeline, o `null`; sin `tts.resolveVoiceId` ni `AGENT_WITH_VOICES_INCLUDE` en el `include` de participantes; actualizar el comentario del método. Si `resolveVoiceId` y `AGENT_WITH_VOICES_INCLUDE` ya no tienen otros usos fuera de `TtsService`, volverlos privados / no exportados
+- [ ] Tests de integración sobre un episodio `READY_FOR_RENDER` (en `episodes.integration.spec.ts`, bloque del manifest de la spec 004): el juez figura en `agents` con `voiceId: null`; cambiar la voz del juez y la de un debatiente en `AgentVoice` no altera el manifest; borrar la fila `AgentVoice` del juez deja el manifest en `200` sin cambios; un debatiente con assets sin `voiceId` figura con `null`; un agente con voces mixtas informa la de su primer segmento (AC 4.16)
+- [ ] `packages/video/fixtures/debate.sample.json`: sumar el agente juez con `"voiceId": null`; verificar `pnpm video:studio` / `remotion still` y `check-boundaries` (AC 4.19)
+- [ ] `pnpm --filter @ai-trend-debates/dashboard generate:api` (o el script equivalente): `schema.d.ts` con `voiceId: string | null`; el build del dashboard sigue en verde
+- [ ] `pnpm openapi:generate`: enum `DebateLanguage` en `createEpisode`, `EpisodeDto`, detalle, listado y manifest; verificar si nestjs-zod genera `DebateLanguage_Output` además; verificar que `RemotionManifest.agents[].voiceId` sale nullable y registrar si aparece un `_Output`; dos corridas sin diff (AC 4.18). **Con esto, API-17 queda cumplido**
 
 ### 13.8. Paso 8 — Smoke test real `ES` (requiere 13.5-13.7)
 
@@ -505,8 +512,9 @@ Los smoke tests `EN`/`PT` pasaron a la mejora 13.11 (D20). La llamada real que c
 
 - [ ] `api-contract.md` §2: request y respuesta de `POST /episodes` con `language` (ejemplo nuevo)
 - [ ] `api-contract.md` §1: código de error `VOICE_NOT_CONFIGURED`, aclarando que en el MVP es la respuesta de `createEpisode` para `EN`/`PT` (D20)
-- [ ] `setup.md`: pre-descarga de voces y `TTS_PROVIDER` limitado a `LOCAL`
+- [ ] `setup.md`: pre-descarga de voces y `TTS_PROVIDER` limitado a `LOCAL`; aclarar que el arranque falla con otro valor (review de 13.6)
 - [ ] `decision-log.md`: entrada de la implementación, con la nota de que el punto 1 de #20 queda reemplazado por el ADR 0002. `features.md` no se toca
+- [ ] Nota fechada en el ADR 0002 (punto 6) — ya agregada el 2026-09-27; D17, AC 4.16, el edge case y AC 4.18 de la spec 004 revisados por `product-analyst`; entrada en `decision-log.md` con las opciones evaluadas (propuesta del reviewer, variante sin fallback elegida, y los descartes: persistir la voz del juez, mantener el 409, omitir al juez de `agents[]`)
 
 ### 13.10. Paso 10 — Dashboard
 
