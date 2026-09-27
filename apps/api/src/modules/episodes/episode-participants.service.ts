@@ -39,19 +39,17 @@ export class EpisodeParticipantsService {
   }
 
   // Spec 004, D15: los 5 agentes que selectParticipants puede elegir (los 4
-  // roles de DEBATER_PERSONAS más JUDGE), resueltos por role con la misma
-  // consulta que arriba. Al crear el episodio todavía no se sabe cuáles 2
-  // debatientes se van a sortear, así que createEpisode valida las voces de
-  // todos. agentId null = no hay fila Agent para ese rol (con
-  // findFirstOrThrow, selectParticipants fallaría más tarde).
+  // roles de DEBATER_PERSONAS más JUDGE), resueltos por role. Al crear el
+  // episodio todavía no se sabe cuáles 2 debatientes se van a sortear, así
+  // que createEpisode valida las voces de todos. agentId null = no hay fila
+  // Agent para ese rol (con findFirstOrThrow, selectParticipants fallaría
+  // más tarde). Una sola consulta; por rol se toma la primera fila en el
+  // orden por defecto de la base, el mismo criterio que el findFirst sin
+  // orderBy de selectParticipants.
   async findCandidateAgents(): Promise<Array<{ role: string; agentId: string | null }>> {
     const roles = [...Object.values(DEBATER_PERSONAS).map((p) => p.id), JUDGE.id];
-    return Promise.all(
-      roles.map(async (role) => {
-        const agent = await this.prisma.agent.findFirst({ where: { role }, select: { id: true } });
-        return { role, agentId: agent?.id ?? null };
-      })
-    );
+    const agents = await this.prisma.agent.findMany({ where: { role: { in: roles } }, select: { id: true, role: true } });
+    return roles.map((role) => ({ role, agentId: agents.find((a) => a.role === role)?.id ?? null }));
   }
 
   // No se toca ModelProviderFactory (fuera de scope, ya implementado) — chequeo

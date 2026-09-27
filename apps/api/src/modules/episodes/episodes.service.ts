@@ -141,16 +141,33 @@ export class EpisodesService {
   // AudioAsset.voiceId (assets anteriores a la migración, o el juez, que no
   // tiene segmentos) se resuelve por el idioma del episodio; si ahí falta la
   // fila, VoiceNotConfiguredError (409), nunca un 500.
+  //
+  // Las voces se resuelven recién después de RenderService.
+  // assertManifestReady (review de 13.6): un episodio que todavía no tiene
+  // audio o veredicto responde MANIFEST_NOT_READY aunque además le falte
+  // alguna voz, porque lo que le falta primero es llegar al audio.
   async getManifest(episodeId: string): Promise<RemotionManifest> {
     const episode = await this.prisma.episode.findUniqueOrThrow({
       where: { id: episodeId },
       select: { title: true, language: true, debate: { select: { verdict: true } } },
     });
+    const orderedArguments = await this.tts.getOrderedOfficialArguments(episodeId);
+    const officialArguments = orderedArguments.map((a) => ({
+      agentId: a.agentId,
+      content: a.content,
+      audioAssetId: a.audioAssetId,
+      durationMs: a.audioAsset?.durationMs ?? null,
+      subtitles: (a.audioAsset?.subtitles as unknown as AudioSubtitleCue[] | null) ?? null,
+    }));
+    const verdict = episode.debate.verdict
+      ? { winnerId: episode.debate.verdict.winnerId, content: episode.debate.verdict.content }
+      : null;
+    this.render.assertManifestReady({ episodeId, officialArguments, verdict });
+
     const participants = await this.prisma.episodeParticipant.findMany({
       where: { episodeId },
       include: { agent: { include: AGENT_WITH_VOICES_INCLUDE } },
     });
-    const officialArguments = await this.tts.getOrderedOfficialArguments(episodeId);
 
     const manifest = this.render.buildManifest({
       episodeId,
@@ -160,19 +177,11 @@ export class EpisodesService {
         name: p.agent.name,
         avatarUrl: p.agent.avatarUrl,
         voiceId:
-          officialArguments.find((a) => a.agentId === p.agent.id && a.audioAsset?.voiceId)?.audioAsset?.voiceId ??
+          orderedArguments.find((a) => a.agentId === p.agent.id && a.audioAsset?.voiceId)?.audioAsset?.voiceId ??
           this.tts.resolveVoiceId(p.agent, episode.language),
       })),
-      officialArguments: officialArguments.map((a) => ({
-        agentId: a.agentId,
-        content: a.content,
-        audioAssetId: a.audioAssetId,
-        durationMs: a.audioAsset?.durationMs ?? null,
-        subtitles: (a.audioAsset?.subtitles as unknown as AudioSubtitleCue[] | null) ?? null,
-      })),
-      verdict: episode.debate.verdict
-        ? { winnerId: episode.debate.verdict.winnerId, content: episode.debate.verdict.content }
-        : null,
+      officialArguments,
+      verdict,
     });
 
     const timeline = await Promise.all(

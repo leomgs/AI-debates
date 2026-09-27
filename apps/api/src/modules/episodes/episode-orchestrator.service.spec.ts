@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
@@ -91,7 +92,7 @@ describe("EpisodeOrchestratorService", () => {
   };
   let budgetService: { withLlmCall: jest.Mock; withSearchRequest: jest.Mock; withTtsCall: jest.Mock };
   let eventsService: { begin: jest.Mock; emit: jest.Mock; complete: jest.Mock };
-  let ttsService: { getOrderedOfficialArguments: jest.Mock; synthesizeSegment: jest.Mock };
+  let ttsService: { getOrderedOfficialArguments: jest.Mock; synthesizeSegment: jest.Mock; assertVoicesConfigured: jest.Mock };
   let contextService: { build: jest.Mock };
 
   beforeEach(async () => {
@@ -141,7 +142,11 @@ describe("EpisodeOrchestratorService", () => {
       withTtsCall: jest.fn((_episodeId: string, fn: () => Promise<unknown>) => fn()),
     };
     eventsService = { begin: jest.fn(), emit: jest.fn(), complete: jest.fn() };
-    ttsService = { getOrderedOfficialArguments: jest.fn().mockResolvedValue([]), synthesizeSegment: jest.fn() };
+    ttsService = {
+      getOrderedOfficialArguments: jest.fn().mockResolvedValue([]),
+      synthesizeSegment: jest.fn(),
+      assertVoicesConfigured: jest.fn().mockResolvedValue(undefined),
+    };
     contextService = {
       build: jest.fn().mockResolvedValue({
         topic: "Un trend",
@@ -473,12 +478,15 @@ describe("EpisodeOrchestratorService", () => {
         .mockResolvedValueOnce({ status: "APPROVED", language: "ES" })
         .mockResolvedValueOnce({ status: "GENERATING_AUDIO" });
       ttsService.getOrderedOfficialArguments.mockResolvedValue([
-        { id: "arg-1", audioAssetId: "existing-asset" },
-        { id: "arg-2", audioAssetId: null },
+        { id: "arg-1", agentId: AGENT_A, audioAssetId: "existing-asset" },
+        { id: "arg-2", agentId: AGENT_B, audioAssetId: null },
       ]);
       ttsService.synthesizeSegment.mockResolvedValue({ id: "asset-2" });
 
       await service.runAudioPhase(EPISODE_ID);
+
+      // Voces validadas solo para los agentes con segmentos pendientes.
+      expect(ttsService.assertVoicesConfigured).toHaveBeenCalledWith([AGENT_B], "ES");
 
       expect(prisma.episode.findUniqueOrThrow).toHaveBeenNthCalledWith(1, {
         where: { id: EPISODE_ID },
@@ -486,7 +494,7 @@ describe("EpisodeOrchestratorService", () => {
       });
       expect(stateService.markGeneratingAudio).toHaveBeenCalledWith(EPISODE_ID);
       expect(ttsService.synthesizeSegment).toHaveBeenCalledTimes(1);
-      expect(ttsService.synthesizeSegment).toHaveBeenCalledWith(EPISODE_ID, { id: "arg-2", audioAssetId: null }, "ES");
+      expect(ttsService.synthesizeSegment).toHaveBeenCalledWith(EPISODE_ID, { id: "arg-2", agentId: AGENT_B, audioAssetId: null }, "ES");
       expect(budgetService.withTtsCall).toHaveBeenCalledTimes(1);
       expect(stateService.markReadyForRender).toHaveBeenCalledWith(EPISODE_ID);
     });
@@ -499,6 +507,8 @@ describe("EpisodeOrchestratorService", () => {
 
       await service.runAudioPhase(EPISODE_ID);
 
+      // Sin segmentos pendientes no hay voces que validar.
+      expect(ttsService.assertVoicesConfigured).not.toHaveBeenCalled();
       expect(stateService.markGeneratingAudio).not.toHaveBeenCalled();
       expect(stateService.markReadyForRender).toHaveBeenCalledWith(EPISODE_ID);
     });
@@ -529,17 +539,25 @@ describe("EpisodeOrchestratorService", () => {
 
     // Spec 004, D15 (AC 4.15): VOICE_NOT_CONFIGURED, nunca
     // PROVIDER_QUOTA_EXCEEDED, y el pipeline no sigue con otros segmentos.
-    it("VoiceNotConfiguredError -> requireHumanReview(VOICE_NOT_CONFIGURED), sin sintetizar los segmentos siguientes", async () => {
+    it("valida las voces de todos los agentes pendientes (sin repetir) antes de sintetizar y, si faltan, no sintetiza ninguno -> VOICE_NOT_CONFIGURED", async () => {
       prisma.episode.findUniqueOrThrow.mockResolvedValueOnce({ status: "APPROVED", language: "PT" });
       ttsService.getOrderedOfficialArguments.mockResolvedValue([
-        { id: "arg-1", audioAssetId: null },
-        { id: "arg-2", audioAssetId: null },
+        { id: "arg-1", agentId: AGENT_A, audioAssetId: null },
+        { id: "arg-2", agentId: AGENT_B, audioAssetId: null },
+        { id: "arg-3", agentId: AGENT_A, audioAssetId: null },
       ]);
-      ttsService.synthesizeSegment.mockRejectedValue(new VoiceNotConfiguredError("PT", "LOCAL", ["Analista (ANALYST)"]));
+      const error = new VoiceNotConfiguredError("PT", "LOCAL", ["Analista (ANALYST)", "Contrera (CONTRARIAN)"]);
+      ttsService.assertVoicesConfigured.mockRejectedValue(error);
+      const warn = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
 
       await service.runAudioPipeline(EPISODE_ID);
 
-      expect(ttsService.synthesizeSegment).toHaveBeenCalledTimes(1);
+      expect(ttsService.assertVoicesConfigured).toHaveBeenCalledWith([AGENT_A, AGENT_B], "PT");
+      expect(ttsService.synthesizeSegment).not.toHaveBeenCalled();
+      expect(budgetService.withTtsCall).not.toHaveBeenCalled();
+      // El detalle (qué agentes faltan) queda en el log; el checkpoint solo tiene el motivo.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(error.message));
+      warn.mockRestore();
       expect(stateService.requireHumanReview).toHaveBeenCalledTimes(1);
       expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "VOICE_NOT_CONFIGURED");
       expect(stateService.markReadyForRender).not.toHaveBeenCalled();

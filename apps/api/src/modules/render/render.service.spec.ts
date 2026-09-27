@@ -90,6 +90,23 @@ describe('RenderService.buildManifest (Feature 7)', () => {
     expect(() => service.buildManifest(input)).toThrow(ManifestNotReadyError);
   });
 
+  // Review de 13.6 (M1): EpisodesService la llama antes de resolver voces.
+  describe('assertManifestReady', () => {
+    it('no tira con veredicto y audio en todos los segmentos', () => {
+      expect(() => service.assertManifestReady(baseInput())).not.toThrow();
+    });
+
+    it('tira ManifestNotReadyError sin veredicto', () => {
+      expect(() => service.assertManifestReady(baseInput({ verdict: null }))).toThrow(ManifestNotReadyError);
+    });
+
+    it('tira ManifestNotReadyError si algún segmento no tiene audio o duración', () => {
+      const input = baseInput();
+      input.officialArguments[0].durationMs = null;
+      expect(() => service.assertManifestReady(input)).toThrow(ManifestNotReadyError);
+    });
+  });
+
   it('verdict.winnerAgentId es null si el debate no tuvo ganador (Verdict.winnerId opcional)', () => {
     const manifest = service.buildManifest(baseInput({ verdict: { winnerId: null, content: 'Empate técnico.' } }));
     expect(manifest.verdict.winnerAgentId).toBeNull();

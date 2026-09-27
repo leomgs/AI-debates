@@ -14,7 +14,7 @@ function mockRandomSequence(values: number[]) {
 
 describe("EpisodeParticipantsService", () => {
   let service: EpisodeParticipantsService;
-  let prisma: { agent: { findFirstOrThrow: jest.Mock; findFirst: jest.Mock }; episodeParticipant: { createMany: jest.Mock } };
+  let prisma: { agent: { findFirstOrThrow: jest.Mock; findMany: jest.Mock }; episodeParticipant: { createMany: jest.Mock } };
   let config: { get: jest.Mock };
 
   beforeEach(async () => {
@@ -23,7 +23,7 @@ describe("EpisodeParticipantsService", () => {
         findFirstOrThrow: jest.fn().mockImplementation(({ where }: { where: { role: string } }) =>
           Promise.resolve({ id: `agent-${where.role}`, role: where.role })
         ),
-        findFirst: jest.fn(),
+        findMany: jest.fn(),
       },
       episodeParticipant: { createMany: jest.fn() },
     };
@@ -99,9 +99,14 @@ describe("EpisodeParticipantsService", () => {
   // Spec 004, D15: los 5 candidatos que valida createEpisode, resueltos por
   // role igual que selectParticipants; un rol sin fila Agent queda con null.
   it("findCandidateAgents devuelve los 4 roles de DEBATER_PERSONAS más JUDGE, con agentId null si falta la fila", async () => {
-    prisma.agent.findFirst.mockImplementation(({ where }: { where: { role: string } }) =>
-      Promise.resolve(where.role === "DIPLOMAT" ? null : { id: `agent-${where.role}` })
-    );
+    // Sin DIPLOMAT, y dos filas ANALYST: gana la primera que devuelve la base.
+    prisma.agent.findMany.mockResolvedValue([
+      { id: "agent-JUDGE", role: "JUDGE" },
+      { id: "agent-ANALYST", role: "ANALYST" },
+      { id: "agent-ANALYST-bis", role: "ANALYST" },
+      { id: "agent-CONTRARIAN", role: "CONTRARIAN" },
+      { id: "agent-PROVOCATEUR", role: "PROVOCATEUR" },
+    ]);
 
     const candidates = await service.findCandidateAgents();
 
@@ -112,6 +117,10 @@ describe("EpisodeParticipantsService", () => {
       { role: "PROVOCATEUR", agentId: "agent-PROVOCATEUR" },
       { role: "JUDGE", agentId: "agent-JUDGE" },
     ]);
-    expect(prisma.agent.findFirst).toHaveBeenCalledWith({ where: { role: "JUDGE" }, select: { id: true } });
+    expect(prisma.agent.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.agent.findMany).toHaveBeenCalledWith({
+      where: { role: { in: ["ANALYST", "CONTRARIAN", "DIPLOMAT", "PROVOCATEUR", "JUDGE"] } },
+      select: { id: true, role: true },
+    });
   });
 });

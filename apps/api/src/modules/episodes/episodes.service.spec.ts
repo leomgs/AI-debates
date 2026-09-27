@@ -10,6 +10,7 @@ import { EpisodesService } from "./episodes.service";
 import { EpisodeEventsService } from "./episode-events.service";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { VoiceNotConfiguredError } from "../tts/tts.errors";
+import { ManifestNotReadyError } from "../render/render.errors";
 
 const TOPIC_ID = "11111111-1111-4111-8111-111111111111";
 const DEBATE_ID = "22222222-2222-4222-8222-222222222222";
@@ -31,7 +32,7 @@ describe("EpisodesService", () => {
     resolveVoiceId: jest.Mock;
     assertVoicesConfigured: jest.Mock;
   };
-  let render: { buildManifest: jest.Mock };
+  let render: { buildManifest: jest.Mock; assertManifestReady: jest.Mock };
   let participants: { findCandidateAgents: jest.Mock };
   let events: EpisodeEventsService;
 
@@ -50,7 +51,7 @@ describe("EpisodesService", () => {
       resolveVoiceId: jest.fn(),
       assertVoicesConfigured: jest.fn().mockResolvedValue(undefined),
     };
-    render = { buildManifest: jest.fn() };
+    render = { buildManifest: jest.fn(), assertManifestReady: jest.fn() };
     participants = {
       findCandidateAgents: jest.fn().mockResolvedValue([
         { role: "ANALYST", agentId: "agent-analyst" },
@@ -493,7 +494,11 @@ describe("EpisodesService", () => {
     });
 
     it("si un agente sin AudioAsset.voiceId tampoco tiene voz para el idioma, propaga VoiceNotConfiguredError (409, no 500)", async () => {
-      prisma.episode.findUniqueOrThrow.mockResolvedValue({ title: "T", language: "ES", debate: { verdict: null } });
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({
+        title: "T",
+        language: "ES",
+        debate: { verdict: { winnerId: null, content: "Empate." } },
+      });
       prisma.episodeParticipant.findMany.mockResolvedValue([{ agent: { id: "agent-judge", name: "Judge", avatarUrl: null, voices: [] } }]);
       tts.getOrderedOfficialArguments.mockResolvedValue([]);
       tts.resolveVoiceId.mockImplementation(() => {
@@ -501,6 +506,32 @@ describe("EpisodesService", () => {
       });
 
       await expect(service.getManifest(EPISODE_ID)).rejects.toThrow(VoiceNotConfiguredError);
+      expect(render.buildManifest).not.toHaveBeenCalled();
+    });
+
+    // Review de 13.6 (M1): un episodio sin audio (por ejemplo, en DEBATING)
+    // responde MANIFEST_NOT_READY aunque además le falte una voz.
+    it("verifica que el manifest esté listo antes de resolver voces: sin audio, ManifestNotReadyError sin tocar las voces", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ title: "T", language: "EN", debate: { verdict: null } });
+      tts.getOrderedOfficialArguments.mockResolvedValue([
+        { agentId: "agent-1", content: "Uno.", audioAssetId: null, audioAsset: null },
+      ]);
+      render.assertManifestReady.mockImplementation(() => {
+        throw new ManifestNotReadyError(EPISODE_ID);
+      });
+      tts.resolveVoiceId.mockImplementation(() => {
+        throw new VoiceNotConfiguredError("EN", "LOCAL", ["Analyst (ANALYST)"]);
+      });
+
+      await expect(service.getManifest(EPISODE_ID)).rejects.toThrow(ManifestNotReadyError);
+
+      expect(render.assertManifestReady).toHaveBeenCalledWith({
+        episodeId: EPISODE_ID,
+        officialArguments: [{ agentId: "agent-1", content: "Uno.", audioAssetId: null, durationMs: null, subtitles: null }],
+        verdict: null,
+      });
+      expect(tts.resolveVoiceId).not.toHaveBeenCalled();
+      expect(prisma.episodeParticipant.findMany).not.toHaveBeenCalled();
       expect(render.buildManifest).not.toHaveBeenCalled();
     });
   });

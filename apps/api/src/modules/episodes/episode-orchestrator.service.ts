@@ -277,13 +277,23 @@ export class EpisodeOrchestratorService {
     }
 
     const ordered = await this.tts.getOrderedOfficialArguments(episodeId);
-    for (const argument of ordered) {
-      if (argument.audioAssetId) continue; // ya sintetizado — idempotencia de resume/recovery
-      // Spec 004, AC 4.14: la voz sale de AgentVoice para el idioma del
-      // episodio (Episode.language, leído acá). Si falta, TtsService tira
-      // VoiceNotConfiguredError antes de sintetizar este segmento: los
-      // anteriores ya salieron con su voz correcta, ninguno con otra
-      // (AC 4.15), y resume retoma desde el pendiente.
+    const pending = ordered.filter((argument) => !argument.audioAssetId); // idempotencia de resume/recovery
+
+    // Spec 004, D15 (AC 4.15, 4.28): antes de sintetizar nada se validan las
+    // voces de TODOS los agentes con segmentos pendientes, en el idioma del
+    // episodio (Episode.language, leído acá), sin consumir cupo de TTS. Así
+    // un solo VoiceNotConfiguredError nombra a todos los que faltan: si
+    // frenara en el primer segmento sin voz, el curador cargaría esa, al
+    // reanudar frenaría por la siguiente con el mismo motivo y el episodio
+    // pasaría a FAILED aunque sí cargó la voz que se le pidió. Tampoco queda
+    // un audio a medias con parte de los segmentos sintetizados.
+    const pendingAgentIds = [...new Set(pending.map((argument) => argument.agentId))];
+    if (pendingAgentIds.length > 0) {
+      await this.tts.assertVoicesConfigured(pendingAgentIds, episode.language);
+    }
+
+    for (const argument of pending) {
+      // AC 4.14: la voz sale de AgentVoice para el idioma del episodio.
       await this.budget.withTtsCall(episodeId, () => this.tts.synthesizeSegment(episodeId, argument, episode.language));
     }
 
@@ -568,6 +578,9 @@ export class EpisodeOrchestratorService {
     // a frenar con el mismo motivo y requireHumanReview lo pasa a FAILED
     // (AC 4.28).
     if (err instanceof VoiceNotConfiguredError) {
+      // El checkpoint solo guarda el motivo: el detalle (idioma, proveedor y
+      // qué agentes no tienen voz) queda en el log.
+      this.logger.warn(`Episodio ${episodeId} frenado por VOICE_NOT_CONFIGURED: ${err.message}`);
       await this.state.requireHumanReview(episodeId, "VOICE_NOT_CONFIGURED");
       return;
     }

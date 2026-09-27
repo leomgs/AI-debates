@@ -55,21 +55,30 @@ export interface BuildManifestInput {
 // TtsService.getSignedAudioUrl (AC 6.1, ya construido en la etapa 3 de TTS).
 @Injectable()
 export class RenderService {
+  // Única definición de "el manifest está listo": veredicto emitido y audio
+  // (AudioAsset con duración) en todos los Argument OFFICIAL. Pública para
+  // que EpisodesService la llame ANTES de resolver las voces de los
+  // participantes (spec 004): un episodio que todavía no llegó al audio
+  // tiene que responder MANIFEST_NOT_READY, no VOICE_NOT_CONFIGURED.
+  // buildManifest la vuelve a aplicar, así que nunca arma un manifest
+  // incompleto aunque el caller no la haya llamado.
+  assertManifestReady(input: Pick<BuildManifestInput, "episodeId" | "officialArguments" | "verdict">): void {
+    this.readyVerdict(input);
+    for (const argument of input.officialArguments) this.readyAudio(input.episodeId, argument);
+  }
+
   buildManifest(input: BuildManifestInput): RemotionManifest {
-    if (!input.verdict) {
-      throw new ManifestNotReadyError(input.episodeId);
-    }
+    this.assertManifestReady(input);
+    const verdict = this.readyVerdict(input);
 
     const timeline = input.officialArguments.map((argument, index) => {
-      if (!argument.audioAssetId || argument.durationMs === null) {
-        throw new ManifestNotReadyError(input.episodeId);
-      }
+      const { audioAssetId, durationMs } = this.readyAudio(input.episodeId, argument);
       return {
         sequenceIndex: index + 1,
         agentId: argument.agentId,
         text: argument.content,
-        audioAssetId: argument.audioAssetId,
-        durationMs: argument.durationMs,
+        audioAssetId,
+        durationMs,
         subtitles: argument.subtitles ?? [],
       };
     });
@@ -92,7 +101,17 @@ export class RenderService {
         voiceId: p.voiceId,
       })),
       timeline,
-      verdict: { winnerAgentId: input.verdict.winnerId, summary: input.verdict.content },
+      verdict: { winnerAgentId: verdict.winnerId, summary: verdict.content },
     };
+  }
+
+  private readyVerdict(input: Pick<BuildManifestInput, "episodeId" | "verdict">): RenderManifestVerdict {
+    if (!input.verdict) throw new ManifestNotReadyError(input.episodeId);
+    return input.verdict;
+  }
+
+  private readyAudio(episodeId: string, argument: RenderManifestArgument): { audioAssetId: string; durationMs: number } {
+    if (!argument.audioAssetId || argument.durationMs === null) throw new ManifestNotReadyError(episodeId);
+    return { audioAssetId: argument.audioAssetId, durationMs: argument.durationMs };
   }
 }
