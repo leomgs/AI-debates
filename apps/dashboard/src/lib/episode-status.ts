@@ -80,3 +80,10 @@ export const STUDIO_GROUP_ORDER: readonly StudioGroup[] = ["requires-action", "i
 export function episodeStatusUi(status: EpisodeStatus): EpisodeStatusUi {
   return EPISODE_STATUS_UI[status];
 }
+
+/** Los 14 estados, en el orden de la tabla de la spec (filtro de /studio, AC 3.19). */
+export const EPISODE_STATUSES = Object.keys(EPISODE_STATUS_UI) as EpisodeStatus[];
+
+export function isEpisodeStatus(value: string): value is EpisodeStatus {
+  return (EPISODE_STATUSES as readonly string[]).includes(value);
+}

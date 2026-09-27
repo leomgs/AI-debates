@@ -71,3 +71,11 @@ export function unwrap<T>(result: FetchResult<T>): T {
 export function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401 && error.code === "UNAUTHORIZED";
 }
+
+// Texto del "error genérico" de la spec 003: el `error.message` del envelope
+// o, si no hubo respuesta (fetch rechazado por la red), un mensaje propio.
+// Nunca un JSON crudo.
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  return "No hubo respuesta del servidor. Revisá la conexión y reintentá.";
+}
