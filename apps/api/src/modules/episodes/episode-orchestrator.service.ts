@@ -9,7 +9,7 @@ import { AgentsService } from "../agents/agents.service";
 import { FactCheckService } from "../fact-check/fact-check.service";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../ai/ai.errors";
 import { TtsService } from "../tts/tts.service";
-import { TtsProviderUnavailableError } from "../tts/tts.errors";
+import { TtsProviderUnavailableError, VoiceNotConfiguredError } from "../tts/tts.errors";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
@@ -268,7 +268,10 @@ export class EpisodeOrchestratorService {
   // asume el guion como de solo lectura y se retoman exclusivamente las
   // llamadas de audio pendientes".
   async runAudioPhase(episodeId: string): Promise<void> {
-    const episode = await this.prisma.episode.findUniqueOrThrow({ where: { id: episodeId }, select: { status: true } });
+    const episode = await this.prisma.episode.findUniqueOrThrow({
+      where: { id: episodeId },
+      select: { status: true, language: true },
+    });
     if (episode.status === "APPROVED" || episode.status === "REQUIRES_HUMAN_REVIEW") {
       await this.state.markGeneratingAudio(episodeId);
     }
@@ -276,7 +279,12 @@ export class EpisodeOrchestratorService {
     const ordered = await this.tts.getOrderedOfficialArguments(episodeId);
     for (const argument of ordered) {
       if (argument.audioAssetId) continue; // ya sintetizado — idempotencia de resume/recovery
-      await this.budget.withTtsCall(episodeId, () => this.tts.synthesizeSegment(episodeId, argument));
+      // Spec 004, AC 4.14: la voz sale de AgentVoice para el idioma del
+      // episodio (Episode.language, leído acá). Si falta, TtsService tira
+      // VoiceNotConfiguredError antes de sintetizar este segmento: los
+      // anteriores ya salieron con su voz correcta, ninguno con otra
+      // (AC 4.15), y resume retoma desde el pendiente.
+      await this.budget.withTtsCall(episodeId, () => this.tts.synthesizeSegment(episodeId, argument, episode.language));
     }
 
     // Guard explícito por status de origen, mismo motivo que
@@ -550,6 +558,17 @@ export class EpisodeOrchestratorService {
     }
     if (err instanceof DailyQuotaExceededError || err instanceof RateLimitWaitExceededError) {
       await this.state.requireHumanReview(episodeId, "PROVIDER_QUOTA_EXCEEDED");
+      return;
+    }
+    // Spec 004, D15 (AC 4.15): falta la voz de un agente para el idioma del
+    // episodio (alguien borró la fila después de crearlo). Va ANTES del
+    // catch de TtsProviderUnavailableError para que nunca termine como
+    // PROVIDER_QUOTA_EXCEEDED, que describe mal el problema. Se reanuda con
+    // body vacío después de cargar la voz; si se reanuda sin cargarla, vuelve
+    // a frenar con el mismo motivo y requireHumanReview lo pasa a FAILED
+    // (AC 4.28).
+    if (err instanceof VoiceNotConfiguredError) {
+      await this.state.requireHumanReview(episodeId, "VOICE_NOT_CONFIGURED");
       return;
     }
     if (err instanceof TtsProviderUnavailableError) {

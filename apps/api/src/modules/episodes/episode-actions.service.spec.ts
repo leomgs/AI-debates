@@ -8,6 +8,7 @@ import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { TtsService } from "../tts/tts.service";
+import { VoiceNotConfiguredError } from "../tts/tts.errors";
 import { EpisodeActionsService } from "./episode-actions.service";
 import { EpisodeContextService } from "./episode-context.service";
 import { BudgetExceededError, InvalidEpisodeTransitionError } from "./episodes.errors";
@@ -35,10 +36,11 @@ function notFound() {
   return new Prisma.PrismaClientKnownRequestError("No record was found for a query.", { code: "P2025", clientVersion: "test" });
 }
 
-function episodeWithDebate(status: string) {
+function episodeWithDebate(status: string, language = "ES") {
   return {
     id: EPISODE_ID,
     status,
+    language,
     debateId: DEBATE_ID,
     debate: { id: DEBATE_ID, topicId: TOPIC_ID, topic: { id: TOPIC_ID, title: "Un trend" } },
   };
@@ -368,8 +370,25 @@ describe("EpisodeActionsService", () => {
       const result = await service.regenerateAudio(EPISODE_ID, { sequenceIndex: 2 });
 
       expect(budgetService.withTtsCall).toHaveBeenCalledWith(EPISODE_ID, expect.any(Function));
-      expect(ttsService.regenerateSegmentByIndex).toHaveBeenCalledWith(EPISODE_ID, 2);
+      expect(ttsService.regenerateSegmentByIndex).toHaveBeenCalledWith(EPISODE_ID, 2, "ES");
       expect(result).toEqual({ id: "new-audio-asset", storageKey: "x" });
+    });
+
+    // Spec 004, AC 4.14: la voz sale del idioma del episodio, leído acá.
+    it("pasa a TtsService el idioma del episodio (PT)", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("READY_FOR_RENDER", "PT"));
+
+      await service.regenerateAudio(EPISODE_ID, { sequenceIndex: 1 });
+
+      expect(ttsService.regenerateSegmentByIndex).toHaveBeenCalledWith(EPISODE_ID, 1, "PT");
+    });
+
+    // AC 4.15: el error sube tal cual para que el filtro responda 409.
+    it("propaga VoiceNotConfiguredError de TtsService", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("READY_FOR_RENDER", "EN"));
+      ttsService.regenerateSegmentByIndex.mockRejectedValue(new VoiceNotConfiguredError("EN", "LOCAL", ["Analista (ANALYST)"]));
+
+      await expect(service.regenerateAudio(EPISODE_ID, { sequenceIndex: 1 })).rejects.toThrow(VoiceNotConfiguredError);
     });
 
     it("fuera de READY_FOR_RENDER tira InvalidEpisodeTransitionError sin llamar a TtsService", async () => {
@@ -445,6 +464,33 @@ describe("EpisodeActionsService", () => {
       expect(prisma.episode.update).not.toHaveBeenCalled();
       expect(orchestrator.runPipeline).toHaveBeenCalledWith(EPISODE_ID, { manualSources });
     });
+
+    // Spec 004, AC 4.15: VOICE_NOT_CONFIGURED se reanuda con body vacío y
+    // retoma solo el audio pendiente (runAudioPipeline, idempotente por
+    // audioAssetId); con body no vacío, ZodError (400 VALIDATION_ERROR).
+    it("VOICE_NOT_CONFIGURED: body vacío, no toca límites, retoma con runAudioPipeline", async () => {
+      prisma.episodeCheckpoint.findFirst.mockResolvedValue({ reason: "VOICE_NOT_CONFIGURED", fromState: "GENERATING_AUDIO" });
+
+      await service.resume(EPISODE_ID, {});
+
+      expect(prisma.episode.update).not.toHaveBeenCalled();
+      expect(stateService.resumeFromCheckpoint).toHaveBeenCalledWith(EPISODE_ID);
+      expect(orchestrator.runAudioPipeline).toHaveBeenCalledWith(EPISODE_ID);
+      expect(orchestrator.runPipeline).not.toHaveBeenCalled();
+    });
+
+    it.each([{ maxLlmCalls: 40 }, { manualSources: [{ url: "https://x.com", title: "t", snippet: "s" }] }])(
+      "VOICE_NOT_CONFIGURED con body no vacío (%j) tira ZodError sin reanudar",
+      async (body) => {
+        prisma.episodeCheckpoint.findFirst.mockResolvedValue({ reason: "VOICE_NOT_CONFIGURED", fromState: "GENERATING_AUDIO" });
+
+        await expect(service.resume(EPISODE_ID, body)).rejects.toThrow(ZodError);
+
+        expect(prisma.episode.update).not.toHaveBeenCalled();
+        expect(stateService.resumeFromCheckpoint).not.toHaveBeenCalled();
+        expect(orchestrator.runAudioPipeline).not.toHaveBeenCalled();
+      }
+    );
 
     it("MAX_REVISIONS_EXCEEDED: body vacío, no toca límites, dispara runPipeline sin opts", async () => {
       prisma.episodeCheckpoint.findFirst.mockResolvedValue({ reason: "MAX_REVISIONS_EXCEEDED" });

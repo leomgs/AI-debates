@@ -1,24 +1,34 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { AgentVoice, AudioAsset, DebateLanguage, Prisma } from "@prisma/client";
+import { Agent, AgentVoice, AudioAsset, DebateLanguage, Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import type { Env } from "../../shared/config/env.schema";
 import type { AudioProvider } from "./audio-provider.interface";
 import type { AudioStorageProvider } from "./audio-storage.interface";
 import { AUDIO_PROVIDER, AUDIO_STORAGE } from "./tts.tokens";
-import { SequenceIndexOutOfRangeError } from "./tts.errors";
+import { SequenceIndexOutOfRangeError, VoiceNotConfiguredError } from "./tts.errors";
 
-// Spec 004, paso 13.4: las voces salieron de Agent.voiceId a AgentVoice
-// (ADR 0002). Idioma fijo ES hasta el paso 13.6, que resuelve la voz con el
-// idioma del episodio (resolveVoiceId(agent, language)) y reemplaza esto.
-const VOICE_LANGUAGE_UNTIL_EPISODE_LANGUAGE: DebateLanguage = "ES";
-
-// Include del Agent con las voces que puede usar resolveVoiceId. Exportado
-// para que EpisodesService.getManifest cargue el agente igual que acá.
+// Include del Agent con las voces que puede usar resolveVoiceId. Trae todas
+// las filas del agente (a lo sumo idiomas × proveedores): el idioma lo elige
+// resolveVoiceId con el del episodio, no el include (spec 004, paso 13.6).
+// Exportado para que EpisodesService.getManifest cargue el agente igual que
+// acá.
 export const AGENT_WITH_VOICES_INCLUDE = {
-  voices: { where: { language: VOICE_LANGUAGE_UNTIL_EPISODE_LANGUAGE } },
+  voices: true,
 } satisfies Prisma.AgentInclude;
+
+// Lo mínimo que necesita resolveVoiceId: las voces del agente y con qué
+// nombrarlo en el error si falta la suya.
+export type AgentWithVoices = Pick<Agent, "name" | "role"> & {
+  voices: Pick<AgentVoice, "language" | "provider" | "voiceId">[];
+};
+
+// Rótulo de un agente en VoiceNotConfiguredError: nombre y rol, para que el
+// mensaje sirva tanto para ubicar la fila Agent como la persona.
+function agentLabel(agent: Pick<Agent, "name" | "role">): string {
+  return agent.role ? `${agent.name} (${agent.role})` : agent.name;
+}
 
 // audioAsset incluido para Feature 7 (RenderModule reusa este método vía
 // EpisodesService para leer durationMs/subtitles ya persistidos, sin query
@@ -72,8 +82,11 @@ export class TtsService {
   // enlaza Argument.audioAssetId. El motor activo (AUDIO_PROVIDER) y qué
   // fila de AgentVoice usar (una por idioma y proveedor, ADR 0002) se
   // resuelven acá, no en el caller.
-  async synthesizeSegment(episodeId: string, argument: ArgumentWithAgent): Promise<AudioAsset> {
-    const created = await this.synthesizeAndSave(episodeId, argument);
+  // `language` es el Episode.language que lee el caller (spec 004, regla de
+  // flujo del idioma: los puntos de entrada lo leen de la base y los
+  // módulos de dominio lo reciben por parámetro).
+  async synthesizeSegment(episodeId: string, argument: ArgumentWithAgent, language: DebateLanguage): Promise<AudioAsset> {
+    const created = await this.synthesizeAndSave(episodeId, argument, language);
     await this.prisma.argument.update({ where: { id: argument.id }, data: { audioAssetId: created.id } });
     return created;
   }
@@ -82,13 +95,16 @@ export class TtsService {
   // sequenceIndex sin alterar el resto del episodio. sequenceIndex es
   // 1-based sobre el mismo orden que getOrderedOfficialArguments (createdAt
   // asc) — decision-log.md 2026-09-09 #20 punto 3, no hay columna nueva.
-  async regenerateSegmentByIndex(episodeId: string, sequenceIndex: number): Promise<AudioAsset> {
+  async regenerateSegmentByIndex(episodeId: string, sequenceIndex: number, language: DebateLanguage): Promise<AudioAsset> {
     const ordered = await this.getOrderedOfficialArguments(episodeId);
     const argument = ordered[sequenceIndex - 1];
     if (!argument) throw new SequenceIndexOutOfRangeError(episodeId, sequenceIndex, ordered.length);
 
     const previousAudioAssetId = argument.audioAssetId;
-    const created = await this.synthesizeAndSave(episodeId, argument);
+    // Sin voz, VoiceNotConfiguredError sale de synthesizeAndSave antes de
+    // sintetizar ni escribir nada: el segmento queda como estaba (spec 004,
+    // AC 4.15).
+    const created = await this.synthesizeAndSave(episodeId, argument, language);
 
     // Atomicidad de AC 6.2 = swap de FK (decision-log.md #20 punto 3), no un
     // UPDATE in-place del AudioAsset viejo: el nuevo AudioAsset ya existe
@@ -128,27 +144,62 @@ export class TtsService {
     return { url };
   }
 
-  // Feature 7 — RenderModule (vía EpisodesService) necesita el mismo voiceId
-  // "real" que se usó para sintetizar, para completar manifest.agents[].
-  // Pública para no duplicar esta resolución (activeProvider + buscar la
-  // fila de AgentVoice) fuera de TtsService. Recibe las voces que carga
+  // Voz de un agente para el idioma del episodio y el proveedor activo
+  // (ADR 0002 punto 4). Pública porque EpisodesService.getManifest la usa
+  // para los agentes sin AudioAsset.voiceId (spec 004, D17), sin duplicar
+  // esta resolución fuera de TtsService. Recibe las voces que carga
   // AGENT_WITH_VOICES_INCLUDE. Sin fila no hay respaldo: devolver undefined
-  // haría que Echogarden elija otra voz sin avisar (spec 004, D14). El error
-  // tipado VoiceNotConfiguredError y su mapeo llegan en el paso 13.6.
-  resolveVoiceId(voices: Pick<AgentVoice, "provider" | "voiceId">[]): string {
-    const activeProvider = this.config.get("TTS_PROVIDER", { infer: true });
-    const voice = voices.find((v) => v.provider === activeProvider);
-    if (!voice) {
-      throw new Error(
-        `El agente no tiene voz ${VOICE_LANGUAGE_UNTIL_EPISODE_LANGUAGE} configurada para el proveedor de TTS "${activeProvider}" (tabla AgentVoice).`
-      );
-    }
+  // haría que Echogarden elija otra voz sin avisar (D14).
+  resolveVoiceId(agent: AgentWithVoices, language: DebateLanguage): string {
+    const activeProvider = this.activeProvider();
+    const voice = agent.voices.find((v) => v.language === language && v.provider === activeProvider);
+    if (!voice) throw new VoiceNotConfiguredError(language, activeProvider, [agentLabel(agent)]);
     return voice.voiceId;
   }
 
-  private async synthesizeAndSave(episodeId: string, argument: ArgumentWithAgent): Promise<AudioAsset> {
-    const activeProvider = this.config.get("TTS_PROVIDER", { infer: true });
-    const voiceId = this.resolveVoiceId(argument.agent.voices);
+  // Spec 004, D15 (ADR 0002 punto 4): createEpisode la llama antes del
+  // primer insert, con los agentes candidatos. `unresolvedRoles` son los
+  // roles candidatos sin fila Agent: cuentan como agentes sin voz y el
+  // error los nombra por su rol. Un solo error con todos los faltantes, para
+  // que el curador sepa de una vez qué hay que cargar.
+  async assertVoicesConfigured(
+    agentIds: readonly string[],
+    language: DebateLanguage,
+    unresolvedRoles: readonly string[] = []
+  ): Promise<void> {
+    const activeProvider = this.activeProvider();
+    const agents = await this.prisma.agent.findMany({
+      where: { id: { in: [...agentIds] } },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        voices: { where: { language, provider: activeProvider }, select: { voiceId: true } },
+      },
+    });
+
+    const missing: string[] = [];
+    for (const agentId of agentIds) {
+      const agent = agents.find((a) => a.id === agentId);
+      if (!agent) missing.push(agentId);
+      else if (agent.voices.length === 0) missing.push(agentLabel(agent));
+    }
+    missing.push(...unresolvedRoles.map((role) => `rol ${role} (sin fila Agent)`));
+
+    if (missing.length > 0) throw new VoiceNotConfiguredError(language, activeProvider, missing);
+  }
+
+  // Proveedor cuya voz se busca en AgentVoice. Mientras Echogarden sea el
+  // único motor, EnvSchema no deja arrancar con otro valor que LOCAL (spec
+  // 004, D16): la clave de la voz y el motor enlazado en TtsModule salen de
+  // la misma fuente.
+  private activeProvider(): Env["TTS_PROVIDER"] {
+    return this.config.get("TTS_PROVIDER", { infer: true });
+  }
+
+  private async synthesizeAndSave(episodeId: string, argument: ArgumentWithAgent, language: DebateLanguage): Promise<AudioAsset> {
+    const activeProvider = this.activeProvider();
+    const voiceId = this.resolveVoiceId(argument.agent, language);
 
     const { audioBuffer, durationMs, mimeType, subtitles } = await this.provider.synthesize(argument.content, voiceId);
     const extension = MIME_EXTENSIONS[mimeType] ?? "bin";
@@ -163,8 +214,8 @@ export class TtsService {
         provider: activeProvider,
         durationMs,
         mimeType,
-        // ADR 0002 punto 6: la voz realmente usada, para el manifest (el
-        // manifest la lee desde acá recién en el paso 13.6, AC 4.16).
+        // ADR 0002 punto 6: la voz realmente usada. El manifest la toma de
+        // acá (spec 004, D17, AC 4.16).
         voiceId,
         subtitles: (subtitles as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
       },

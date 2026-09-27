@@ -47,6 +47,23 @@ describe("validateEnv (API-8)", () => {
     );
   });
 
+  // Spec 004, AC 4.24 (D16): mientras Echogarden sea el único motor, el
+  // proceso no arranca con otro TTS_PROVIDER, y el mensaje dice por qué.
+  it("acepta TTS_PROVIDER LOCAL, explícito u omitido (default)", () => {
+    expect(validateEnv(baseEnv()).TTS_PROVIDER).toBe("LOCAL");
+    expect(validateEnv(baseEnv({ TTS_PROVIDER: "LOCAL" })).TTS_PROVIDER).toBe("LOCAL");
+  });
+
+  it.each(["GOOGLE_TTS", "OPENROUTER"])("falla con TTS_PROVIDER=%s y explica que solo hay motor LOCAL (AC 4.24)", (provider) => {
+    expect(() => validateEnv(baseEnv({ TTS_PROVIDER: provider }))).toThrow(
+      new RegExp(`TTS_PROVIDER: "${provider}" no está soportado: el único motor de TTS implementado es el local \\(Echogarden\\)`)
+    );
+  });
+
+  it("falla con un TTS_PROVIDER fuera del enum", () => {
+    expect(() => validateEnv(baseEnv({ TTS_PROVIDER: "CHATTERBOX" }))).toThrow(/TTS_PROVIDER/);
+  });
+
   it("en producción acepta un AUDIO_SIGNING_SECRET propio, y fuera de producción acepta el default", () => {
     expect(validateEnv(baseEnv({ NODE_ENV: "production", AUDIO_SIGNING_SECRET: "secreto-propio" })).NODE_ENV).toBe("production");
     expect(validateEnv(baseEnv({ NODE_ENV: "development" })).AUDIO_SIGNING_SECRET).toBe(DEFAULT_AUDIO_SIGNING_SECRET);

@@ -159,9 +159,16 @@ export class EpisodeActionsService {
   // sentido desde READY_FOR_RENDER, que es adonde llega un episodio recién
   // que EpisodeOrchestratorService.runAudioPhase termina de sintetizar todos
   // los segmentos (episode-state.service.ts, markReadyForRender).
+  //
+  // Spec 004: la voz sale del idioma del episodio (AC 4.14). Si falta,
+  // VoiceNotConfiguredError sale antes de sintetizar: el segmento queda
+  // como estaba, withTtsCall devuelve el cupo y el filtro responde 409
+  // VOICE_NOT_CONFIGURED (AC 4.15).
   async regenerateAudio(episodeId: string, dto: RegenerateAudioActionDto): Promise<AudioAsset> {
-    await this.assertStatus(episodeId, ["READY_FOR_RENDER"], "regenerate-audio");
-    return this.budget.withTtsCall(episodeId, () => this.tts.regenerateSegmentByIndex(episodeId, dto.sequenceIndex));
+    const episode = await this.assertStatus(episodeId, ["READY_FOR_RENDER"], "regenerate-audio");
+    return this.budget.withTtsCall(episodeId, () =>
+      this.tts.regenerateSegmentByIndex(episodeId, dto.sequenceIndex, episode.language)
+    );
   }
 
   // El body esperado depende de checkpoint.reason (api-contract.md §3) — el
@@ -231,6 +238,9 @@ export class EpisodeActionsService {
       case "MAX_REVISIONS_EXCEEDED":
       case "VALIDATION_INCONSISTENCY":
       case "PROVIDER_QUOTA_EXCEEDED":
+      // Spec 004, AC 4.15: se reanuda con body vacío después de cargar la
+      // voz; no hay nada que el curador pueda mandar en el body.
+      case "VOICE_NOT_CONFIGURED":
         EmptyResumeSchema.parse(body);
         return undefined;
       default: {

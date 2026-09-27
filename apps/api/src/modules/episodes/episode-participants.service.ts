@@ -38,6 +38,22 @@ export class EpisodeParticipantsService {
     });
   }
 
+  // Spec 004, D15: los 5 agentes que selectParticipants puede elegir (los 4
+  // roles de DEBATER_PERSONAS más JUDGE), resueltos por role con la misma
+  // consulta que arriba. Al crear el episodio todavía no se sabe cuáles 2
+  // debatientes se van a sortear, así que createEpisode valida las voces de
+  // todos. agentId null = no hay fila Agent para ese rol (con
+  // findFirstOrThrow, selectParticipants fallaría más tarde).
+  async findCandidateAgents(): Promise<Array<{ role: string; agentId: string | null }>> {
+    const roles = [...Object.values(DEBATER_PERSONAS).map((p) => p.id), JUDGE.id];
+    return Promise.all(
+      roles.map(async (role) => {
+        const agent = await this.prisma.agent.findFirst({ where: { role }, select: { id: true } });
+        return { role, agentId: agent?.id ?? null };
+      })
+    );
+  }
+
   // No se toca ModelProviderFactory (fuera de scope, ya implementado) — chequeo
   // propio de presencia de env vars. GOOGLE es la única requerida
   // (env.schema.ts), siempre disponible; las otras 3 son opcionales.

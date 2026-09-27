@@ -19,6 +19,10 @@ import { EpisodesService } from "./episodes.service";
 import { DebateService } from "../debate/debate.service";
 import { DailyQuotaExceededError } from "../ai/ai.errors";
 import { BudgetExceededError, InvalidEpisodeTransitionError } from "./episodes.errors";
+import { AUDIO_PROVIDER, AUDIO_STORAGE } from "../tts/tts.tokens";
+import { VoiceNotConfiguredError } from "../tts/tts.errors";
+import type { DebateLanguage } from "@prisma/client";
+import { ZodError } from "zod";
 
 // coding-rules.md §9 — único módulo con tests de integración multi-módulo
 // (todo mockeado en el borde externo: Research/Agents/FactCheck llaman a
@@ -64,7 +68,10 @@ async function seedAgents(prisma: PrismaService): Promise<void> {
   });
 }
 
-async function createTestEpisode(prisma: PrismaService, overrides: Partial<{ maxRevisionAttempts: number }> = {}) {
+async function createTestEpisode(
+  prisma: PrismaService,
+  overrides: Partial<{ maxRevisionAttempts: number; language: DebateLanguage; rebuttalRounds: number }> = {}
+) {
   const topic = await prisma.topic.create({
     data: { title: `Trend de test ${Date.now()}-${Math.random().toString(36).slice(2)}`, context: "contexto de prueba" },
   });
@@ -126,6 +133,10 @@ describe("EpisodesModule (integración)", () => {
   let researchMock: { createTopic: jest.Mock; research: jest.Mock };
   let agentsMock: { createDebateAgent: jest.Mock; judge: jest.Mock };
   let factCheckMock: { extractClaims: jest.Mock; check: jest.Mock; editorialReview: jest.Mock };
+  // Motor de TTS y storage mockeados en el borde (spec 004: los AC de TTS se
+  // verifican con lo que recibe el AudioProvider). TtsService es el real.
+  let audioProviderMock: { synthesize: jest.Mock };
+  let audioStorageMock: { save: jest.Mock; delete: jest.Mock; getSignedUrl: jest.Mock };
 
   beforeAll(async () => {
     if (existsSync(TEST_DB_PATH)) unlinkSync(TEST_DB_PATH);
@@ -148,6 +159,8 @@ describe("EpisodesModule (integración)", () => {
     researchMock = { createTopic: jest.fn(), research: jest.fn() };
     agentsMock = { createDebateAgent: jest.fn(), judge: jest.fn() };
     factCheckMock = { extractClaims: jest.fn(), check: jest.fn(), editorialReview: jest.fn() };
+    audioProviderMock = { synthesize: jest.fn() };
+    audioStorageMock = { save: jest.fn(), delete: jest.fn(), getSignedUrl: jest.fn() };
 
     moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }), PrismaModule, EpisodesModule],
@@ -158,6 +171,10 @@ describe("EpisodesModule (integración)", () => {
       .useValue(agentsMock)
       .overrideProvider(FactCheckService)
       .useValue(factCheckMock)
+      .overrideProvider(AUDIO_PROVIDER)
+      .useValue(audioProviderMock)
+      .overrideProvider(AUDIO_STORAGE)
+      .useValue(audioStorageMock)
       .compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -193,6 +210,15 @@ describe("EpisodesModule (integración)", () => {
     ]);
     factCheckMock.check.mockResolvedValue({ veracity: "TRUE", analysis: "Verificado.", sourceIds: ["src-test"] });
     factCheckMock.editorialReview.mockResolvedValue({ passed: true });
+    audioProviderMock.synthesize.mockResolvedValue({
+      audioBuffer: Buffer.from("audio-de-prueba"),
+      durationMs: 1000,
+      mimeType: "audio/wav",
+      subtitles: [],
+    });
+    audioStorageMock.save.mockResolvedValue(undefined);
+    audioStorageMock.delete.mockResolvedValue(undefined);
+    audioStorageMock.getSignedUrl.mockImplementation((key: string) => Promise.resolve(`/audio-files/${key}?sig=test`));
   });
 
   it("pipeline feliz completo: CREATED -> ... -> PENDING_REVIEW, con Argument OFFICIAL y Verdict persistidos", async () => {
@@ -607,6 +633,316 @@ describe("EpisodesModule (integración)", () => {
 
       expect(await prisma.verdict.findUniqueOrThrow({ where: { debateId: episode.debateId } })).toEqual(verdictBefore);
       expect(await prisma.verdictHistory.count({ where: { debateId: episode.debateId } })).toBe(0);
+    });
+  });
+
+  // Spec 004, paso 13.6 (D14-D17). La base de este archivo tiene, como la
+  // que deja el seed del MVP, solo voces ES (seedAgents). Las filas EN/PT que
+  // cargan algunos tests son de prueba, con ids visiblemente ficticios (D14),
+  // y se borran después de cada test: nunca van al seed.
+  describe("spec 004: voces por idioma y VOICE_NOT_CONFIGURED", () => {
+    const CANDIDATE_ROLES = [...Object.values(DEBATER_PERSONAS).map((p) => p.id), JUDGE.id];
+
+    // Id ficticio por agente e idioma (D14): test-en-analyst, test-pt-judge...
+    function testVoiceId(language: DebateLanguage, role: string): string {
+      return `test-${language.toLowerCase()}-${role.toLowerCase()}`;
+    }
+
+    async function loadTestVoices(language: DebateLanguage, roles: readonly string[] = CANDIDATE_ROLES): Promise<void> {
+      for (const role of roles) {
+        const agent = await prisma.agent.findFirstOrThrow({ where: { role } });
+        await prisma.agentVoice.create({
+          data: { agentId: agent.id, language, provider: "LOCAL", voiceId: testVoiceId(language, role) },
+        });
+      }
+    }
+
+    async function countCreationRows() {
+      const [topics, debates, episodes, usages] = await Promise.all([
+        prisma.topic.count(),
+        prisma.debate.count(),
+        prisma.episode.count(),
+        prisma.episodeUsage.count(),
+      ]);
+      return { topics, debates, episodes, usages };
+    }
+
+    // Episodio en PENDING_REVIEW con el pipeline real, OPENING + REBUTTAL
+    // (4 segmentos, 2 por debatiente, alternados).
+    async function episodeReadyForAudio(language: DebateLanguage) {
+      const created = await createTestEpisode(prisma, { language, rebuttalRounds: 1 });
+      researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+      await orchestrator.runPipeline(created.episode.id);
+      expect((await prisma.episode.findUniqueOrThrow({ where: { id: created.episode.id } })).status).toBe("PENDING_REVIEW");
+      return created;
+    }
+
+    // approve y resume disparan runAudioPipeline sin await: se espera esa
+    // promesa (vía spy) para no leer el estado a mitad de camino.
+    async function awaitAudioPipeline(trigger: () => Promise<unknown>): Promise<void> {
+      const spy = jest.spyOn(orchestrator, "runAudioPipeline");
+      try {
+        await trigger();
+        await spy.mock.results[spy.mock.results.length - 1].value;
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    async function segmentsWithAgent(debateId: string) {
+      return prisma.argument.findMany({
+        where: { debateRound: { debateId }, status: "OFFICIAL" },
+        include: { agent: true, audioAsset: true },
+        orderBy: { createdAt: "asc" },
+      });
+    }
+
+    async function lastCheckpoints(episodeId: string) {
+      return prisma.episodeCheckpoint.findMany({ where: { episodeId }, orderBy: { createdAt: "asc" } });
+    }
+
+    afterEach(async () => {
+      await prisma.agentVoice.deleteMany({ where: { language: { not: "ES" } } });
+    });
+
+    // AC 4.29 (parte de servicio; la HTTP es del paso 13.7) y AC 4.4.
+    describe("createEpisode (D15, AC 4.4 y 4.29)", () => {
+      let runPipelineSpy: jest.SpyInstance;
+
+      beforeEach(() => {
+        researchMock.createTopic.mockImplementation((title: string, context: string) =>
+          prisma.topic.create({ data: { title, context } })
+        );
+        // El pipeline en background no es lo que se prueba acá.
+        runPipelineSpy = jest.spyOn(orchestrator, "runPipeline").mockResolvedValue(undefined);
+      });
+
+      afterEach(() => {
+        runPipelineSpy.mockRestore();
+      });
+
+      it.each(["EN", "PT"] as const)(
+        "con solo voces ES, %s tira VoiceNotConfiguredError con el idioma, LOCAL y los 5 candidatos, sin crear filas",
+        async (language) => {
+          const before = await countCreationRows();
+
+          const error = await episodesService.createEpisode(`Trend ${language} ${Date.now()}`, language).catch((err: unknown) => err);
+
+          expect(error).toBeInstanceOf(VoiceNotConfiguredError);
+          const voiceError = error as VoiceNotConfiguredError;
+          expect(voiceError.language).toBe(language);
+          expect(voiceError.provider).toBe("LOCAL");
+          expect(voiceError.agents).toHaveLength(5);
+          expect(voiceError.message).toContain(`idioma ${language}`);
+          expect(voiceError.message).toContain('"LOCAL"');
+          for (const role of CANDIDATE_ROLES) expect(voiceError.message).toContain(`(${role})`);
+
+          expect(await countCreationRows()).toEqual(before);
+          expect(researchMock.createTopic).not.toHaveBeenCalled();
+          expect(runPipelineSpy).not.toHaveBeenCalled();
+        }
+      );
+
+      it("con ES explícito o sin idioma crea el episodio normalmente, en ES", async () => {
+        const before = await countCreationRows();
+
+        const explicit = await episodesService.createEpisode(`Trend ES ${Date.now()}`, "ES");
+        const implicit = await episodesService.createEpisode(`Trend sin idioma ${Date.now()}`);
+
+        for (const created of [explicit, implicit]) {
+          expect((await prisma.episode.findUniqueOrThrow({ where: { id: created.id } })).language).toBe("ES");
+        }
+        expect(await countCreationRows()).toEqual({
+          topics: before.topics + 2,
+          debates: before.debates + 2,
+          episodes: before.episodes + 2,
+          usages: before.usages + 2,
+        });
+      });
+
+      // D20: cargar las voces de un idioma lo habilita sin otro cambio.
+      it("con voces EN de prueba para los 5 candidatos, EN crea el episodio en EN", async () => {
+        await loadTestVoices("EN");
+
+        const created = await episodesService.createEpisode(`Trend EN habilitado ${Date.now()}`, "EN");
+
+        expect((await prisma.episode.findUniqueOrThrow({ where: { id: created.id } })).language).toBe("EN");
+      });
+
+      it("si falta la voz de un solo candidato, el error nombra solo a ese agente", async () => {
+        await loadTestVoices("EN", CANDIDATE_ROLES.filter((role) => role !== "PROVOCATEUR"));
+        const before = await countCreationRows();
+
+        const error = await episodesService.createEpisode(`Trend ${Date.now()}`, "EN").catch((err: unknown) => err);
+
+        expect(error).toBeInstanceOf(VoiceNotConfiguredError);
+        expect((error as VoiceNotConfiguredError).agents).toEqual([expect.stringContaining("(PROVOCATEUR)")]);
+        expect(await countCreationRows()).toEqual(before);
+      });
+
+      it("si falta la fila Agent de un rol candidato, cuenta como sin voz y el error lo nombra por su rol", async () => {
+        const diplomat = await prisma.agent.findFirstOrThrow({ where: { role: "DIPLOMAT" } });
+        await prisma.agent.update({ where: { id: diplomat.id }, data: { role: "RETIRADO" } });
+        try {
+          const before = await countCreationRows();
+
+          const error = await episodesService.createEpisode(`Trend ${Date.now()}`, "ES").catch((err: unknown) => err);
+
+          expect(error).toBeInstanceOf(VoiceNotConfiguredError);
+          expect((error as VoiceNotConfiguredError).agents).toEqual(["rol DIPLOMAT (sin fila Agent)"]);
+          expect(await countCreationRows()).toEqual(before);
+        } finally {
+          await prisma.agent.update({ where: { id: diplomat.id }, data: { role: "DIPLOMAT" } });
+        }
+      });
+    });
+
+    // AC 4.14 y D17: la voz que recibe el AudioProvider es la del idioma del
+    // episodio y del agente; AudioAsset.voiceId la guarda y el manifest la
+    // informa aunque después cambie AgentVoice.
+    it("fase de audio EN: cada segmento sale con la voz EN/LOCAL de su agente y AudioAsset.voiceId la guarda", async () => {
+      await loadTestVoices("EN");
+      const { episode } = await episodeReadyForAudio("EN");
+
+      await awaitAudioPipeline(() => actions.approve(episode.id));
+
+      expect((await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } })).status).toBe("READY_FOR_RENDER");
+      const segments = await segmentsWithAgent(episode.debateId);
+      expect(segments).toHaveLength(4);
+      expect(audioProviderMock.synthesize).toHaveBeenCalledTimes(4);
+      segments.forEach((segment, i) => {
+        const expectedVoice = testVoiceId("EN", segment.agent.role!);
+        expect(audioProviderMock.synthesize).toHaveBeenNthCalledWith(i + 1, segment.content, expectedVoice);
+        expect(segment.audioAsset?.voiceId).toBe(expectedVoice);
+      });
+    });
+
+    it("regenerate-audio usa la voz del idioma del episodio (AC 4.14) y, sin esa voz, 409 sin tocar el segmento (AC 4.15)", async () => {
+      await loadTestVoices("PT");
+      const { episode } = await episodeReadyForAudio("PT");
+      await awaitAudioPipeline(() => actions.approve(episode.id));
+      audioProviderMock.synthesize.mockClear();
+
+      const [first] = await segmentsWithAgent(episode.debateId);
+      const regenerated = await actions.regenerateAudio(episode.id, { sequenceIndex: 1 });
+      expect(audioProviderMock.synthesize).toHaveBeenCalledWith(first.content, testVoiceId("PT", first.agent.role!));
+      expect(regenerated.voiceId).toBe(testVoiceId("PT", first.agent.role!));
+
+      // Se borra la voz PT de ese agente: el segmento queda como estaba y el
+      // cupo de TTS se devuelve.
+      await prisma.agentVoice.delete({
+        where: { agentId_language_provider: { agentId: first.agentId, language: "PT", provider: "LOCAL" } },
+      });
+      audioProviderMock.synthesize.mockClear();
+      const usageBefore = await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } });
+
+      await expect(actions.regenerateAudio(episode.id, { sequenceIndex: 1 })).rejects.toThrow(VoiceNotConfiguredError);
+
+      expect(audioProviderMock.synthesize).not.toHaveBeenCalled();
+      const [after] = await segmentsWithAgent(episode.debateId);
+      expect(after.audioAssetId).toBe(regenerated.id);
+      expect(await prisma.audioAsset.findUnique({ where: { id: regenerated.id } })).not.toBeNull();
+      expect((await prisma.episodeUsage.findUniqueOrThrow({ where: { episodeId: episode.id } })).ttsRequests).toBe(usageBefore.ttsRequests);
+    });
+
+    // D17, AC 4.16: cambiar AgentVoice (lo que haría un seed nuevo) no cambia
+    // el manifest de un episodio ya sintetizado.
+    it("el manifest informa la voz de AudioAsset.voiceId aunque después cambie AgentVoice", async () => {
+      await loadTestVoices("EN");
+      const { episode } = await episodeReadyForAudio("EN");
+      await awaitAudioPipeline(() => actions.approve(episode.id));
+
+      const before = await episodesService.getManifest(episode.id);
+      const debaterIds = (await prisma.episodeParticipant.findMany({ where: { episodeId: episode.id, isJudge: false } })).map(
+        (p) => p.agentId
+      );
+      await prisma.agentVoice.updateMany({
+        where: { agentId: { in: debaterIds }, language: "EN" },
+        data: { voiceId: "test-en-voz-cambiada" },
+      });
+
+      const after = await episodesService.getManifest(episode.id);
+
+      expect(after.agents).toEqual(before.agents);
+      for (const agent of after.agents.filter((a) => debaterIds.includes(a.id))) {
+        expect(agent.voiceId).not.toBe("test-en-voz-cambiada");
+        expect(agent.voiceId).toMatch(/^test-en-/);
+      }
+    });
+
+    // AC 4.15 y 4.28: sin voz en la fase de audio -> VOICE_NOT_CONFIGURED
+    // (nunca PROVIDER_QUOTA_EXCEEDED ni otra voz); resume sin cargarla ->
+    // FAILED; con la voz cargada, resume retoma solo lo pendiente.
+    describe("fase de audio sin voz (AC 4.15, 4.28)", () => {
+      // Solo uno de los dos debatientes tiene voz PT: el pipeline frena en
+      // el primer segmento del otro. Los que ya salieron, salieron con la voz
+      // de su agente.
+      async function haltedForVoice() {
+        const created = await episodeReadyForAudio("PT");
+        const [withVoice, withoutVoice] = await prisma.episodeParticipant.findMany({
+          where: { episodeId: created.episode.id, isJudge: false },
+          include: { agent: true },
+        });
+        await loadTestVoices("PT", [withVoice.agent.role!]);
+
+        await awaitAudioPipeline(() => actions.approve(created.episode.id));
+
+        return { ...created, withVoice, withoutVoice };
+      }
+
+      it("frena en REQUIRES_HUMAN_REVIEW con VOICE_NOT_CONFIGURED sin sintetizar ningún segmento con otra voz", async () => {
+        const { episode, withVoice, withoutVoice } = await haltedForVoice();
+
+        expect((await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } })).status).toBe("REQUIRES_HUMAN_REVIEW");
+        const checkpoints = await lastCheckpoints(episode.id);
+        expect(checkpoints[checkpoints.length - 1]).toMatchObject({ reason: "VOICE_NOT_CONFIGURED", fromState: "GENERATING_AUDIO" });
+
+        const segments = await segmentsWithAgent(episode.debateId);
+        expect(segments.some((s) => s.agentId === withoutVoice.agentId && s.audioAssetId)).toBe(false);
+        for (const call of audioProviderMock.synthesize.mock.calls) {
+          expect(call[1]).toBe(testVoiceId("PT", withVoice.agent.role!));
+        }
+        for (const s of segments.filter((s) => s.audioAsset)) {
+          expect(s.audioAsset?.voiceId).toBe(testVoiceId("PT", withVoice.agent.role!));
+        }
+      });
+
+      it("resume con body no vacío tira ZodError (400) sin reanudar", async () => {
+        const { episode } = await haltedForVoice();
+
+        await expect(actions.resume(episode.id, { maxLlmCalls: 50 })).rejects.toThrow(ZodError);
+
+        expect((await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } })).status).toBe("REQUIRES_HUMAN_REVIEW");
+      });
+
+      it("resume sin haber cargado la voz vuelve a frenar con el mismo motivo y el episodio pasa a FAILED (AC 4.28)", async () => {
+        const { episode } = await haltedForVoice();
+
+        await awaitAudioPipeline(() => actions.resume(episode.id, {}));
+
+        expect((await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } })).status).toBe("FAILED");
+        const checkpoints = await lastCheckpoints(episode.id);
+        expect(checkpoints.map((c) => c.reason)).toEqual(["VOICE_NOT_CONFIGURED", "VOICE_NOT_CONFIGURED"]);
+      });
+
+      it("con la voz cargada, resume con body vacío sintetiza solo los segmentos pendientes y llega a READY_FOR_RENDER", async () => {
+        const { episode, withoutVoice } = await haltedForVoice();
+        const before = await segmentsWithAgent(episode.debateId);
+        const alreadySynthesized = new Map(before.filter((s) => s.audioAssetId).map((s) => [s.id, s.audioAssetId]));
+        const pending = before.filter((s) => !s.audioAssetId);
+        await loadTestVoices("PT", [withoutVoice.agent.role!]);
+        audioProviderMock.synthesize.mockClear();
+
+        await awaitAudioPipeline(() => actions.resume(episode.id, {}));
+
+        expect((await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } })).status).toBe("READY_FOR_RENDER");
+        expect(audioProviderMock.synthesize).toHaveBeenCalledTimes(pending.length);
+        const after = await segmentsWithAgent(episode.debateId);
+        for (const s of after) {
+          expect(s.audioAsset?.voiceId).toBe(testVoiceId("PT", s.agent.role!));
+          if (alreadySynthesized.has(s.id)) expect(s.audioAssetId).toBe(alreadySynthesized.get(s.id));
+        }
+      });
     });
   });
 });

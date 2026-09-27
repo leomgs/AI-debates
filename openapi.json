@@ -1012,7 +1012,8 @@
                     "USAGE_LIMIT_EXCEEDED",
                     "MAX_REVISIONS_EXCEEDED",
                     "VALIDATION_INCONSISTENCY",
-                    "PROVIDER_QUOTA_EXCEEDED"
+                    "PROVIDER_QUOTA_EXCEEDED",
+                    "VOICE_NOT_CONFIGURED"
                   ]
                 },
                 "debateRoundId": {
@@ -1516,7 +1517,8 @@
                   "USAGE_LIMIT_EXCEEDED",
                   "MAX_REVISIONS_EXCEEDED",
                   "VALIDATION_INCONSISTENCY",
-                  "PROVIDER_QUOTA_EXCEEDED"
+                  "PROVIDER_QUOTA_EXCEEDED",
+                  "VOICE_NOT_CONFIGURED"
                 ]
               },
               "checkpoint": {
@@ -1548,7 +1550,8 @@
                       "USAGE_LIMIT_EXCEEDED",
                       "MAX_REVISIONS_EXCEEDED",
                       "VALIDATION_INCONSISTENCY",
-                      "PROVIDER_QUOTA_EXCEEDED"
+                      "PROVIDER_QUOTA_EXCEEDED",
+                      "VOICE_NOT_CONFIGURED"
                     ]
                   },
                   "debateRoundId": {

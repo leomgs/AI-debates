@@ -89,6 +89,21 @@ export const EnvSchema = z
     SESSION_SECRET: z.string().min(32, "debe tener al menos 32 caracteres (ver setup.md para generarlo)"),
   })
   .superRefine((env, ctx) => {
+    // Spec 004, D16 (ADR 0002 punto 5): TtsModule enlaza siempre Echogarden,
+    // así que con otro TTS_PROVIDER la voz se buscaría en AgentVoice para un
+    // proveedor que no es el que sintetiza (Echogarden recibiría "es" de
+    // GOOGLE_TTS y elegiría una voz por prefijo sin avisar) y AudioAsset.
+    // provider quedaría mal etiquetado. El enum conserva los tres valores
+    // porque son los de AudioProvider en la base; lo que se rechaza es
+    // arrancar con uno sin motor. Se levanta cuando exista un segundo
+    // AudioProvider real (tasks.md §5).
+    if (env.TTS_PROVIDER !== "LOCAL") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TTS_PROVIDER"],
+        message: `"${env.TTS_PROVIDER}" no está soportado: el único motor de TTS implementado es el local (Echogarden), así que solo se admite LOCAL. Con otro valor las voces se buscarían para un proveedor que no es el que sintetiza (spec 004, D16)`,
+      });
+    }
     if (env.NODE_ENV === "production" && env.AUDIO_SIGNING_SECRET === DEFAULT_AUDIO_SIGNING_SECRET) {
       ctx.addIssue({
         code: "custom",

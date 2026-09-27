@@ -64,6 +64,7 @@ async function seedReviewedEpisode(
   overrides: {
     status?: 'PENDING_REVIEW' | 'APPROVED' | 'READY_FOR_RENDER';
     maxLlmCalls?: number;
+    language?: 'ES' | 'EN' | 'PT';
   } = {},
 ) {
   const suffix = randomUUID().slice(0, 8);
@@ -98,6 +99,7 @@ async function seedReviewedEpisode(
       title: 'Un trend',
       status: overrides.status ?? 'PENDING_REVIEW',
       maxLlmCalls: overrides.maxLlmCalls ?? 25,
+      language: overrides.language ?? 'ES',
     },
   });
   await prisma.episodeUsage.create({
@@ -420,6 +422,37 @@ describe('Acciones de curaduría (e2e): API-10b, API-14 y API-19', () => {
         'Argumento original.',
         'x',
       );
+      expect(await prisma.audioAsset.count()).toBe(audioAssetsBefore);
+      expect(
+        await prisma.argument.findUniqueOrThrow({ where: { id: argument.id } }),
+      ).toMatchObject({ audioAssetId: null });
+      const usage = await prisma.episodeUsage.findUniqueOrThrow({
+        where: { episodeId: episode.id },
+      });
+      expect(usage.ttsRequests).toBe(0);
+    });
+  });
+
+  // Spec 004, D15 (AC 4.15): los agentes del seed de este archivo solo
+  // tienen voz ES, así que un episodio EN no tiene voz para regenerar.
+  describe('spec 004: regenerate-audio sin voz para el idioma del episodio', () => {
+    it('→ 409 VOICE_NOT_CONFIGURED con idioma, proveedor y agente, sin llamar al motor y con el segmento como estaba', async () => {
+      const { episode, argument } = await seedReviewedEpisode(prisma, {
+        status: 'READY_FOR_RENDER',
+        language: 'EN',
+      });
+      audioProviderMock.synthesize.mockClear();
+      const audioAssetsBefore = await prisma.audioAsset.count();
+
+      const res = await action(episode.id, 'regenerate-audio', {
+        sequenceIndex: 1,
+      }).expect(409);
+
+      expect(res.body.error.code).toBe('VOICE_NOT_CONFIGURED');
+      expect(res.body.error.message).toMatch(/idioma EN/);
+      expect(res.body.error.message).toMatch(/"LOCAL"/);
+      expect(res.body.error.message).toMatch(/\(ANALYST\)/);
+      expect(audioProviderMock.synthesize).not.toHaveBeenCalled();
       expect(await prisma.audioAsset.count()).toBe(audioAssetsBefore);
       expect(
         await prisma.argument.findUniqueOrThrow({ where: { id: argument.id } }),

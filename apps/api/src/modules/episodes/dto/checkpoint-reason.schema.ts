@@ -8,4 +8,5 @@ export const CheckpointReasonSchema = z.enum([
   "MAX_REVISIONS_EXCEEDED",
   "VALIDATION_INCONSISTENCY",
   "PROVIDER_QUOTA_EXCEEDED",
+  "VOICE_NOT_CONFIGURED",
 ]);

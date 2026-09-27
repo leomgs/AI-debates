@@ -8,7 +8,7 @@ import { AgentsService } from "../agents/agents.service";
 import { FactCheckService } from "../fact-check/fact-check.service";
 import { DailyQuotaExceededError } from "../ai/ai.errors";
 import { TtsService } from "../tts/tts.service";
-import { TtsProviderUnavailableError } from "../tts/tts.errors";
+import { TtsProviderUnavailableError, VoiceNotConfiguredError } from "../tts/tts.errors";
 import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EpisodeStateService } from "./episode-state.service";
 import { EpisodeBudgetService } from "./episode-budget.service";
@@ -470,7 +470,7 @@ describe("EpisodeOrchestratorService", () => {
   describe("runAudioPhase / runAudioPipeline (etapa 2 de TTS)", () => {
     it("idempotente: sintetiza solo los Argument sin audioAssetId, marca GENERATING_AUDIO al entrar y READY_FOR_RENDER al terminar", async () => {
       prisma.episode.findUniqueOrThrow
-        .mockResolvedValueOnce({ status: "APPROVED" })
+        .mockResolvedValueOnce({ status: "APPROVED", language: "ES" })
         .mockResolvedValueOnce({ status: "GENERATING_AUDIO" });
       ttsService.getOrderedOfficialArguments.mockResolvedValue([
         { id: "arg-1", audioAssetId: "existing-asset" },
@@ -480,9 +480,13 @@ describe("EpisodeOrchestratorService", () => {
 
       await service.runAudioPhase(EPISODE_ID);
 
+      expect(prisma.episode.findUniqueOrThrow).toHaveBeenNthCalledWith(1, {
+        where: { id: EPISODE_ID },
+        select: { status: true, language: true },
+      });
       expect(stateService.markGeneratingAudio).toHaveBeenCalledWith(EPISODE_ID);
       expect(ttsService.synthesizeSegment).toHaveBeenCalledTimes(1);
-      expect(ttsService.synthesizeSegment).toHaveBeenCalledWith(EPISODE_ID, { id: "arg-2", audioAssetId: null });
+      expect(ttsService.synthesizeSegment).toHaveBeenCalledWith(EPISODE_ID, { id: "arg-2", audioAssetId: null }, "ES");
       expect(budgetService.withTtsCall).toHaveBeenCalledTimes(1);
       expect(stateService.markReadyForRender).toHaveBeenCalledWith(EPISODE_ID);
     });
@@ -508,6 +512,37 @@ describe("EpisodeOrchestratorService", () => {
 
       expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "PROVIDER_QUOTA_EXCEEDED");
       expect(eventsService.complete).toHaveBeenCalledWith(EPISODE_ID);
+    });
+
+    // Spec 004, AC 4.14: el idioma que recibe TtsService es Episode.language.
+    it("pasa a TtsService el idioma del episodio (EN)", async () => {
+      prisma.episode.findUniqueOrThrow
+        .mockResolvedValueOnce({ status: "APPROVED", language: "EN" })
+        .mockResolvedValueOnce({ status: "GENERATING_AUDIO" });
+      ttsService.getOrderedOfficialArguments.mockResolvedValue([{ id: "arg-1", audioAssetId: null }]);
+      ttsService.synthesizeSegment.mockResolvedValue({ id: "asset-1" });
+
+      await service.runAudioPhase(EPISODE_ID);
+
+      expect(ttsService.synthesizeSegment).toHaveBeenCalledWith(EPISODE_ID, { id: "arg-1", audioAssetId: null }, "EN");
+    });
+
+    // Spec 004, D15 (AC 4.15): VOICE_NOT_CONFIGURED, nunca
+    // PROVIDER_QUOTA_EXCEEDED, y el pipeline no sigue con otros segmentos.
+    it("VoiceNotConfiguredError -> requireHumanReview(VOICE_NOT_CONFIGURED), sin sintetizar los segmentos siguientes", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValueOnce({ status: "APPROVED", language: "PT" });
+      ttsService.getOrderedOfficialArguments.mockResolvedValue([
+        { id: "arg-1", audioAssetId: null },
+        { id: "arg-2", audioAssetId: null },
+      ]);
+      ttsService.synthesizeSegment.mockRejectedValue(new VoiceNotConfiguredError("PT", "LOCAL", ["Analista (ANALYST)"]));
+
+      await service.runAudioPipeline(EPISODE_ID);
+
+      expect(ttsService.synthesizeSegment).toHaveBeenCalledTimes(1);
+      expect(stateService.requireHumanReview).toHaveBeenCalledTimes(1);
+      expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "VOICE_NOT_CONFIGURED");
+      expect(stateService.markReadyForRender).not.toHaveBeenCalled();
     });
   });
 

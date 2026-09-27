@@ -42,6 +42,11 @@ enum CheckpointReason {
   // de USAGE_LIMIT_EXCEEDED, que es el presupuesto propio del episodio
   // (EpisodeUsage vs maxLlmCalls), no la cuota externa del provider.
   PROVIDER_QUOTA_EXCEEDED
+  // Spec 004, D15 (ADR 0002 punto 4): falta la voz de un agente para el
+  // idioma del episodio y el proveedor activo en la fase de audio. Se
+  // reanuda con body vacío después de cargar la voz. En SQLite el enum es
+  // TEXT: agregar el valor no lleva SQL.
+  VOICE_NOT_CONFIGURED
 }
 
 // Spec 004 (D3, ADR 0002 punto 1): idioma del debate, compartido por

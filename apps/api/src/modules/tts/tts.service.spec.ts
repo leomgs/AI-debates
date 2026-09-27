@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { TtsService } from './tts.service';
 import { AUDIO_PROVIDER, AUDIO_STORAGE } from './tts.tokens';
-import { SequenceIndexOutOfRangeError } from './tts.errors';
+import { SequenceIndexOutOfRangeError, VoiceNotConfiguredError } from './tts.errors';
 
 const EPISODE_ID = '11111111-1111-4111-8111-111111111111';
 const DEBATE_ID = '22222222-2222-4222-8222-222222222222';
@@ -14,11 +14,17 @@ function argumentWithAgent(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: ARGUMENT_ID,
     content: 'contenido del argumento',
+    // Ids de voz visiblemente ficticios (spec 004, D14). Voces ES y EN para
+    // LOCAL, y ES para GOOGLE_TTS: alcanza para ver que se elige por idioma
+    // y proveedor a la vez.
     agent: {
       id: 'agent-1',
+      name: 'Analista',
+      role: 'ANALYST',
       voices: [
-        { provider: 'LOCAL', voiceId: 'test-es-analyst' },
-        { provider: 'GOOGLE_TTS', voiceId: 'es' },
+        { language: 'ES', provider: 'LOCAL', voiceId: 'test-es-analyst' },
+        { language: 'EN', provider: 'LOCAL', voiceId: 'test-en-analyst' },
+        { language: 'ES', provider: 'GOOGLE_TTS', voiceId: 'es' },
       ],
     },
     ...overrides,
@@ -31,6 +37,7 @@ describe('TtsService', () => {
     episode: { findUniqueOrThrow: jest.Mock };
     argument: { findMany: jest.Mock; update: jest.Mock; findFirstOrThrow: jest.Mock };
     audioAsset: { create: jest.Mock; findUnique: jest.Mock; delete: jest.Mock };
+    agent: { findMany: jest.Mock };
   };
   let config: { get: jest.Mock };
   let provider: { synthesize: jest.Mock };
@@ -41,6 +48,7 @@ describe('TtsService', () => {
       episode: { findUniqueOrThrow: jest.fn() },
       argument: { findMany: jest.fn(), update: jest.fn(), findFirstOrThrow: jest.fn() },
       audioAsset: { create: jest.fn(), findUnique: jest.fn(), delete: jest.fn() },
+      agent: { findMany: jest.fn() },
     };
     config = { get: jest.fn().mockReturnValue('LOCAL') };
     provider = { synthesize: jest.fn() };
@@ -72,7 +80,7 @@ describe('TtsService', () => {
       });
       expect(prisma.argument.findMany).toHaveBeenCalledWith({
         where: { debateRound: { debateId: DEBATE_ID }, status: 'OFFICIAL' },
-        include: { agent: { include: { voices: { where: { language: 'ES' } } } }, audioAsset: true },
+        include: { agent: { include: { voices: true } }, audioAsset: true },
         orderBy: { createdAt: 'asc' },
       });
       expect(result).toHaveLength(1);
@@ -89,10 +97,10 @@ describe('TtsService', () => {
       });
       prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
 
-      const result = await service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never);
+      const result = await service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never, 'ES');
 
       // TTS_PROVIDER=LOCAL (mock de ConfigService) -> usa la fila AgentVoice
-      // LOCAL, no la de GOOGLE_TTS (ADR 0002).
+      // ES/LOCAL, no la de GOOGLE_TTS ni la EN (ADR 0002).
       expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'test-es-analyst');
 
       expect(storage.save).toHaveBeenCalledTimes(1);
@@ -123,7 +131,30 @@ describe('TtsService', () => {
       const boom = new Error('boom');
       provider.synthesize.mockRejectedValue(boom);
 
-      await expect(service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never)).rejects.toThrow('boom');
+      await expect(service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never, 'ES')).rejects.toThrow('boom');
+      expect(prisma.audioAsset.create).not.toHaveBeenCalled();
+      expect(prisma.argument.update).not.toHaveBeenCalled();
+    });
+
+    // Spec 004, AC 4.14: la voz que recibe el AudioProvider es la del idioma
+    // del episodio, y es la que queda en AudioAsset.voiceId (D17).
+    it('con un episodio EN, el AudioProvider recibe la voz EN/LOCAL y el AudioAsset la guarda', async () => {
+      provider.synthesize.mockResolvedValue({ audioBuffer: Buffer.from('x'), durationMs: 1, mimeType: 'audio/wav' });
+      prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
+
+      await service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never, 'EN');
+
+      expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'test-en-analyst');
+      expect(prisma.audioAsset.create.mock.calls[0][0].data.voiceId).toBe('test-en-analyst');
+    });
+
+    // AC 4.15 / D14: sin fila para el idioma no hay respaldo con la voz ES.
+    it('sin voz para el idioma del episodio tira VoiceNotConfiguredError sin sintetizar ni escribir nada', async () => {
+      await expect(service.synthesizeSegment(EPISODE_ID, argumentWithAgent() as never, 'PT')).rejects.toThrow(
+        VoiceNotConfiguredError
+      );
+      expect(provider.synthesize).not.toHaveBeenCalled();
+      expect(storage.save).not.toHaveBeenCalled();
       expect(prisma.audioAsset.create).not.toHaveBeenCalled();
       expect(prisma.argument.update).not.toHaveBeenCalled();
     });
@@ -142,8 +173,9 @@ describe('TtsService', () => {
       prisma.audioAsset.findUnique.mockResolvedValue({ id: 'old-audio-asset', storageKey: 'ep/old-audio-asset.wav' });
       prisma.audioAsset.delete.mockResolvedValue(undefined);
 
-      const result = await service.regenerateSegmentByIndex(EPISODE_ID, 1);
+      const result = await service.regenerateSegmentByIndex(EPISODE_ID, 1, 'ES');
 
+      expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'test-es-analyst');
       expect(storage.save).toHaveBeenCalledTimes(1);
       const [newStorageKey] = storage.save.mock.calls[0];
       expect(prisma.audioAsset.create).toHaveBeenCalledTimes(1);
@@ -167,7 +199,7 @@ describe('TtsService', () => {
       prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
       prisma.argument.findMany.mockResolvedValue([argumentWithAgent()]);
 
-      await expect(service.regenerateSegmentByIndex(EPISODE_ID, 5)).rejects.toThrow(SequenceIndexOutOfRangeError);
+      await expect(service.regenerateSegmentByIndex(EPISODE_ID, 5, 'ES')).rejects.toThrow(SequenceIndexOutOfRangeError);
       expect(provider.synthesize).not.toHaveBeenCalled();
     });
 
@@ -177,33 +209,106 @@ describe('TtsService', () => {
       provider.synthesize.mockResolvedValue({ audioBuffer: Buffer.from('x'), durationMs: 1, mimeType: 'audio/wav' });
       prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
 
-      await service.regenerateSegmentByIndex(EPISODE_ID, 1);
+      await service.regenerateSegmentByIndex(EPISODE_ID, 1, 'ES');
 
       expect(prisma.audioAsset.findUnique).not.toHaveBeenCalled();
       expect(storage.delete).not.toHaveBeenCalled();
       expect(prisma.audioAsset.delete).not.toHaveBeenCalled();
     });
+
+    // Spec 004, AC 4.14.
+    it('usa la voz del idioma que recibe (EN)', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      prisma.argument.findMany.mockResolvedValue([argumentWithAgent({ audioAssetId: null })]);
+      provider.synthesize.mockResolvedValue({ audioBuffer: Buffer.from('x'), durationMs: 1, mimeType: 'audio/wav' });
+      prisma.audioAsset.create.mockImplementation(({ data }) => Promise.resolve(data));
+
+      await service.regenerateSegmentByIndex(EPISODE_ID, 1, 'EN');
+
+      expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'test-en-analyst');
+    });
+
+    // Spec 004, AC 4.15: el segmento queda como estaba.
+    it('sin voz para el idioma tira VoiceNotConfiguredError y no toca el segmento ni su audio previo', async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue({ debateId: DEBATE_ID });
+      prisma.argument.findMany.mockResolvedValue([argumentWithAgent({ audioAssetId: 'old-audio-asset' })]);
+
+      await expect(service.regenerateSegmentByIndex(EPISODE_ID, 1, 'PT')).rejects.toThrow(VoiceNotConfiguredError);
+
+      expect(provider.synthesize).not.toHaveBeenCalled();
+      expect(storage.save).not.toHaveBeenCalled();
+      expect(prisma.audioAsset.create).not.toHaveBeenCalled();
+      expect(prisma.argument.update).not.toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
+      expect(prisma.audioAsset.delete).not.toHaveBeenCalled();
+    });
   });
 
-  describe('resolveVoiceId (Feature 7)', () => {
-    it('elige la fila de AgentVoice del provider activo (TTS_PROVIDER)', () => {
-      const voiceId = service.resolveVoiceId([
-        { provider: 'GOOGLE_TTS', voiceId: 'es' },
-        { provider: 'LOCAL', voiceId: 'test-es-analyst' },
+  describe('resolveVoiceId (spec 004, ADR 0002 punto 4)', () => {
+    const agent = argumentWithAgent().agent as never;
+
+    it('elige la fila de AgentVoice del idioma pedido y del provider activo (TTS_PROVIDER)', () => {
+      expect(service.resolveVoiceId(agent, 'ES')).toBe('test-es-analyst');
+      expect(service.resolveVoiceId(agent, 'EN')).toBe('test-en-analyst');
+    });
+
+    it('sin fila para el idioma y el provider activo tira VoiceNotConfiguredError con idioma, proveedor y agente (D14, D15)', () => {
+      let error: unknown;
+      try {
+        service.resolveVoiceId(agent, 'PT');
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(VoiceNotConfiguredError);
+      const voiceError = error as VoiceNotConfiguredError;
+      expect(voiceError.language).toBe('PT');
+      expect(voiceError.provider).toBe('LOCAL');
+      expect(voiceError.agents).toEqual(['Analista (ANALYST)']);
+      expect(voiceError.message).toMatch(/idioma PT/);
+      expect(voiceError.message).toMatch(/"LOCAL"/);
+      expect(voiceError.message).toMatch(/Analista \(ANALYST\)/);
+    });
+
+    it('una voz de otro proveedor para el mismo idioma no cuenta (sin respaldo)', () => {
+      const soloGoogle = { name: 'Juez', role: 'JUDGE', voices: [{ language: 'ES', provider: 'GOOGLE_TTS', voiceId: 'es' }] };
+      expect(() => service.resolveVoiceId(soloGoogle as never, 'ES')).toThrow(VoiceNotConfiguredError);
+    });
+  });
+
+  describe('assertVoicesConfigured (spec 004, D15)', () => {
+    it('consulta AgentVoice por idioma y provider activo, y no tira si todos tienen voz', async () => {
+      prisma.agent.findMany.mockResolvedValue([
+        { id: 'a1', name: 'Analista', role: 'ANALYST', voices: [{ voiceId: 'test-en-analyst' }] },
+        { id: 'a2', name: 'Juez', role: 'JUDGE', voices: [{ voiceId: 'test-en-judge' }] },
       ]);
-      expect(voiceId).toBe('test-es-analyst');
+
+      await expect(service.assertVoicesConfigured(['a1', 'a2'], 'EN')).resolves.toBeUndefined();
+
+      expect(prisma.agent.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['a1', 'a2'] } },
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          voices: { where: { language: 'EN', provider: 'LOCAL' }, select: { voiceId: true } },
+        },
+      });
     });
 
-    it('sin fila para el provider activo tira error en vez de devolver undefined (spec 004, D14)', () => {
-      expect(() => service.resolveVoiceId([{ provider: 'GOOGLE_TTS', voiceId: 'es' }])).toThrow(/LOCAL/);
-    });
+    it('nombra en un solo error a los agentes sin voz y a los roles sin fila Agent, en el orden recibido', async () => {
+      prisma.agent.findMany.mockResolvedValue([
+        { id: 'a1', name: 'Analista', role: 'ANALYST', voices: [{ voiceId: 'test-pt-analyst' }] },
+        { id: 'a2', name: 'Escéptico', role: 'SKEPTIC', voices: [] },
+      ]);
 
-    it('sin voz no sintetiza nada', async () => {
-      await expect(
-        service.synthesizeSegment(EPISODE_ID, argumentWithAgent({ agent: { id: 'agent-1', voices: [] } }) as never)
-      ).rejects.toThrow(/AgentVoice/);
-      expect(provider.synthesize).not.toHaveBeenCalled();
-      expect(prisma.audioAsset.create).not.toHaveBeenCalled();
+      const promise = service.assertVoicesConfigured(['a1', 'a2'], 'PT', ['JUDGE']);
+
+      await expect(promise).rejects.toThrow(VoiceNotConfiguredError);
+      await expect(promise).rejects.toMatchObject({
+        language: 'PT',
+        provider: 'LOCAL',
+        agents: ['Escéptico (SKEPTIC)', 'rol JUDGE (sin fila Agent)'],
+      });
     });
   });
 

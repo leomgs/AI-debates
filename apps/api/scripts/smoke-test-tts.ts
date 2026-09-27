@@ -24,7 +24,8 @@ import type { Env } from '../src/shared/config/env.schema';
 // en esta misma corrida — se llama runAudioPipeline() directo después.
 //
 // Correr con: npx ts-node scripts/smoke-test-tts.ts
-// Para probar otro proveedor: TTS_PROVIDER=GOOGLE_TTS npx ts-node scripts/smoke-test-tts.ts
+// Solo con TTS_PROVIDER=LOCAL: mientras Echogarden sea el único motor, el
+// proceso no arranca con otro valor (spec 004, D16).
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule);
 

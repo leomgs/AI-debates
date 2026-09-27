@@ -14,7 +14,7 @@ function mockRandomSequence(values: number[]) {
 
 describe("EpisodeParticipantsService", () => {
   let service: EpisodeParticipantsService;
-  let prisma: { agent: { findFirstOrThrow: jest.Mock }; episodeParticipant: { createMany: jest.Mock } };
+  let prisma: { agent: { findFirstOrThrow: jest.Mock; findFirst: jest.Mock }; episodeParticipant: { createMany: jest.Mock } };
   let config: { get: jest.Mock };
 
   beforeEach(async () => {
@@ -23,6 +23,7 @@ describe("EpisodeParticipantsService", () => {
         findFirstOrThrow: jest.fn().mockImplementation(({ where }: { where: { role: string } }) =>
           Promise.resolve({ id: `agent-${where.role}`, role: where.role })
         ),
+        findFirst: jest.fn(),
       },
       episodeParticipant: { createMany: jest.fn() },
     };
@@ -93,5 +94,24 @@ describe("EpisodeParticipantsService", () => {
     const data = prisma.episodeParticipant.createMany.mock.calls[0][0].data;
     expect(data.every((p: { modelProvider: string }) => p.modelProvider === "GOOGLE")).toBe(true);
     expect(prisma.agent.findFirstOrThrow).toHaveBeenCalledWith({ where: { role: "JUDGE" } });
+  });
+
+  // Spec 004, D15: los 5 candidatos que valida createEpisode, resueltos por
+  // role igual que selectParticipants; un rol sin fila Agent queda con null.
+  it("findCandidateAgents devuelve los 4 roles de DEBATER_PERSONAS más JUDGE, con agentId null si falta la fila", async () => {
+    prisma.agent.findFirst.mockImplementation(({ where }: { where: { role: string } }) =>
+      Promise.resolve(where.role === "DIPLOMAT" ? null : { id: `agent-${where.role}` })
+    );
+
+    const candidates = await service.findCandidateAgents();
+
+    expect(candidates).toEqual([
+      { role: "ANALYST", agentId: "agent-ANALYST" },
+      { role: "CONTRARIAN", agentId: "agent-CONTRARIAN" },
+      { role: "DIPLOMAT", agentId: null },
+      { role: "PROVOCATEUR", agentId: "agent-PROVOCATEUR" },
+      { role: "JUDGE", agentId: "agent-JUDGE" },
+    ]);
+    expect(prisma.agent.findFirst).toHaveBeenCalledWith({ where: { role: "JUDGE" }, select: { id: true } });
   });
 });

@@ -3,7 +3,7 @@ import { UnauthorizedException } from "@nestjs/common";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
 import { BudgetExceededError } from "../../modules/episodes/episodes.errors";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
-import { TtsProviderUnavailableError } from "../../modules/tts/tts.errors";
+import { TtsProviderUnavailableError, VoiceNotConfiguredError } from "../../modules/tts/tts.errors";
 import { BrokenCircuitError } from "cockatiel";
 import { HttpErrorFilter } from "./http-error.filter";
 
@@ -79,5 +79,17 @@ describe("HttpErrorFilter — errores de proveedor y presupuesto (API-10b)", () 
     const res = run(new Error("el juez devolvió algo inválido"));
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({ error: { code: "INTERNAL_ERROR", message: "el juez devolvió algo inválido" } });
+  });
+});
+
+describe("HttpErrorFilter — voces (spec 004, D15)", () => {
+  it("VoiceNotConfiguredError: 409 VOICE_NOT_CONFIGURED con idioma, proveedor y agentes en el mensaje", () => {
+    const error = new VoiceNotConfiguredError("EN", "LOCAL", ["Analista (ANALYST)", "rol JUDGE (sin fila Agent)"]);
+    const res = run(error);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({ error: { code: "VOICE_NOT_CONFIGURED", message: error.message } });
+    expect(error.message).toMatch(/idioma EN/);
+    expect(error.message).toMatch(/"LOCAL"/);
+    expect(error.message).toMatch(/Analista \(ANALYST\), rol JUDGE \(sin fila Agent\)/);
   });
 });

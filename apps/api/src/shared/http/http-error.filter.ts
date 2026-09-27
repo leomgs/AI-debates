@@ -5,7 +5,7 @@ import { ZodError } from "zod";
 import { ZodValidationException } from "nestjs-zod";
 import { BrokenCircuitError } from "cockatiel";
 import { BudgetExceededError, InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
-import { SequenceIndexOutOfRangeError, TtsProviderUnavailableError } from "../../modules/tts/tts.errors";
+import { SequenceIndexOutOfRangeError, TtsProviderUnavailableError, VoiceNotConfiguredError } from "../../modules/tts/tts.errors";
 import { DailyQuotaExceededError, RateLimitWaitExceededError } from "../../modules/ai/ai.errors";
 import { ManifestNotReadyError } from "../../modules/render/render.errors";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
@@ -59,6 +59,16 @@ export class HttpErrorFilter implements ExceptionFilter {
     // datos, no un payload inválido (mismo status class que INVALID_STATE_TRANSITION).
     if (exception instanceof ManifestNotReadyError) {
       return { status: 409, code: "MANIFEST_NOT_READY", message: exception.message };
+    }
+
+    // Spec 004, D15 (ADR 0002 punto 4): falta la voz de algún agente para el
+    // idioma y el proveedor activo. En createEpisode (antes de crear filas),
+    // en regenerate-audio (el segmento queda como estaba, AC 4.15) y en el
+    // manifest (un agente sin AudioAsset.voiceId y sin fila en AgentVoice).
+    // Es un conflicto con los datos cargados, no un bug: 409. El mensaje ya
+    // nombra el idioma, el proveedor y los agentes sin voz.
+    if (exception instanceof VoiceNotConfiguredError) {
+      return { status: 409, code: "VOICE_NOT_CONFIGURED", message: exception.message };
     }
 
     // API-10b (spec 003, AC 3.50/3.62/3.85): las acciones sincrónicas que

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
-import { EpisodeStatus } from "@prisma/client";
+import { DebateLanguage, EpisodeStatus } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { DebateService } from "../debate/debate.service";
@@ -10,6 +10,7 @@ import { RenderService } from "../render/render.service";
 import type { RemotionManifest } from "@ai-trend-debates/contracts";
 import { EpisodeOrchestratorService } from "./episode-orchestrator.service";
 import { EpisodeEventsService } from "./episode-events.service";
+import { EpisodeParticipantsService } from "./episode-participants.service";
 import { EPISODE_DETAIL_INCLUDE, mapEpisodeDetail, EpisodeDetailResponse } from "./episode-detail.mapper";
 import type { SerializedEpisode, SerializedEpisodeListItem } from "./dto/episode.schema";
 
@@ -26,7 +27,8 @@ export class EpisodesService {
     private readonly orchestrator: EpisodeOrchestratorService,
     private readonly tts: TtsService,
     private readonly render: RenderService,
-    private readonly events: EpisodeEventsService
+    private readonly events: EpisodeEventsService,
+    private readonly participants: EpisodeParticipantsService
   ) {}
 
   // Orden: Topic (le pertenece a ResearchModule) -> Debate (requiere
@@ -40,10 +42,25 @@ export class EpisodesService {
   // decisión D-11 del plan): POST /episodes responde apenas el Episode existe
   // en CREATED, el pipeline corre en background. Si el proceso cae a mitad de
   // camino, EpisodeRecoveryService (Fase E) lo retoma al reiniciar.
-  async createEpisode(topic: string): Promise<SerializedEpisode> {
+  //
+  // Spec 004, D15 (AC 4.4, 4.29): antes del primer insert se validan las
+  // voces de los 5 agentes candidatos para el idioma pedido y el proveedor
+  // activo. Si falta alguna, VoiceNotConfiguredError (409
+  // VOICE_NOT_CONFIGURED) sin haber creado ninguna fila. El orden completo
+  // es: validación de Zod del body (400, en el borde HTTP) -> voces (409) ->
+  // inserts. `language` llega por parámetro con default ES: el DTO HTTP que
+  // lo acepta es del paso 13.7, hasta entonces el controller no lo manda.
+  async createEpisode(topic: string, language: DebateLanguage = "ES"): Promise<SerializedEpisode> {
+    const candidates = await this.participants.findCandidateAgents();
+    await this.tts.assertVoicesConfigured(
+      candidates.flatMap((c) => (c.agentId ? [c.agentId] : [])),
+      language,
+      candidates.filter((c) => !c.agentId).map((c) => c.role)
+    );
+
     const topicRow = await this.research.createTopic(topic, topic);
     const debate = await this.debateService.createDebate(topicRow.id);
-    const episode = await this.prisma.episode.create({ data: { debateId: debate.id, title: topic } });
+    const episode = await this.prisma.episode.create({ data: { debateId: debate.id, title: topic, language } });
     await this.prisma.episodeUsage.create({ data: { episodeId: episode.id } });
 
     void this.orchestrator
@@ -114,10 +131,20 @@ export class EpisodesService {
   // (puro) para armar el contrato. Las URLs firmadas se resuelven acá
   // después, reusando TtsService.getSignedAudioUrl (AC 6.1) — RenderService
   // no conoce TtsService.
+  //
+  // Voz de cada agente (spec 004, D17, AC 4.16): la que quedó en
+  // AudioAsset.voiceId de sus segmentos, así el manifest de un episodio ya
+  // sintetizado no cambia si después se modifica el seed. Si un agente
+  // tiene segmentos con voces distintas (un regenerate-audio posterior a un
+  // cambio de voz, spec 004 pregunta B), se informa la de su primer
+  // segmento en el orden del timeline. Solo para los agentes sin ningún
+  // AudioAsset.voiceId (assets anteriores a la migración, o el juez, que no
+  // tiene segmentos) se resuelve por el idioma del episodio; si ahí falta la
+  // fila, VoiceNotConfiguredError (409), nunca un 500.
   async getManifest(episodeId: string): Promise<RemotionManifest> {
     const episode = await this.prisma.episode.findUniqueOrThrow({
       where: { id: episodeId },
-      select: { title: true, debate: { select: { verdict: true } } },
+      select: { title: true, language: true, debate: { select: { verdict: true } } },
     });
     const participants = await this.prisma.episodeParticipant.findMany({
       where: { episodeId },
@@ -132,7 +159,9 @@ export class EpisodesService {
         agentId: p.agent.id,
         name: p.agent.name,
         avatarUrl: p.agent.avatarUrl,
-        voiceId: this.tts.resolveVoiceId(p.agent.voices),
+        voiceId:
+          officialArguments.find((a) => a.agentId === p.agent.id && a.audioAsset?.voiceId)?.audioAsset?.voiceId ??
+          this.tts.resolveVoiceId(p.agent, episode.language),
       })),
       officialArguments: officialArguments.map((a) => ({
         agentId: a.agentId,
