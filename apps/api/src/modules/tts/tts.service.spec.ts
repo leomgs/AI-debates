@@ -17,7 +17,7 @@ function argumentWithAgent(overrides: Partial<Record<string, unknown>> = {}) {
     agent: {
       id: 'agent-1',
       voices: [
-        { provider: 'LOCAL', voiceId: 'es_ES-davefx-medium' },
+        { provider: 'LOCAL', voiceId: 'test-es-analyst' },
         { provider: 'GOOGLE_TTS', voiceId: 'es' },
       ],
     },
@@ -93,7 +93,7 @@ describe('TtsService', () => {
 
       // TTS_PROVIDER=LOCAL (mock de ConfigService) -> usa la fila AgentVoice
       // LOCAL, no la de GOOGLE_TTS (ADR 0002).
-      expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'es_ES-davefx-medium');
+      expect(provider.synthesize).toHaveBeenCalledWith('contenido del argumento', 'test-es-analyst');
 
       expect(storage.save).toHaveBeenCalledTimes(1);
       const [storageKey, buffer] = storage.save.mock.calls[0];
@@ -108,7 +108,7 @@ describe('TtsService', () => {
       expect(createArgs.durationMs).toBe(1234);
       expect(createArgs.mimeType).toBe('audio/wav');
       // ADR 0002 punto 6: el AudioAsset guarda la voz realmente usada.
-      expect(createArgs.voiceId).toBe('es_ES-davefx-medium');
+      expect(createArgs.voiceId).toBe('test-es-analyst');
       // Feature 7 — subtitles del provider se persisten tal cual en AudioAsset.
       expect(createArgs.subtitles).toEqual([{ text: 'contenido', startMs: 0, endMs: 500 }]);
 
@@ -189,9 +189,9 @@ describe('TtsService', () => {
     it('elige la fila de AgentVoice del provider activo (TTS_PROVIDER)', () => {
       const voiceId = service.resolveVoiceId([
         { provider: 'GOOGLE_TTS', voiceId: 'es' },
-        { provider: 'LOCAL', voiceId: 'es_ES-davefx-medium' },
+        { provider: 'LOCAL', voiceId: 'test-es-analyst' },
       ]);
-      expect(voiceId).toBe('es_ES-davefx-medium');
+      expect(voiceId).toBe('test-es-analyst');
     });
 
     it('sin fila para el provider activo tira error en vez de devolver undefined (spec 004, D14)', () => {

@@ -616,3 +616,20 @@ Tests:
 - Mutaciones temporales: con el orden invertido en `editByHuman`, y con `regenerate` volviendo a `reviseDraft` + `promoteToOfficial`, los tests fallan porque el juez no ve la versión nueva.
 
 Resultado: `pnpm build` verde, 317 unit (33 suites) y 41 e2e (5 suites), `check:boundaries` OK.
+
+## 2026-09-27
+
+### 36. Paso 13.4 de la spec 004: schema y migración del idioma del debate
+
+**Contexto**: primer paso del camino crítico hacia API-17 (13.4 → 13.6 → 13.7) tras D20 (voces `EN`/`PT` fuera del MVP). Flujo: rama `feat/backend-13-4` → `backend-engineer` → verificación propia → `code-reviewer` → correcciones → merge.
+
+**Qué se hizo**: enum `DebateLanguage`, `AgentVoice` (PK `agentId`+`language`+`provider`, cascade), sin `Agent.voiceId`, `Episode.language` default `ES`, `AudioAsset.voiceId`, índices `ArgumentHistory(argumentId, createdAt)` y `DebateRound(debateId)`. Migración manual `20260927120000_add_debate_language_agent_voice` en el orden de la spec (backfill de `AudioAsset.voiceId` vía `Argument.audioAssetId` → `Argument.agentId` antes de reconstruir `Agent`; `Episode.language` con `ADD COLUMN`, como `publishedAt`). Seed con upsert por `(agentId, language, provider)`, solo `ES` (`LOCAL` + `GOOGLE_TTS` = `"es"`). `TtsService` resuelve la voz `ES` desde `AgentVoice` con una constante interina y graba `AudioAsset.voiceId`; se borró `voice-id.types.ts`.
+
+**Decisiones**:
+- `CheckpointReason.VOICE_NOT_CONFIGURED` pasa a 13.6: agregarlo rompe el `switch` exhaustivo de `applyResumeBody` y `CheckpointReasonSchema` (13.6/13.7). En SQLite no cambia el SQL.
+- Si falta la voz, `resolveVoiceId` tira error en vez de devolver `undefined` (con `undefined`, Echogarden elegía otra voz sin avisar, prohibido por D14). Queda sin clasificar hasta 13.6; el review lo dio por aceptable como interino (solo pasa con configuración inválida o agentes fuera del seed). Detalle en `tasks.md` 13.6.
+- No se editó la migración ya aplicada para corregir su comentario (dice que `VOICE_NOT_CONFIGURED` no lleva SQL, pero no se agregó) ni para unificar los filtros de los pasos 2 y 3 (el 3 no descarta valores numéricos o vacíos como el 2): editarla obliga a tocar el checksum en `dev.db`, y con los datos reales no hay diferencia.
+
+**Verificación**: episodios previos en `dev.db`: 4, todos del mismo tema en español (ninguno mal etiquetado). Migración probada primero sobre una copia de `dev.db` y sobre una base nueva (`migrate deploy` + seed ×2): mismas 10 filas `AgentVoice`, hashes de las tablas preexistentes sin cambios, `foreign_key_check` limpio, `migrate diff` sin diferencias. Aplicada a `dev.db` con el mismo resultado (respaldo previo fuera del repo). `code-reviewer` re-probó casos borde (voces `TBD`/vacías/numéricas/keys raras, cascade de `AgentVoice` durante el `DROP TABLE "Agent"`) sobre copias. Build 6/6 con `check:boundaries`, unit 33 suites/319 tests, e2e 5 suites/41 tests.
+
+**Correcciones del review aplicadas**: ids de voz de los mocks unitarios cambiados a ficticios (`test-es-analyst`, D14); `architecture.md` ya no describe `Agent.voiceId` como `Json`.

@@ -342,9 +342,9 @@ describe("EpisodesService", () => {
         debate: { verdict: { winnerId: "agent-1", content: "Ganó Analyst." } },
       });
       prisma.episodeParticipant.findMany.mockResolvedValue([
-        { agent: { id: "agent-1", name: "Analyst", avatarUrl: null, voices: [{ provider: "LOCAL", voiceId: "es_ES-davefx-medium" }] } },
+        { agent: { id: "agent-1", name: "Analyst", avatarUrl: null, voices: [{ provider: "LOCAL", voiceId: "test-es-analyst" }] } },
       ]);
-      tts.resolveVoiceId.mockReturnValue("es_ES-davefx-medium");
+      tts.resolveVoiceId.mockReturnValue("test-es-analyst");
       tts.getOrderedOfficialArguments.mockResolvedValue([
         {
           agentId: "agent-1",
@@ -356,7 +356,7 @@ describe("EpisodesService", () => {
       render.buildManifest.mockReturnValue({
         episodeId: EPISODE_ID,
         meta: { topic: "¿La IA reemplaza programadores?", language: "ES", durationEstimatedSec: 4 },
-        agents: [{ id: "agent-1", name: "Analyst", avatarUrl: null, voiceId: "es_ES-davefx-medium" }],
+        agents: [{ id: "agent-1", name: "Analyst", avatarUrl: null, voiceId: "test-es-analyst" }],
         timeline: [
           { sequenceIndex: 1, agentId: "agent-1", text: "Primer argumento.", audioAssetId: "audio-1", durationMs: 4000, subtitles: [] },
         ],
@@ -366,12 +366,12 @@ describe("EpisodesService", () => {
 
       const manifest = await service.getManifest(EPISODE_ID);
 
-      expect(tts.resolveVoiceId).toHaveBeenCalledWith([{ provider: "LOCAL", voiceId: "es_ES-davefx-medium" }]);
+      expect(tts.resolveVoiceId).toHaveBeenCalledWith([{ provider: "LOCAL", voiceId: "test-es-analyst" }]);
 
       expect(render.buildManifest).toHaveBeenCalledWith({
         episodeId: EPISODE_ID,
         topic: "¿La IA reemplaza programadores?",
-        participants: [{ agentId: "agent-1", name: "Analyst", avatarUrl: null, voiceId: "es_ES-davefx-medium" }],
+        participants: [{ agentId: "agent-1", name: "Analyst", avatarUrl: null, voiceId: "test-es-analyst" }],
         officialArguments: [
           {
             agentId: "agent-1",
