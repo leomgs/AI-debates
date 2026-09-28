@@ -1,4 +1,4 @@
-import { ApiError, isUnauthorizedError } from "@/lib/api/errors";
+import { isNotFoundError, isUnauthorizedError } from "@/lib/api/errors";
 import type { EpisodeDetail } from "@/lib/episode-detail";
 import { episodeStatusUi, type EpisodeStatus } from "@/lib/episode-status";
 import { POLLING_INTERVALS_MS } from "@/lib/polling";
@@ -55,7 +55,7 @@ export function shouldReconnectAfterRefetch(params: {
 }): boolean {
   const { detail, error } = params;
   if (isUnauthorizedError(error)) return false;
-  if (error instanceof ApiError && error.status === 404) return false;
+  if (isNotFoundError(error)) return false;
   return detail !== undefined && detailLiveUpdateMode(detail) === "sse";
 }
 

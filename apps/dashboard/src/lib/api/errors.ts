@@ -73,6 +73,12 @@ export function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401 && error.code === API_ERROR_CODES.UNAUTHORIZED;
 }
 
+// El recurso no existe (404 NOT_FOUND del envelope; AC 3.41). Un 404 sin el
+// envelope (por ejemplo, del rewrite) no cuenta: es un error genérico.
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && error.code === API_ERROR_CODES.NOT_FOUND;
+}
+
 // Texto del "error genérico" de la spec 003: el `error.message` del envelope
 // o, si no hubo respuesta (fetch rechazado por la red), un mensaje propio.
 // Nunca un JSON crudo.

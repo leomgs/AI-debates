@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api/client";
-import { API_ERROR_CODES } from "@/lib/api/error-codes";
-import { ApiError, unwrap } from "@/lib/api/errors";
+import { isNotFoundError, unwrap } from "@/lib/api/errors";
 import type { EpisodeDetail } from "@/lib/episode-detail";
 import { prependFeedEntry, type BusinessEvent, type FeedEntry } from "@/lib/episode-events";
 import { detailLiveUpdateMode, detailRefetchInterval } from "@/lib/live-updates";
@@ -21,12 +20,10 @@ import { UsagePanel } from "./usage-panel";
 import { useEpisodeEventStream } from "./use-episode-event-stream";
 import { VerdictSection } from "./verdict-section";
 
-async function fetchEpisodeDetail(episodeId: string): Promise<EpisodeDetail> {
-  return unwrap(await api.GET("/episodes/{id}", { params: { path: { id: episodeId } } }));
-}
-
-function isNotFound(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404 && error.code === API_ERROR_CODES.NOT_FOUND;
+// Con el `signal` de TanStack Query: cuando un evento SSE invalida el
+// detalle con un refetch en vuelo, se cancela también la petición HTTP.
+async function fetchEpisodeDetail(episodeId: string, signal: AbortSignal): Promise<EpisodeDetail> {
+  return unwrap(await api.GET("/episodes/{id}", { params: { path: { id: episodeId } }, signal }));
 }
 
 /**
@@ -38,7 +35,7 @@ function isNotFound(error: unknown): boolean {
 export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
   const query = useQuery({
     queryKey: queryKeys.episodes.detail(episodeId),
-    queryFn: () => fetchEpisodeDetail(episodeId),
+    queryFn: ({ signal }) => fetchEpisodeDetail(episodeId, signal),
     // AC 3.35: 10 s solo en APPROVED/GENERATING_AUDIO/RENDERING con
     // pipeline activo; se apaga solo al llegar a un estado sin actualización.
     refetchInterval: (current) => detailRefetchInterval(current.state.data),
@@ -61,7 +58,7 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
   // AC 3.73: carga, error y (AC 3.41) no encontrado.
   if (query.isPending) return <EpisodeDetailSkeleton />;
   if (!detail) {
-    if (isNotFound(query.error)) return <EpisodeNotFound />;
+    if (isNotFoundError(query.error)) return <EpisodeNotFound />;
     return (
       <ErrorNotice
         title="No se pudo cargar el episodio"

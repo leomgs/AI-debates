@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, isUnauthorizedError, toApiError, unwrap } from "./errors";
+import { ApiError, isNotFoundError, isUnauthorizedError, toApiError, unwrap } from "./errors";
+
+describe("isNotFoundError (AC 3.41)", () => {
+  it("es verdadero solo para 404 con el código NOT_FOUND del envelope", () => {
+    expect(isNotFoundError(new ApiError({ status: 404, code: "NOT_FOUND", message: "" }))).toBe(true);
+  });
+
+  it("un 404 sin el envelope (código del cliente) u otro error no cuenta", () => {
+    expect(isNotFoundError(new ApiError({ status: 404, code: "UNKNOWN_ERROR", message: "" }))).toBe(false);
+    expect(isNotFoundError(new ApiError({ status: 401, code: "UNAUTHORIZED", message: "" }))).toBe(false);
+    expect(isNotFoundError(new Error("red caída"))).toBe(false);
+  });
+});
 
 function response(status: number, headers: Record<string, string> = {}): Response {
   return new Response(null, { status, headers });
