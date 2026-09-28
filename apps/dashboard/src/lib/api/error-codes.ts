@@ -12,6 +12,7 @@ export const API_ERROR_CODES = {
   LOGIN_BUSY: "LOGIN_BUSY",
   VALIDATION_ERROR: "VALIDATION_ERROR",
   VOICE_NOT_CONFIGURED: "VOICE_NOT_CONFIGURED",
+  NOT_FOUND: "NOT_FOUND",
 } as const satisfies Record<string, components["schemas"]["ErrorCode"]>;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES];

@@ -11,5 +11,7 @@ export const queryKeys = {
     all: ["episodes"] as const,
     /** `statusCsv` es el filtro ya normalizado (serializeStatusFilter), o null. */
     list: (statusCsv: string | null) => ["episodes", "list", statusCsv] as const,
+    /** Detalle de un episodio: lo invalidan los eventos SSE (D7) y lo refresca el polling (D19). */
+    detail: (episodeId: string) => ["episodes", "detail", episodeId] as const,
   },
 } as const;

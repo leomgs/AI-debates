@@ -27,6 +27,21 @@ export function debateLanguageLabel(language: AnyDebateLanguage): string {
   return DEBATE_LANGUAGE_LABELS[language];
 }
 
+/**
+ * Etiqueta BCP 47 del contenido del debate, para el atributo `lang` de los
+ * bloques con argumentos, veredicto y extractos (AC 3.79 b): el documento del
+ * panel es `lang="es"`, pero un debate en inglés se lee y pronuncia en inglés.
+ */
+export const DEBATE_LANGUAGE_TAGS: Readonly<Record<AnyDebateLanguage, string>> = {
+  ES: "es",
+  EN: "en",
+  PT: "pt",
+};
+
+export function debateLanguageTag(language: AnyDebateLanguage): string {
+  return DEBATE_LANGUAGE_TAGS[language];
+}
+
 /** Estrecha el valor de un control del formulario (siempre string) al enum. */
 export function parseDebateLanguage(value: string): DebateLanguage | null {
   return DEBATE_LANGUAGES.find((language) => language === value) ?? null;

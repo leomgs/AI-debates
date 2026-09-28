@@ -9,4 +9,6 @@ import type { paths } from "./schema";
 // Sin timeout propio: las acciones sincrónicas largas (regenerate,
 // regenerate-verdict) no pueden cortarse antes que el rewrite
 // (experimental.proxyTimeout).
-export const api = createClient<paths>({ baseUrl: "/api" });
+export const API_BASE_URL = "/api";
+
+export const api = createClient<paths>({ baseUrl: API_BASE_URL });
