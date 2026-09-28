@@ -7,6 +7,7 @@ import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
 import { FactCheckService } from './fact-check.service';
 import { ANALYST } from '../../shared/personas/agents.personas';
 import { DebateContext } from '../../shared/contracts/agents.contracts';
+import { buildLanguageInstruction, describeLanguage } from '../../shared/personas/language-instruction';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -57,7 +58,7 @@ describe('FactCheckService', () => {
         .mockResolvedValueOnce({ id: 'claim-1', argumentId: ARGUMENT_ID, statement: 'Un 40% adopta IA', type: 'FACTUAL' })
         .mockResolvedValueOnce({ id: 'claim-2', argumentId: ARGUMENT_ID, statement: 'Esto es genial', type: 'OPINION' });
 
-      const claims = await service.extractClaims(ARGUMENT_ID, 'Un 40% adopta IA. Esto es genial.', 'GOOGLE');
+      const claims = await service.extractClaims(ARGUMENT_ID, 'Un 40% adopta IA. Esto es genial.', 'GOOGLE', 'ES');
 
       expect(modelProviderFactory.resolve).toHaveBeenCalledWith('GOOGLE');
       expect(prisma.claim.create).toHaveBeenNthCalledWith(1, {
@@ -78,7 +79,7 @@ describe('FactCheckService', () => {
       prisma.factCheck.create.mockResolvedValue({ id: 'fc-1' });
       const claim = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'un dato falso', type: 'FACTUAL' as const };
 
-      const output = await service.check(claim, buildEvidenceBase(), 'ANTHROPIC');
+      const output = await service.check(claim, buildEvidenceBase(), 'ANTHROPIC', 'ES');
 
       expect(modelProviderFactory.resolve).toHaveBeenCalledWith('ANTHROPIC');
       expect(output.veracity).toBe('FALSE');
@@ -101,7 +102,7 @@ describe('FactCheckService', () => {
       mockGenerateObject.mockResolvedValue({ object: { passed: true } });
       const claim = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'una opinión fuerte', type: 'OPINION' as const };
 
-      const output = await service.editorialReview(claim, ANALYST, 'GOOGLE', 'Un argumento completo con datos y esta opinión fuerte al final.');
+      const output = await service.editorialReview(claim, ANALYST, 'GOOGLE', 'Un argumento completo con datos y esta opinión fuerte al final.', 'ES');
 
       expect(output.passed).toBe(true);
       expect(prisma.claim.create).not.toHaveBeenCalled();
@@ -120,10 +121,64 @@ describe('FactCheckService', () => {
       mockGenerateObject.mockResolvedValue({ object: { passed: false } }); // passed=false sin violatedRule/reason -> falla el .refine()
       const claim = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'algo', type: 'OPINION' as const };
 
-      await expect(service.editorialReview(claim, ANALYST, 'GOOGLE', 'Un argumento completo.')).rejects.toThrow();
+      await expect(service.editorialReview(claim, ANALYST, 'GOOGLE', 'Un argumento completo.', 'ES')).rejects.toThrow();
 
       // maxAttempts: 3 en cockatiel = 1 intento inicial + 3 reintentos = 4 invocaciones.
       expect(mockGenerateObject).toHaveBeenCalledTimes(4);
     }, 10_000);
+  });
+
+  // Spec 004, D7 y AC 4.7 (parte tests): las tres evaluadoras reciben el
+  // idioma del episodio. El system prompt dice en qué idioma está el texto
+  // evaluado y en cuál se escriben los campos libres (statement, analysis,
+  // violatedRule, reason), y el prompt de usuario termina con la instrucción
+  // en el idioma de destino.
+  describe('idioma del episodio (spec 004, AC 4.7)', () => {
+    const LANGUAGES = ['ES', 'EN', 'PT'] as const;
+    const CLAIM = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'a claim', type: 'OPINION' as const };
+
+    function expectLanguage(call: { system: string; prompt: string }, language: (typeof LANGUAGES)[number], freeFields: string[]) {
+      const idiomaRule = call.system.split('\n\n').at(-1)!;
+      expect(idiomaRule).toContain(describeLanguage(language));
+      for (const field of freeFields) expect(idiomaRule).toContain(field);
+      expect(call.prompt.split('\n\n').at(-1)).toBe(buildLanguageInstruction(language));
+      for (const other of LANGUAGES.filter((l) => l !== language)) {
+        expect(call.system).not.toContain(describeLanguage(other));
+        expect(call.prompt).not.toContain(buildLanguageInstruction(other));
+      }
+    }
+
+    it.each(LANGUAGES)('extractClaims en %s: idioma del argumento y de cada statement', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { claims: [] } });
+
+      await service.extractClaims(ARGUMENT_ID, 'An argument.', 'GOOGLE', language);
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expectLanguage(call, language, ['statement']);
+      expect(call.system).toContain(`el argumento está escrito en ${describeLanguage(language)}`);
+    });
+
+    it.each(LANGUAGES)('check en %s: idioma de la afirmación y del analysis', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { veracity: 'TRUE', analysis: 'ok', sourceIds: [SOURCE_A] } });
+      prisma.factCheck.create.mockResolvedValue({ id: 'fc-1' });
+
+      await service.check({ ...CLAIM, type: 'FACTUAL' }, buildEvidenceBase(), 'GOOGLE', language);
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expectLanguage(call, language, ['analysis']);
+      expect(call.system).toContain(`la afirmación a verificar está escrita en ${describeLanguage(language)}`);
+    });
+
+    it.each(LANGUAGES)('editorialReview en %s: idioma del texto, de violatedRule y de reason', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { passed: true } });
+
+      await service.editorialReview(CLAIM, ANALYST, 'GOOGLE', 'The whole argument.', language);
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expectLanguage(call, language, ['violatedRule', 'reason']);
+      expect(call.system).toContain(`están escritos en ${describeLanguage(language)}`);
+      // Las reglas editoriales siguen en español (D11) y se aplican al contenido.
+      expect(call.system).toContain(ANALYST.editorialRules.forbidden[0]);
+    });
   });
 });

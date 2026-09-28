@@ -32,6 +32,7 @@ import {
   buildDebaterSystemPrompt,
   buildJudgeSystemPrompt,
 } from '../../shared/personas/agents.personas';
+import { buildLanguageInstruction } from '../../shared/personas/language-instruction';
 
 // Política propia de AgentsModule (coding-rules.md §4) — no se comparte con
 // research/tts, que fallan distinto. handleWhen (no handleAll) excluye
@@ -62,7 +63,7 @@ function formatOfficialArguments(
   participants: DebateContext['participants'],
 ): string {
   if (officialArguments.length === 0)
-    return '(ninguno todavía — sos el primero en hablar)';
+    return '(ninguno todavía — eres el primero en hablar)';
   return officialArguments
     .map((arg) => {
       // Fallback al agentId crudo si no matchea ningún participant — no
@@ -75,13 +76,28 @@ function formatOfficialArguments(
     .join('\n');
 }
 
+// Spec 004, D11 (AC 4.6): todos los prompts de usuario generativos (argue,
+// respond, amend y judge; el regenerate de curaduría reusa argue/respond)
+// terminan con la instrucción de idioma del episodio, además de tenerla como
+// regla del system prompt. Va última a propósito: es lo más cercano a la
+// salida, detrás de evidencia y transcripciones que pueden estar en otro
+// idioma (fuentes sin restricción de idioma, D9).
+function withLanguageInstruction(lines: Array<string | null>, context: DebateContext): string {
+  return [...lines, buildLanguageInstruction(context.language)]
+    .filter((line): line is string => line !== null)
+    .join('\n\n');
+}
+
 function buildArguePrompt(context: DebateContext): string {
-  return [
-    `Tema del debate: ${context.topic}`,
-    `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
-    `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
-    `Generá tu argumento para esta intervención.`,
-  ].join('\n\n');
+  return withLanguageInstruction(
+    [
+      `Tema del debate: ${context.topic}`,
+      `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
+      `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
+      `Genera tu argumento para esta intervención.`,
+    ],
+    context,
+  );
 }
 
 function buildRespondPrompt(
@@ -90,13 +106,16 @@ function buildRespondPrompt(
 ): string {
   const targetName =
     context.participants.find((p) => p.agentId === target.agentId)?.displayName ?? target.agentId;
-  return [
-    `Tema del debate: ${context.topic}`,
-    `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
-    `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
-    `Te toca hacer cross-examination del siguiente argumento puntual (de ${targetName}, id: ${target.id}):\n"${target.content}"`,
-    `Generá tu respuesta dirigida específicamente a ese argumento. En el campo respondsToId devolvé exactamente este id: ${target.id}.`,
-  ].join('\n\n');
+  return withLanguageInstruction(
+    [
+      `Tema del debate: ${context.topic}`,
+      `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
+      `Argumentos oficiales presentados hasta ahora en el debate:\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
+      `Te corresponde hacer cross-examination del siguiente argumento puntual (de ${targetName}, id: ${target.id}):\n"${target.content}"`,
+      `Genera tu respuesta dirigida específicamente a ese argumento. En el campo respondsToId devuelve exactamente este id: ${target.id}.`,
+    ],
+    context,
+  );
 }
 
 function buildAmendPrompt(
@@ -104,22 +123,23 @@ function buildAmendPrompt(
   original: ArgumentDraft | CrossExaminationDraft,
   feedback: AmendmentFeedback,
 ): string {
-  return [
-    `Tema del debate: ${context.topic}`,
-    `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
-    `Tu borrador anterior fue rechazado:\n"${original.content}"`,
-    `Motivo del rechazo: ${feedback.reason}`,
-    feedback.failedClaim
-      ? `Afirmación que falló la verificación: "${feedback.failedClaim}"`
-      : null,
-    `Detalle: ${feedback.details}`,
-    `Generá una nueva versión que corrija este problema, manteniendo tu postura y estilo.`,
-    'respondsToId' in original
-      ? `Recordá devolver el mismo respondsToId: ${original.respondsToId}`
-      : null,
-  ]
-    .filter((line): line is string => line !== null)
-    .join('\n\n');
+  return withLanguageInstruction(
+    [
+      `Tema del debate: ${context.topic}`,
+      `Evidencia disponible (Evidence Base):\n${formatEvidence(context.evidenceBase)}`,
+      `Tu borrador anterior fue rechazado:\n"${original.content}"`,
+      `Motivo del rechazo: ${feedback.reason}`,
+      feedback.failedClaim
+        ? `Afirmación que falló la verificación: "${feedback.failedClaim}"`
+        : null,
+      `Detalle: ${feedback.details}`,
+      `Genera una nueva versión que corrija este problema, manteniendo tu postura y estilo.`,
+      'respondsToId' in original
+        ? `Recuerda devolver el mismo respondsToId: ${original.respondsToId}`
+        : null,
+    ],
+    context,
+  );
 }
 
 function formatParticipants(participants: DebateContext['participants']): string {
@@ -127,12 +147,15 @@ function formatParticipants(participants: DebateContext['participants']): string
 }
 
 function buildJudgePrompt(context: DebateContext): string {
-  return [
-    `Tema debatido: ${context.topic}`,
-    `Agentes que participaron de este debate (para saber qué agentId devolver en winnerAgentId):\n${formatParticipants(context.participants)}`,
-    `Transcripción completa del debate (argumentos oficiales, en orden):\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
-    `Emití tu veredicto. Si corresponde declarar un ganador, winnerAgentId debe ser el agentId (de la lista de arriba) de uno de los agentes que participó del debate; si no hay un ganador claro, winnerAgentId puede ser null.`,
-  ].join('\n\n');
+  return withLanguageInstruction(
+    [
+      `Tema debatido: ${context.topic}`,
+      `Agentes que participaron de este debate (para saber qué agentId devolver en winnerAgentId):\n${formatParticipants(context.participants)}`,
+      `Transcripción completa del debate (argumentos oficiales, en orden):\n${formatOfficialArguments(context.officialArguments, context.participants)}`,
+      `Emite tu veredicto. Si corresponde declarar un ganador, winnerAgentId debe ser el agentId (de la lista de arriba) de uno de los agentes que participó del debate; si no hay un ganador claro, winnerAgentId puede ser null.`,
+    ],
+    context,
+  );
 }
 
 // DebateAgent ya no incluye research() (ver nota en agents.contracts.ts) —
@@ -166,7 +189,7 @@ class DebaterAgentImpl implements DebaterAgent {
     context: DebateContext,
     roundType: 'OPENING' | 'REBUTTAL',
   ): Promise<ArgumentDraft> {
-    const system = buildDebaterSystemPrompt(this.persona, roundType, this.findOpponent(context));
+    const system = buildDebaterSystemPrompt(this.persona, roundType, context.language, this.findOpponent(context));
     return policy.execute(async () => {
       await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
@@ -183,7 +206,7 @@ class DebaterAgentImpl implements DebaterAgent {
     context: DebateContext,
     target: DebateContext['officialArguments'][number],
   ): Promise<CrossExaminationDraft> {
-    const system = buildDebaterSystemPrompt(this.persona, 'CROSS_EXAMINATION', this.findOpponent(context));
+    const system = buildDebaterSystemPrompt(this.persona, 'CROSS_EXAMINATION', context.language, this.findOpponent(context));
     return policy.execute(async () => {
       await this.rateLimiter.acquire(this.provider);
       const result = await generateObject({
@@ -202,7 +225,7 @@ class DebaterAgentImpl implements DebaterAgent {
     feedback: AmendmentFeedback,
     roundType: RoundType,
   ): Promise<ArgumentDraft | CrossExaminationDraft> {
-    const system = buildDebaterSystemPrompt(this.persona, roundType, this.findOpponent(context));
+    const system = buildDebaterSystemPrompt(this.persona, roundType, context.language, this.findOpponent(context));
     const schema =
       roundType === 'CROSS_EXAMINATION'
         ? CrossExaminationDraftSchema
@@ -243,7 +266,7 @@ export class AgentsService {
     provider: ModelProvider,
   ): Promise<VerdictOutput> {
     const model = this.modelProviderFactory.resolve(provider);
-    const system = buildJudgeSystemPrompt(JUDGE);
+    const system = buildJudgeSystemPrompt(JUDGE, context.language);
     return policy.execute(async () => {
       await this.rateLimiter.acquire(provider);
       const result = await generateObject({

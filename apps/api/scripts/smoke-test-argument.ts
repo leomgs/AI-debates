@@ -28,7 +28,8 @@ async function main() {
   console.log(`   Topic creado: ${topic.id}`);
 
   console.log('2. Corriendo research() real (Tavily + extracción con Gemini)...');
-  const researchOutput = await research.research(topic.id);
+  // ES: el default de createEpisode (spec 004, D4); este script no crea Episode.
+  const researchOutput = await research.research(topic.id, 'ES');
   console.log(`   ${researchOutput.facts.length} facts extraídos:`);
   researchOutput.facts.forEach((f, i) => console.log(`   [${i + 1}] ${f.statement}`));
 
@@ -45,6 +46,7 @@ async function main() {
     evidenceBase: researchOutput,
     officialArguments: [],
     participants: [{ agentId: analystAgent.id, personaId: ANALYST.id, displayName: ANALYST.displayName }],
+    language: 'ES',
   };
   const debaterAgent = agents.createDebateAgent(ANALYST, 'GOOGLE');
   const draft = await debaterAgent.argue(context, 'OPENING');

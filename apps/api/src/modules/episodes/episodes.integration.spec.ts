@@ -21,7 +21,7 @@ import { DebateService } from "../debate/debate.service";
 import { DailyQuotaExceededError } from "../ai/ai.errors";
 import { BudgetExceededError, InvalidEpisodeTransitionError } from "./episodes.errors";
 import { AUDIO_PROVIDER, AUDIO_STORAGE } from "../tts/tts.tokens";
-import { VoiceNotConfiguredError } from "../tts/tts.errors";
+import { TtsProviderUnavailableError, VoiceNotConfiguredError } from "../tts/tts.errors";
 import type { DebateLanguage } from "@prisma/client";
 import { ZodError } from "zod";
 
@@ -1100,6 +1100,261 @@ describe("EpisodesModule (integración)", () => {
           expect(s.audioAsset?.voiceId).toBe(testVoiceId("PT", s.agent.role!));
           if (alreadySynthesized.has(s.id)) expect(s.audioAssetId).toBe(alreadySynthesized.get(s.id));
         }
+      });
+    });
+
+    // Spec 004, paso 5c (AC 4.10-4.13): el idioma se relee de
+    // Episode.language en cada reentrada (EpisodeContextService para los
+    // agentes, el orquestador para research y fact-check, TtsService para las
+    // voces), así que sobrevive a cualquier corte. Agentes, fact-check y
+    // research están mockeados en el borde: se verifica qué idioma reciben
+    // (el prompt de cada idioma lo cubren sus specs unitarios).
+    describe("idioma en los cortes del pipeline (AC 4.10-4.13)", () => {
+      type RecordedContext = { topic: string; language: DebateLanguage };
+
+      // Contextos que recibieron los debatientes (argue/respond/amend), solo
+      // los de este episodio (el título del tópico es único por test).
+      function agentContexts(topicTitle: string): RecordedContext[] {
+        return agentsMock.createDebateAgent.mock.results
+          .flatMap((result) => {
+            const stub = result.value as ReturnType<typeof fakeArgentAgent>;
+            return [...stub.argue.mock.calls, ...stub.respond.mock.calls, ...stub.amend.mock.calls].map(
+              (call) => call[0] as RecordedContext
+            );
+          })
+          .filter((context) => context.topic === topicTitle);
+      }
+
+      function judgeContexts(topicTitle: string): RecordedContext[] {
+        return agentsMock.judge.mock.calls.map((call) => call[0] as RecordedContext).filter((context) => context.topic === topicTitle);
+      }
+
+      // Idioma que recibió cada llamada a FactCheckService (último parámetro).
+      function factCheckLanguages(): string[] {
+        return [
+          ...factCheckMock.extractClaims.mock.calls.map((call) => call[3] as string),
+          ...factCheckMock.check.mock.calls.map((call) => call[3] as string),
+          ...factCheckMock.editorialReview.mock.calls.map((call) => call[4] as string),
+        ];
+      }
+
+      function expectAllIn(values: Array<RecordedContext | string>, language: DebateLanguage) {
+        expect(values.length).toBeGreaterThan(0);
+        for (const value of values) expect(typeof value === "string" ? value : value.language).toBe(language);
+      }
+
+      async function awaitPipeline(trigger: () => Promise<unknown>): Promise<void> {
+        const spy = jest.spyOn(orchestrator, "runPipeline");
+        try {
+          await trigger();
+          await spy.mock.results[spy.mock.results.length - 1].value;
+        } finally {
+          spy.mockRestore();
+        }
+      }
+
+      async function status(episodeId: string) {
+        return (await prisma.episode.findUniqueOrThrow({ where: { id: episodeId } })).status;
+      }
+
+      // Recovery solo sobre este episodio: otros tests pueden dejar episodios
+      // en fases activas, y sus pipelines mezclarían llamadas en los mocks.
+      async function recoverOnly(episodeId: string): Promise<void> {
+        const runPipeline = orchestrator.runPipeline.bind(orchestrator);
+        const runAudioPipeline = orchestrator.runAudioPipeline.bind(orchestrator);
+        const pipelineSpy = jest
+          .spyOn(orchestrator, "runPipeline")
+          .mockImplementation((id, opts) => (id === episodeId ? runPipeline(id, opts) : Promise.resolve()));
+        const audioSpy = jest
+          .spyOn(orchestrator, "runAudioPipeline")
+          .mockImplementation((id) => (id === episodeId ? runAudioPipeline(id) : Promise.resolve()));
+        try {
+          await recovery.onApplicationBootstrap();
+          const runs = [
+            ...pipelineSpy.mock.calls.map((call, i) => ({ id: call[0], done: pipelineSpy.mock.results[i].value as Promise<void> })),
+            ...audioSpy.mock.calls.map((call, i) => ({ id: call[0], done: audioSpy.mock.results[i].value as Promise<void> })),
+          ].filter((run) => run.id === episodeId);
+          expect(runs).toHaveLength(1);
+          await runs[0].done;
+        } finally {
+          pipelineSpy.mockRestore();
+          audioSpy.mockRestore();
+        }
+      }
+
+      // Un error no clasificado deja el episodio en su fase activa, igual que
+      // una caída real del proceso (handlePipelineError, último caso).
+      function crash(): Error {
+        return new Error("caída simulada del proceso");
+      }
+
+      let errorSpy: jest.SpyInstance;
+      beforeEach(() => {
+        errorSpy = jest.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);
+      });
+      afterEach(() => {
+        errorSpy.mockRestore();
+      });
+
+      describe("AC 4.10: episodio EN reanudado con resume", () => {
+        it("desde DEBATING: los argumentos que faltan, su fact-check y el veredicto salen en EN", async () => {
+          const { topic, episode } = await createTestEpisode(prisma, { language: "EN", rebuttalRounds: 1 });
+          researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+          factCheckMock.extractClaims.mockRejectedValueOnce(new DailyQuotaExceededError("GOOGLE", 500));
+
+          await orchestrator.runPipeline(episode.id);
+          expect(await status(episode.id)).toBe("REQUIRES_HUMAN_REVIEW");
+          expect((await lastCheckpoints(episode.id))[0]).toMatchObject({ reason: "PROVIDER_QUOTA_EXCEEDED", fromState: "DEBATING" });
+
+          agentsMock.createDebateAgent.mockClear();
+          agentsMock.judge.mockClear();
+          factCheckMock.extractClaims.mockClear();
+          factCheckMock.check.mockClear();
+          factCheckMock.editorialReview.mockClear();
+          await awaitPipeline(() => actions.resume(episode.id, {}));
+
+          expect(await status(episode.id)).toBe("PENDING_REVIEW");
+          expectAllIn(agentContexts(topic.title), "EN");
+          expectAllIn(factCheckLanguages(), "EN");
+          expectAllIn(judgeContexts(topic.title), "EN");
+        });
+
+        it("desde JUDGING: el veredicto sale en EN", async () => {
+          const { topic, episode } = await createTestEpisode(prisma, { language: "EN" });
+          researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+          agentsMock.judge.mockRejectedValueOnce(new DailyQuotaExceededError("GOOGLE", 500));
+
+          await orchestrator.runPipeline(episode.id);
+          expect((await lastCheckpoints(episode.id))[0]).toMatchObject({ reason: "PROVIDER_QUOTA_EXCEEDED", fromState: "JUDGING" });
+
+          agentsMock.judge.mockClear();
+          await awaitPipeline(() => actions.resume(episode.id, {}));
+
+          expect(await status(episode.id)).toBe("PENDING_REVIEW");
+          const judged = judgeContexts(topic.title);
+          expect(judged).toHaveLength(1);
+          expectAllIn(judged, "EN");
+        });
+
+        it("desde GENERATING_AUDIO: los segmentos pendientes se sintetizan con las voces EN", async () => {
+          await loadTestVoices("EN");
+          const { episode } = await episodeReadyForAudio("EN");
+          audioProviderMock.synthesize.mockRejectedValueOnce(new TtsProviderUnavailableError("LOCAL"));
+
+          await awaitAudioPipeline(() => actions.approve(episode.id));
+          expect((await lastCheckpoints(episode.id))[0]).toMatchObject({
+            reason: "PROVIDER_QUOTA_EXCEEDED",
+            fromState: "GENERATING_AUDIO",
+          });
+
+          audioProviderMock.synthesize.mockClear();
+          await awaitAudioPipeline(() => actions.resume(episode.id, {}));
+
+          expect(await status(episode.id)).toBe("READY_FOR_RENDER");
+          const segments = await segmentsWithAgent(episode.debateId);
+          expect(audioProviderMock.synthesize).toHaveBeenCalledTimes(segments.length);
+          for (const s of segments) {
+            expect(audioProviderMock.synthesize).toHaveBeenCalledWith(s.content, testVoiceId("EN", s.agent.role!));
+            expect(s.audioAsset?.voiceId).toBe(testVoiceId("EN", s.agent.role!));
+          }
+        });
+      });
+
+      describe("AC 4.11: episodio PT retomado por EpisodeRecoveryService", () => {
+        it("en DEBATING: los argumentos, su fact-check y el veredicto salen en PT", async () => {
+          const { topic, episode } = await createTestEpisode(prisma, { language: "PT", rebuttalRounds: 1 });
+          researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+          factCheckMock.extractClaims.mockRejectedValueOnce(crash());
+          await orchestrator.runPipeline(episode.id);
+          expect(await status(episode.id)).toBe("DEBATING");
+
+          agentsMock.createDebateAgent.mockClear();
+          agentsMock.judge.mockClear();
+          factCheckMock.extractClaims.mockClear();
+          factCheckMock.check.mockClear();
+          factCheckMock.editorialReview.mockClear();
+          await recoverOnly(episode.id);
+
+          expect(await status(episode.id)).toBe("PENDING_REVIEW");
+          expectAllIn(agentContexts(topic.title), "PT");
+          expectAllIn(factCheckLanguages(), "PT");
+          expectAllIn(judgeContexts(topic.title), "PT");
+        });
+
+        it("en JUDGING: el veredicto sale en PT", async () => {
+          const { topic, episode } = await createTestEpisode(prisma, { language: "PT" });
+          researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+          agentsMock.judge.mockRejectedValueOnce(crash());
+          await orchestrator.runPipeline(episode.id);
+          expect(await status(episode.id)).toBe("JUDGING");
+
+          agentsMock.judge.mockClear();
+          await recoverOnly(episode.id);
+
+          expect(await status(episode.id)).toBe("PENDING_REVIEW");
+          const judged = judgeContexts(topic.title);
+          expect(judged).toHaveLength(1);
+          expectAllIn(judged, "PT");
+        });
+
+        it("en GENERATING_AUDIO: los segmentos pendientes se sintetizan con las voces PT", async () => {
+          await loadTestVoices("PT");
+          const { episode } = await episodeReadyForAudio("PT");
+          audioProviderMock.synthesize.mockRejectedValueOnce(crash());
+          await awaitAudioPipeline(() => actions.approve(episode.id));
+          expect(await status(episode.id)).toBe("GENERATING_AUDIO");
+
+          audioProviderMock.synthesize.mockClear();
+          await recoverOnly(episode.id);
+
+          expect(await status(episode.id)).toBe("READY_FOR_RENDER");
+          const segments = await segmentsWithAgent(episode.debateId);
+          expect(audioProviderMock.synthesize).toHaveBeenCalledTimes(segments.length);
+          for (const s of segments) {
+            expect(audioProviderMock.synthesize).toHaveBeenCalledWith(s.content, testVoiceId("PT", s.agent.role!));
+            expect(s.audioAsset?.voiceId).toBe(testVoiceId("PT", s.agent.role!));
+          }
+        });
+      });
+
+      // AC 4.12 y AC 4.6 (regenerate y el judge de regenerate-verdict): las
+      // dos acciones de curaduría usan el mismo EpisodeContextService que el
+      // orquestador, así que reciben el idioma sin pasarlo a mano.
+      it("AC 4.12: regenerate y regenerate-verdict en PENDING_REVIEW sobre un episodio EN usan el contexto compartido, en EN", async () => {
+        const { topic, episode } = await createTestEpisode(prisma, { language: "EN" });
+        researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+        await orchestrator.runPipeline(episode.id);
+        expect(await status(episode.id)).toBe("PENDING_REVIEW");
+        const [argument] = await segmentsWithAgent(episode.debateId);
+
+        agentsMock.createDebateAgent.mockClear();
+        agentsMock.judge.mockClear();
+        await actions.regenerate(episode.id, { argumentId: argument.id });
+        await actions.regenerateVerdict(episode.id);
+
+        const regenerated = agentContexts(topic.title);
+        expect(regenerated).toHaveLength(1);
+        expectAllIn(regenerated, "EN");
+        const judged = judgeContexts(topic.title);
+        expect(judged).toHaveLength(1);
+        expectAllIn(judged, "EN");
+      });
+
+      it("AC 4.13: resume de INSUFFICIENT_EVIDENCE en un episodio EN vuelve a extraer los hechos en EN", async () => {
+        const { topic, episode } = await createTestEpisode(prisma, { language: "EN" });
+        researchMock.research.mockRejectedValueOnce(new InsufficientEvidenceError(1));
+        await orchestrator.runPipeline(episode.id);
+        expect((await lastCheckpoints(episode.id))[0]).toMatchObject({ reason: "INSUFFICIENT_EVIDENCE" });
+        expect(researchMock.research).toHaveBeenCalledWith(topic.id, "EN", undefined);
+
+        researchMock.research.mockClear();
+        researchMock.research.mockImplementation((topicId: string) => persistFakeResearch(prisma, topicId));
+        const manualSources = [{ url: "https://example.com/manual-en", title: "Manual", snippet: "Manual source" }];
+        await awaitPipeline(() => actions.resume(episode.id, { manualSources }));
+
+        expect(researchMock.research).toHaveBeenCalledTimes(1);
+        expect(researchMock.research).toHaveBeenCalledWith(topic.id, "EN", manualSources);
+        expect(await status(episode.id)).toBe("PENDING_REVIEW");
       });
     });
   });

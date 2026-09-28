@@ -50,7 +50,7 @@ const JUDGE_VOICES: SeedVoice[] = spanishVoices('es_ES-mls_10246-low');
 // campo de Agent no se lee en runtime del debate.
 function debaterSummary(persona: DebaterPersona): string {
   return [
-    `Sos ${persona.displayName}, un participante de un debate entre IAs sobre un trend de Internet.`,
+    `Eres ${persona.displayName}, un participante de un debate entre IAs sobre un trend de Internet.`,
     `Tu postura estructural: ${persona.coreStance}`,
     `Tu estilo de argumentación: ${persona.argumentStyle}`,
   ].join('\n\n');
@@ -91,7 +91,11 @@ async function main() {
   await upsertAgent({
     name: JUDGE.displayName,
     role: JUDGE.id,
-    systemPrompt: buildJudgeSystemPrompt(JUDGE),
+    // Snapshot informativo, como debaterSummary (Agent.systemPrompt no se
+    // lee en runtime). Lleva la regla de idioma de ES, el default (spec 004,
+    // D4); el prompt real del juez lo arma AgentsService con el idioma de
+    // cada episodio.
+    systemPrompt: buildJudgeSystemPrompt(JUDGE, 'ES'),
     voices: JUDGE_VOICES,
   });
 }

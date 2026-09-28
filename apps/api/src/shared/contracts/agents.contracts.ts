@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { DebateLanguage } from "@ai-trend-debates/contracts";
 
 // ============================================================
 // Enums compartidos — deben espejar los enums de schema.prisma
@@ -142,6 +143,12 @@ export interface DebateContext {
     personaId: DebaterPersonaId;
     displayName: string;
   }>;
+  // Spec 004 (AC 4.6, 4.10, 4.12): idioma del episodio, leído de
+  // Episode.language por EpisodeContextService en cada reconstrucción del
+  // contexto (pipeline, resume, recovery, regenerate y regenerate-verdict),
+  // así que sobrevive a todos los cortes. Los agentes lo usan para la
+  // instrucción de idioma de sus prompts (buildLanguageInstruction).
+  language: DebateLanguage;
 }
 
 // research(topic) NO es parte de este contrato: según architecture.md §4/§7.1,

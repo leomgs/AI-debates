@@ -13,6 +13,10 @@ import { DEBATER_PERSONAS, DebaterPersona } from "../../shared/personas/agents.p
 //
 // Se reconstruye en cada llamada (no se cachea): officialArguments crece con
 // cada Argument promovido a OFFICIAL dentro de la misma corrida del pipeline.
+//
+// Paso 5c: suma language desde Episode.language. Como todos los caminos que
+// retoman el pipeline (resume, recovery, regenerate, regenerate-verdict)
+// pasan por acá, el idioma sobrevive a cualquier corte (AC 4.10-4.12).
 @Injectable()
 export class EpisodeContextService {
   constructor(private readonly prisma: PrismaService) {}
@@ -20,7 +24,11 @@ export class EpisodeContextService {
   async build(episodeId: string): Promise<DebateContext> {
     const episode = await this.prisma.episode.findUniqueOrThrow({
       where: { id: episodeId },
-      select: { debateId: true, debate: { select: { topicId: true, topic: { select: { title: true } } } } },
+      select: {
+        debateId: true,
+        language: true,
+        debate: { select: { topicId: true, topic: { select: { title: true } } } },
+      },
     });
     const topicId = episode.debate.topicId;
     const topicTitle = episode.debate.topic.title;
@@ -57,6 +65,7 @@ export class EpisodeContextService {
         const persona = DEBATER_PERSONAS[p.agent.role as DebaterPersona["id"]];
         return { agentId: p.agentId, personaId: persona.id, displayName: persona.displayName };
       }),
+      language: episode.language,
     };
   }
 }

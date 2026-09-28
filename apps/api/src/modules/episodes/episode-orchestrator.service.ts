@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Argument, Claim, DebateRound, ModelProvider, Prisma, RoundType } from "@prisma/client";
+import { Argument, Claim, DebateLanguage, DebateRound, ModelProvider, Prisma, RoundType } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { InsufficientEvidenceError } from "../research/research.errors";
@@ -100,6 +100,17 @@ function isEditorialFailure(result: EditorialReviewOutput): boolean {
   return result.passed === false;
 }
 
+// Spec 004, D7: respaldo de feedback.details cuando el filtro editorial
+// rechaza sin reason ni violatedRule (el .refine de EditorialReviewOutputSchema
+// lo impide, pero el tipo los deja opcionales). Vuelve al debatiente en el
+// prompt de amend, así que sale en el idioma del episodio: en otro idioma
+// aumentaría el riesgo de que la enmienda cambie de idioma.
+const EDITORIAL_VIOLATION_FALLBACK: Record<DebateLanguage, string> = {
+  ES: "Violación de reglas editoriales.",
+  EN: "Editorial rules violation.",
+  PT: "Violação das regras editoriais.",
+};
+
 // architecture.md §7 — orquestador del pipeline. Fase C agrega el loop de
 // rondas de debate (§7.2), el loop de enmienda (§7.3) y el veredicto (§7.4),
 // más el entrypoint runPipeline() que encadena las 3 fases con manejo de
@@ -168,8 +179,13 @@ export class EpisodeOrchestratorService {
     if (!existing) {
       // InsufficientEvidenceError (u otras excepciones tipadas de research())
       // NO se captura acá — la maneja runPipeline() vía handlePipelineError.
+      // El idioma sale de Episode.language (spec 004, AC 4.13): un resume de
+      // INSUFFICIENT_EVIDENCE vuelve a pasar por acá y extrae los hechos
+      // nuevos en el idioma del episodio, no en el de la request original.
       await this.budget.withSearchRequest(episodeId, () =>
-        this.budget.withLlmCall(episodeId, () => this.research.research(episode.debate.topicId, manualSources))
+        this.budget.withLlmCall(episodeId, () =>
+          this.research.research(episode.debate.topicId, episode.language, manualSources)
+        )
       );
     }
 
@@ -331,7 +347,7 @@ export class EpisodeOrchestratorService {
 
     for (;;) {
       const claims: Claim[] = await this.budget.withLlmCall(episodeId, () =>
-        this.factCheck.extractClaims(row.id, currentContent, provider)
+        this.factCheck.extractClaims(row.id, currentContent, provider, context.language)
       );
       this.emitEvent(episodeId, "agent.thinking", { agentId, round: debateRound.round });
 
@@ -344,8 +360,8 @@ export class EpisodeOrchestratorService {
         claims.map((claim) =>
           this.budget.withLlmCall<FactCheckOutput | EditorialReviewOutput>(episodeId, () =>
             claim.type === "FACTUAL"
-              ? this.factCheck.check(claim, context.evidenceBase, provider)
-              : this.factCheck.editorialReview(claim, persona, EDITORIAL_REVIEW_PROVIDER, currentContent)
+              ? this.factCheck.check(claim, context.evidenceBase, provider, context.language)
+              : this.factCheck.editorialReview(claim, persona, EDITORIAL_REVIEW_PROVIDER, currentContent, context.language)
           )
         )
       );
@@ -395,7 +411,7 @@ export class EpisodeOrchestratorService {
               details:
                 (failedResult as EditorialReviewOutput).reason ??
                 (failedResult as EditorialReviewOutput).violatedRule ??
-                "Violación de reglas editoriales.",
+                EDITORIAL_VIOLATION_FALLBACK[context.language],
             };
 
       const original: ArgumentDraft | CrossExaminationDraft = respondsToId

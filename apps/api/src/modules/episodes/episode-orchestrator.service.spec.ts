@@ -38,6 +38,7 @@ function episodeRow(status: string, overrides: Record<string, unknown> = {}) {
   return {
     id: EPISODE_ID,
     status,
+    language: "ES",
     debateId: DEBATE_ID,
     debate: { id: DEBATE_ID, topicId: TOPIC_ID, topic: { id: TOPIC_ID, title: "Un trend" } },
     participants: PARTICIPANTS,
@@ -153,6 +154,7 @@ describe("EpisodeOrchestratorService", () => {
         evidenceBase: { topic: "Un trend", facts: [] },
         officialArguments: [],
         participants: [],
+        language: "ES",
       }),
     };
 
@@ -191,7 +193,7 @@ describe("EpisodeOrchestratorService", () => {
 
       expect(participantsService.selectParticipants).toHaveBeenCalledWith(EPISODE_ID, DEBATE_ID);
       expect(stateService.markResearching).toHaveBeenCalledWith(EPISODE_ID);
-      expect(researchService.research).toHaveBeenCalledWith(TOPIC_ID, undefined);
+      expect(researchService.research).toHaveBeenCalledWith(TOPIC_ID, "ES", undefined);
       expect(stateService.markReadyForDebate).toHaveBeenCalledWith(EPISODE_ID);
     });
 
@@ -207,7 +209,7 @@ describe("EpisodeOrchestratorService", () => {
 
       expect(participantsService.selectParticipants).not.toHaveBeenCalled();
       expect(stateService.markResearching).not.toHaveBeenCalled();
-      expect(researchService.research).toHaveBeenCalledWith(TOPIC_ID, manualSources);
+      expect(researchService.research).toHaveBeenCalledWith(TOPIC_ID, "ES", manualSources);
     });
 
     it("idempotencia: si ya existe research completa para el topic, no vuelve a llamar research()", async () => {
@@ -301,7 +303,7 @@ describe("EpisodeOrchestratorService", () => {
         .mockResolvedValueOnce(episodeRow("READY_FOR_DEBATE"))
         .mockResolvedValueOnce(episodeRow("DEBATING"))
         .mockResolvedValueOnce(episodeRow("JUDGING"));
-      const contextForTurn1 = { topic: "turno 1", evidenceBase: { topic: "t", facts: [] }, officialArguments: [], participants: [] };
+      const contextForTurn1 = { topic: "turno 1", evidenceBase: { topic: "t", facts: [] }, officialArguments: [], participants: [], language: "ES" };
       const contextForTurn2 = { ...contextForTurn1, topic: "turno 2" };
       const contextForJudge = { ...contextForTurn1, topic: "juez" };
       contextService.build
@@ -344,7 +346,7 @@ describe("EpisodeOrchestratorService", () => {
         .mockResolvedValueOnce({ veracity: "FALSE", analysis: "está mal", sourceIds: ["src-1"] })
         .mockResolvedValueOnce({ veracity: "TRUE", analysis: "ahora ok", sourceIds: ["src-1"] });
 
-      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [] };
+      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [], language: "ES" };
       const round = { id: "round-1", round: 1, type: "OPENING", debateId: DEBATE_ID };
 
       // processDraft es privado — se llama vía reflection (patrón aceptado
@@ -376,7 +378,7 @@ describe("EpisodeOrchestratorService", () => {
       ]);
       factCheckService.editorialReview.mockResolvedValue({ passed: true });
 
-      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [] };
+      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [], language: "ES" };
       const round = { id: "round-1", round: 1, type: "OPENING", debateId: DEBATE_ID };
 
       await (service as unknown as { processDraft: (p: unknown) => Promise<unknown> }).processDraft({
@@ -400,7 +402,8 @@ describe("EpisodeOrchestratorService", () => {
         expect.anything(),
         expect.anything(),
         "GOOGLE",
-        expect.anything()
+        expect.anything(),
+        "ES"
       );
       expect(factCheckService.check).not.toHaveBeenCalled();
     });
@@ -412,7 +415,7 @@ describe("EpisodeOrchestratorService", () => {
       ]);
       factCheckService.check.mockResolvedValue({ veracity: "FALSE", analysis: "siempre mal", sourceIds: ["src-1"] });
 
-      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [] };
+      const context = { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [], language: "ES" };
       const round = { id: "round-1", round: 1, type: "OPENING", debateId: DEBATE_ID };
 
       await expect(
@@ -432,6 +435,82 @@ describe("EpisodeOrchestratorService", () => {
 
       expect(debateService.rejectArgument).toHaveBeenCalledWith("arg-1");
       expect(stateService.requireHumanReview).toHaveBeenCalledWith(EPISODE_ID, "MAX_REVISIONS_EXCEEDED", "round-1");
+    });
+  });
+
+  // Spec 004, paso 5c (regla de flujo del idioma): el orquestador lee
+  // Episode.language y se lo pasa por parámetro a ResearchService y a
+  // FactCheckService (módulos de dominio que no conocen Episode); el texto de
+  // respaldo del filtro editorial sale en ese idioma (D7).
+  describe("idioma del episodio (spec 004)", () => {
+    type ProcessDraft = (p: unknown) => Promise<unknown>;
+    const round = { id: "round-1", round: 1, type: "OPENING", debateId: DEBATE_ID };
+
+    function processDraftWith(language: string, agentInstance = makeAgentStub()) {
+      return (service as unknown as { processDraft: ProcessDraft }).processDraft({
+        episodeId: EPISODE_ID,
+        debateRound: round,
+        agentId: AGENT_A,
+        agentInstance,
+        provider: "OPENROUTER",
+        persona: { id: "ANALYST" },
+        roundType: "OPENING",
+        initialContent: "draft",
+        context: { topic: "x", evidenceBase: { topic: "x", facts: [] }, officialArguments: [], participants: [], language },
+        maxRevisionAttempts: 3,
+      });
+    }
+
+    it.each(["EN", "PT"])("research() recibe Episode.language (%s), también con manualSources (AC 4.13)", async (language) => {
+      prisma.episode.findUniqueOrThrow
+        .mockResolvedValueOnce(episodeRow("REQUIRES_HUMAN_REVIEW", { language }))
+        .mockResolvedValueOnce(episodeRow("REQUIRES_HUMAN_REVIEW", { language }));
+      prisma.evidenceFact.count.mockResolvedValue(0);
+      researchService.research.mockResolvedValue({ topic: "x", facts: [] });
+      const manualSources = [{ url: "https://x.com", title: "t", snippet: "s" }];
+
+      await service.runResearchPhase(EPISODE_ID, manualSources);
+
+      expect(researchService.research).toHaveBeenCalledWith(TOPIC_ID, language, manualSources);
+    });
+
+    it.each(["ES", "EN", "PT"])("extractClaims, check y editorialReview reciben el idioma del contexto (%s) como último parámetro (AC 4.7)", async (language) => {
+      factCheckService.extractClaims.mockResolvedValue([
+        { id: "claim-1", argumentId: "arg-1", statement: "s1", type: "FACTUAL" },
+        { id: "claim-2", argumentId: "arg-1", statement: "s2", type: "OPINION" },
+      ]);
+
+      await processDraftWith(language);
+
+      expect(factCheckService.extractClaims).toHaveBeenCalledWith("arg-1", "draft", "OPENROUTER", language);
+      expect(factCheckService.check).toHaveBeenCalledWith(expect.objectContaining({ id: "claim-1" }), { topic: "x", facts: [] }, "OPENROUTER", language);
+      expect(factCheckService.editorialReview).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "claim-2" }),
+        { id: "ANALYST" },
+        "GOOGLE",
+        "draft",
+        language
+      );
+    });
+
+    it.each([
+      ["ES", "Violación de reglas editoriales."],
+      ["EN", "Editorial rules violation."],
+      ["PT", "Violação das regras editoriais."],
+    ])("el respaldo de feedback.details del filtro editorial sale en el idioma del episodio (%s, D7)", async (language, expected) => {
+      const agentInstance = makeAgentStub();
+      factCheckService.extractClaims.mockResolvedValue([{ id: "claim-1", argumentId: "arg-1", statement: "s1", type: "OPINION" }]);
+      // Rechazo sin reason ni violatedRule: el caso en que entra el respaldo.
+      factCheckService.editorialReview.mockResolvedValueOnce({ passed: false }).mockResolvedValueOnce({ passed: true });
+
+      await processDraftWith(language, agentInstance);
+
+      expect(agentInstance.amend).toHaveBeenCalledWith(
+        expect.objectContaining({ language }),
+        { content: "draft" },
+        { reason: "PERSONA_VIOLATION", failedClaim: "s1", details: expected },
+        "OPENING"
+      );
     });
   });
 

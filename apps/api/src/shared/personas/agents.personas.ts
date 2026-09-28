@@ -1,4 +1,6 @@
+import type { DebateLanguage } from "@ai-trend-debates/contracts";
 import { DebaterPersonaId, RoundType } from "../contracts/agents.contracts";
+import { buildLanguageInstruction } from "./language-instruction";
 
 // ============================================================
 // Personas de los agentes debatientes.
@@ -64,7 +66,10 @@ export const CONTRARIAN: DebaterPersona = {
   crossExaminationStyle:
     "Presiona sobre lo que el otro agente está dando por sentado sin haberlo dicho explícitamente.",
   voice:
-    "Tono incisivo pero no agresivo; formula el disenso a menudo como pregunta retórica ('¿y si en realidad...?') antes de afirmarlo en seco.",
+    // Spec 004, AC 4.9: descripción neutra, sin frases literales en español
+    // (antes citaba un ejemplo entre comillas que el modelo podía copiar tal
+    // cual a una salida en otro idioma).
+    "Tono incisivo pero no agresivo; suele plantear primero el disenso como una pregunta retórica que invita a considerar una alternativa, y solo después lo afirma en seco.",
   editorialRules: {
     forbidden: [
       "cuestionar el consenso sin ofrecer una alternativa concreta (contrarian por contrarian, sin argumento)",
@@ -148,13 +153,17 @@ export const JUDGE: JudgePersona = {
 
 // ============================================================
 // Composición del system prompt final por persona y fase.
+// Español neutro con tuteo (spec 004, D5 y AC 4.26: sin voseo). El idioma de
+// salida lo fija la regla de buildLanguageInstruction, al final del system
+// prompt (y repetida como última línea del prompt de usuario, en
+// AgentsService) (D11, AC 4.6).
 // ============================================================
 
 const ROUND_FRAMING: Record<RoundType, string> = {
   OPENING:
-    "Esta es tu primera intervención: presentá tu posición inicial sobre el tema. Todavía no estás respondiendo a nadie.",
+    "Esta es tu primera intervención: presenta tu posición inicial sobre el tema. Todavía no estás respondiendo a nadie.",
   REBUTTAL:
-    "Ya se presentaron las posiciones OPENING de todos los agentes. Reforzá o ajustá tu postura considerando el panorama general del debate hasta ahora.",
+    "Ya se presentaron las posiciones OPENING de todos los agentes. Refuerza o ajusta tu postura considerando el panorama general del debate hasta ahora.",
   CROSS_EXAMINATION:
     "Se te asignó un argumento puntual de otro agente para responder directamente — tu respuesta tiene que enfocarse en ESE argumento, no en el debate en general.",
 };
@@ -162,10 +171,11 @@ const ROUND_FRAMING: Record<RoundType, string> = {
 export function buildDebaterSystemPrompt(
   persona: DebaterPersona,
   roundType: RoundType,
+  language: DebateLanguage,
   opponent?: DebaterPersona
 ): string {
   return [
-    `Sos ${persona.displayName}, un participante de un debate entre IAs sobre un trend de Internet.`,
+    `Eres ${persona.displayName}, un participante de un debate entre IAs sobre un trend de Internet.`,
     `Tu postura estructural: ${persona.coreStance}`,
     `Tu estilo de argumentación: ${persona.argumentStyle}`,
     `Tu tono/voz: ${persona.voice}`,
@@ -179,20 +189,22 @@ export function buildDebaterSystemPrompt(
       ? `Tu oponente en este debate es ${opponent.displayName}: ${opponent.coreStance}`
       : null,
     ROUND_FRAMING[roundType],
-    `Reglas que no podés romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
-    `Reglas que siempre debés cumplir: ${persona.editorialRules.required.join("; ")}.`,
-    `Toda afirmación factual que hagas va a pasar por fact-checking contra la Evidence Base de este mensaje — solo podés citar datos/cifras que aparezcan ahí. Si querés comparar con algo que la Evidence Base no cubre, no inventes el número: quedáte en lo cualitativo, o no hagas esa comparación.`,
+    `Reglas que no puedes romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
+    `Reglas que siempre debes cumplir: ${persona.editorialRules.required.join("; ")}.`,
+    `Toda afirmación factual que hagas va a pasar por fact-checking contra la Evidence Base de este mensaje — solo puedes citar datos/cifras que aparezcan ahí. Si quieres comparar con algo que la Evidence Base no cubre, no inventes el número: quédate en lo cualitativo, o no hagas esa comparación.`,
+    buildLanguageInstruction(language),
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-export function buildJudgeSystemPrompt(persona: JudgePersona): string {
+export function buildJudgeSystemPrompt(persona: JudgePersona, language: DebateLanguage): string {
   return [
-    `Sos ${persona.displayName}, quien evalúa un debate entre IAs sobre un trend de Internet.`,
-    `No tenés una postura propia sobre el tema — tu única función es evaluar cómo debatieron los demás agentes.`,
+    `Eres ${persona.displayName}, quien evalúa un debate entre IAs sobre un trend de Internet.`,
+    `No tienes una postura propia sobre el tema — tu única función es evaluar cómo debatieron los demás agentes.`,
     `Criterios de evaluación: ${persona.evaluationCriteria.map((c) => `- ${c}`).join("\n")}`,
-    `Reglas que no podés romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
-    `Reglas que siempre debés cumplir: ${persona.editorialRules.required.join("; ")}.`,
+    `Reglas que no puedes romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
+    `Reglas que siempre debes cumplir: ${persona.editorialRules.required.join("; ")}.`,
+    buildLanguageInstruction(language),
   ].join("\n\n");
 }

@@ -23,6 +23,7 @@ describe("EpisodeContextService", () => {
       episode: {
         findUniqueOrThrow: jest.fn().mockResolvedValue({
           debateId: DEBATE_ID,
+          language: "ES",
           debate: { topicId: TOPIC_ID, topic: { title: "Un trend" } },
         }),
       },
@@ -64,7 +65,26 @@ describe("EpisodeContextService", () => {
         { agentId: AGENT_A, personaId: "ANALYST", displayName: DEBATER_PERSONAS.ANALYST.displayName },
         { agentId: AGENT_B, personaId: "CONTRARIAN", displayName: DEBATER_PERSONAS.CONTRARIAN.displayName },
       ],
+      language: "ES",
     });
+  });
+
+  // Spec 004, paso 5c (AC 4.10, 4.12): el idioma sale de Episode.language en
+  // cada build, así que lo reciben igual el pipeline, un resume, la
+  // recuperación post-caída, regenerate y regenerate-verdict.
+  it.each(["EN", "PT"] as const)("completa language desde Episode.language (%s)", async (language) => {
+    prisma.episode.findUniqueOrThrow.mockResolvedValueOnce({
+      debateId: DEBATE_ID,
+      language,
+      debate: { topicId: TOPIC_ID, topic: { title: "Un trend" } },
+    });
+
+    const context = await service.build(EPISODE_ID);
+
+    expect(context.language).toBe(language);
+    expect(prisma.episode.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ language: true }) })
+    );
   });
 
   it("filtra por el tópico y el debate del episodio, solo OFFICIAL en orden de creación, y sin el juez", async () => {

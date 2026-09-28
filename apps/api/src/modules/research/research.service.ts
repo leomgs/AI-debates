@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { generateObject } from "ai";
 import { retry, handleWhen, ExponentialBackoff, circuitBreaker, ConsecutiveBreaker, wrap } from "cockatiel";
-import { Topic, Source } from "@prisma/client";
+import { DebateLanguage, Topic, Source } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ModelProviderFactory } from "../ai/model-provider.factory";
 import { LlmRateLimiterService } from "../ai/llm-rate-limiter.service";
@@ -10,6 +10,7 @@ import { DailyQuotaExceededError } from "../ai/ai.errors";
 import { TavilyProvider } from "./tavily.provider";
 import { InsufficientEvidenceError } from "./research.errors";
 import { ResearchOutput, ResearchOutputSchema } from "../../shared/contracts/agents.contracts";
+import { buildLanguageInstruction, describeLanguage } from "../../shared/personas/language-instruction";
 
 // Política propia de ResearchService (coding-rules.md §4) — la llamada al
 // LLM de extracción falla distinto a la búsqueda web de TavilyProvider
@@ -27,20 +28,27 @@ const policy = wrap(retryPolicy, breakerPolicy);
 
 const MIN_VALID_SOURCES = 3; // AC 1.2 / features.md Feature 1, edge case
 
-function buildExtractionSystemPrompt(): string {
+// Spec 004, D9 (AC 4.7, 4.13): la búsqueda no se restringe por idioma, así
+// que las fuentes pueden venir en cualquiera; los hechos se redactan en el
+// idioma del debate, para que debatientes y fact-checker no trabajen con
+// evidencia mezclada. El system prompt lo dice en español (D11) y la última
+// línea del prompt de usuario repite la instrucción en el idioma de destino.
+function buildExtractionSystemPrompt(language: DebateLanguage): string {
   return [
-    "Sos un extractor de hechos para una Evidence Base de investigación.",
+    "Eres un extractor de hechos para una Evidence Base de investigación.",
     "Tu única función es leer fuentes ya recolectadas y extraer afirmaciones factuales concretas (Facts/Data_Points), citando siempre la fuente exacta de la que salió cada una.",
     "No opines, no completes con conocimiento propio lo que las fuentes no dicen explícitamente, no inventes datos.",
+    `Idioma: las fuentes pueden estar en cualquier idioma. Redacta cada hecho (statement) en ${describeLanguage(language)}, sin cambiar lo que dice la fuente; los sourceId no se traducen.`,
   ].join("\n\n");
 }
 
-function buildExtractionPrompt(topic: string, sources: Source[]): string {
+function buildExtractionPrompt(topic: string, sources: Source[], language: DebateLanguage): string {
   return [
     `Tema de investigación: ${topic}`,
-    `Fuentes recolectadas (usá exactamente el id indicado en el campo sourceId de cada fact que extraigas):`,
+    `Fuentes recolectadas (usa exactamente el id indicado en el campo sourceId de cada fact que extraigas):`,
     sources.map((s) => `- id: ${s.id}\n  título: ${s.title}\n  contenido: ${s.snippet}`).join("\n"),
-    "Extraé los hechos relevantes para el tema. Cada fact debe tener un sourceId que matchee exactamente uno de los ids de arriba.",
+    "Extrae los hechos relevantes para el tema. Cada fact debe tener un sourceId que coincida exactamente con uno de los ids de arriba.",
+    buildLanguageInstruction(language),
   ].join("\n\n");
 }
 
@@ -71,6 +79,11 @@ export class ResearchService {
   // le pertenece a este módulo (architecture.md §6). Resuelto: EpisodesModule
   // crea el Topic en EpisodesService.createEpisode(), antes de llamar acá.
   //
+  // language (spec 004, regla de flujo del idioma): el idioma del episodio
+  // llega por parámetro, porque Episode no le pertenece a este módulo. Solo
+  // cambia el idioma en que se redactan los hechos; la búsqueda en Tavily
+  // sigue sin restricción de idioma (D9).
+  //
   // manualSources (opcional, aditivo/retrocompatible): usado por
   // EpisodesModule al reanudar un episodio en REQUIRES_HUMAN_REVIEW con
   // reason INSUFFICIENT_EVIDENCE (api-contract.md §3, acción `resume`) — el
@@ -80,6 +93,7 @@ export class ResearchService {
   // incluyéndolas en el pool desde el arranque.
   async research(
     topicId: string,
+    language: DebateLanguage,
     manualSources?: Array<{ url: string; title: string; snippet: string }>
   ): Promise<ResearchOutput> {
     const topic = await this.prisma.topic.findUniqueOrThrow({ where: { id: topicId } });
@@ -120,8 +134,8 @@ export class ResearchService {
       const result = await generateObject({
         model,
         schema: ResearchOutputSchema,
-        system: buildExtractionSystemPrompt(),
-        prompt: buildExtractionPrompt(topic.title, researchSession.sources),
+        system: buildExtractionSystemPrompt(language),
+        prompt: buildExtractionPrompt(topic.title, researchSession.sources, language),
       });
       return ResearchOutputSchema.parse(result.object); // dentro del retry — coding-rules.md §3
     });

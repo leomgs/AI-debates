@@ -363,6 +363,44 @@ describe("EpisodeActionsService", () => {
     });
   });
 
+  // Spec 004 (AC 4.6, 4.12): regenerate y regenerate-verdict arman el
+  // contexto con EpisodeContextService (real en este spec), que lee
+  // Episode.language: el agente y el juez reciben el idioma del episodio sin
+  // que estas acciones lo acepten ni lo pasen a mano (AC 4.3).
+  describe("idioma del episodio en regenerate y regenerate-verdict (spec 004)", () => {
+    beforeEach(() => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("PENDING_REVIEW", "EN"));
+    });
+
+    it("regenerate sobre un episodio EN pasa al agente el contexto compartido con language EN (AC 4.12)", async () => {
+      prisma.argument.findFirstOrThrow.mockResolvedValueOnce({
+        id: ARG_ID,
+        agentId: AGENT_ID,
+        respondsToId: null,
+        debateRound: { id: "round-2", type: "REBUTTAL" },
+      });
+      prisma.episodeParticipant.findFirstOrThrow.mockResolvedValue({ agentId: AGENT_ID, modelProvider: "GOOGLE", agent: { role: "ANALYST" } });
+      const agentInstance = agentsService.createDebateAgent();
+
+      await service.regenerate(EPISODE_ID, { argumentId: ARG_ID });
+
+      expect(agentInstance.argue).toHaveBeenCalledWith(expect.objectContaining({ topic: "Un trend", language: "EN" }), "REBUTTAL");
+      // El idioma sale de la base: la query del contexto lo selecciona.
+      expect(prisma.episode.findUniqueOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({ select: expect.objectContaining({ language: true }) })
+      );
+    });
+
+    it("regenerate-verdict sobre un episodio PT llama al juez con language PT (AC 4.6)", async () => {
+      prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("PENDING_REVIEW", "PT"));
+      prisma.episodeParticipant.findFirstOrThrow.mockResolvedValue({ agentId: JUDGE_ID, modelProvider: "ANTHROPIC", isJudge: true });
+
+      await service.regenerateVerdict(EPISODE_ID);
+
+      expect(agentsService.judge).toHaveBeenCalledWith(expect.objectContaining({ language: "PT" }), "ANTHROPIC");
+    });
+  });
+
   describe("regenerateAudio", () => {
     it("en READY_FOR_RENDER delega en TtsService.regenerateSegmentByIndex dentro de withTtsCall (AC 2.1)", async () => {
       prisma.episode.findUniqueOrThrow.mockResolvedValue(episodeWithDebate("READY_FOR_RENDER"));

@@ -6,6 +6,7 @@ import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
 import { AgentsService } from './agents.service';
 import { DebateContext } from '../../shared/contracts/agents.contracts';
 import { ANALYST, CONTRARIAN, JUDGE, buildDebaterSystemPrompt, buildJudgeSystemPrompt } from '../../shared/personas/agents.personas';
+import { buildLanguageInstruction } from '../../shared/personas/language-instruction';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -29,6 +30,7 @@ function buildContext(overrides: Partial<DebateContext> = {}): DebateContext {
     },
     officialArguments: [],
     participants: [],
+    language: 'ES',
     ...overrides,
   };
 }
@@ -75,7 +77,7 @@ describe('AgentsService', () => {
       expect(draft).toEqual({ content: 'La evidencia muestra una adopción creciente.' });
       const call = mockGenerateObject.mock.calls[0][0];
       expect(call.model).toBe(FAKE_MODEL);
-      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'REBUTTAL'));
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'REBUTTAL', 'ES'));
       expect(call.prompt).toContain(context.topic);
       expect(call.prompt).toContain(context.evidenceBase.facts[0].statement);
     });
@@ -93,7 +95,7 @@ describe('AgentsService', () => {
       await agent.argue(context, 'REBUTTAL');
 
       const call = mockGenerateObject.mock.calls[0][0];
-      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'REBUTTAL', CONTRARIAN));
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'REBUTTAL', 'ES', CONTRARIAN));
       expect(call.system).toContain(CONTRARIAN.displayName);
     });
   });
@@ -116,7 +118,7 @@ describe('AgentsService', () => {
 
       expect(draft.respondsToId).toBe(target.id);
       const call = mockGenerateObject.mock.calls[0][0];
-      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'CROSS_EXAMINATION'));
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'CROSS_EXAMINATION', 'ES'));
       expect(call.prompt).toContain(target.content);
       expect(call.prompt).toContain(target.id);
     });
@@ -134,7 +136,7 @@ describe('AgentsService', () => {
 
       expect(amended).toEqual({ content: 'Versión corregida sin el dato cuestionado.' });
       const call = mockGenerateObject.mock.calls[0][0];
-      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'OPENING'));
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'OPENING', 'ES'));
       expect(call.prompt).toContain(feedback.details);
     });
 
@@ -151,7 +153,7 @@ describe('AgentsService', () => {
 
       expect(amended).toEqual({ content: 'Respuesta corregida.', respondsToId: '22222222-2222-4222-8222-222222222222' });
       const call = mockGenerateObject.mock.calls[0][0];
-      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'CROSS_EXAMINATION'));
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'CROSS_EXAMINATION', 'ES'));
     });
   });
 
@@ -169,8 +171,78 @@ describe('AgentsService', () => {
       expect(verdict.winnerAgentId).toBe('33333333-3333-4333-8333-333333333333');
       expect(modelProviderFactory.resolve).toHaveBeenCalledWith('ANTHROPIC');
       const call = mockGenerateObject.mock.calls[0][0];
-      expect(call.system).toBe(buildJudgeSystemPrompt(JUDGE));
+      expect(call.system).toBe(buildJudgeSystemPrompt(JUDGE, 'ES'));
       expect(call.prompt).toContain(context.topic);
+    });
+  });
+
+  // Spec 004, D11 (AC 4.6): toda llamada generativa lleva la instrucción de
+  // idioma del episodio (context.language) como regla del system prompt y
+  // como última línea del prompt de usuario. El regenerate de curaduría usa
+  // estos mismos argue()/respond() con el contexto compartido
+  // (EpisodeContextService), y el regenerate-verdict usa judge().
+  describe('instrucción de idioma (spec 004, AC 4.6)', () => {
+    const LANGUAGES = ['ES', 'EN', 'PT'] as const;
+    const TARGET = {
+      id: '22222222-2222-4222-8222-222222222222',
+      agentId: AGENT_B_ID,
+      content: 'Los copilotos de IA ya reemplazan tareas enteras.',
+      roundType: 'REBUTTAL' as const,
+    };
+
+    function expectLanguageInstruction(call: { system: string; prompt: string }, language: (typeof LANGUAGES)[number]) {
+      const instruction = buildLanguageInstruction(language);
+      // Regla del system prompt: su último párrafo.
+      expect(call.system.split('\n\n').at(-1)).toBe(instruction);
+      // Última línea del prompt de usuario.
+      expect(call.prompt.split('\n\n').at(-1)).toBe(instruction);
+      // Y ninguna instrucción de otro idioma se cuela.
+      for (const other of LANGUAGES.filter((l) => l !== language)) {
+        expect(call.system).not.toContain(buildLanguageInstruction(other));
+        expect(call.prompt).not.toContain(buildLanguageInstruction(other));
+      }
+    }
+
+    it.each(LANGUAGES)('argue() en %s', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { content: 'Un argumento.' } });
+      const agent = service.createDebateAgent(ANALYST, 'GOOGLE');
+
+      await agent.argue(buildContext({ language }), 'OPENING');
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expect(call.system).toBe(buildDebaterSystemPrompt(ANALYST, 'OPENING', language));
+      expectLanguageInstruction(call, language);
+    });
+
+    it.each(LANGUAGES)('respond() en %s', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { content: 'Una réplica.', respondsToId: TARGET.id } });
+      const agent = service.createDebateAgent(ANALYST, 'GOOGLE');
+
+      await agent.respond(buildContext({ language }), TARGET);
+
+      expectLanguageInstruction(mockGenerateObject.mock.calls[0][0], language);
+    });
+
+    it.each(LANGUAGES)('amend() en %s, también con respondsToId (la instrucción queda última)', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { content: 'Enmendado.', respondsToId: TARGET.id } });
+      const agent = service.createDebateAgent(ANALYST, 'GOOGLE');
+      const feedback = { reason: 'PERSONA_VIOLATION' as const, details: 'Detalle del rechazo.' };
+
+      await agent.amend(buildContext({ language }), { content: 'Original.', respondsToId: TARGET.id }, feedback, 'CROSS_EXAMINATION');
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expect(call.prompt).toContain(`respondsToId: ${TARGET.id}`);
+      expectLanguageInstruction(call, language);
+    });
+
+    it.each(LANGUAGES)('judge() en %s', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { content: 'Veredicto.', winnerAgentId: null } });
+
+      await service.judge(buildContext({ language }), 'GOOGLE');
+
+      const call = mockGenerateObject.mock.calls[0][0];
+      expect(call.system).toBe(buildJudgeSystemPrompt(JUDGE, language));
+      expectLanguageInstruction(call, language);
     });
   });
 

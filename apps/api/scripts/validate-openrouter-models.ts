@@ -47,7 +47,7 @@ async function validateModel(openrouter: ReturnType<typeof createOpenRouter>, mo
     const result = await generateObject({
       model: openrouter(modelId),
       schema: TestSchema,
-      system: "Sos un extractor de claims. Segmentá el texto en afirmaciones y clasificá cada una en FACTUAL, OPINION, PREDICTION o SUBJECTIVE.",
+      system: "Eres un extractor de claims. Segmenta el texto en afirmaciones y clasifica cada una en FACTUAL, OPINION, PREDICTION o SUBJECTIVE.",
       prompt: `Argumento a segmentar:\n\n${TEST_ARGUMENT}`,
     });
     const parsed = TestSchema.parse(result.object); // mismo patrón que el resto del proyecto — .parse() adentro

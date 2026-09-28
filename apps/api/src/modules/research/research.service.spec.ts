@@ -7,6 +7,7 @@ import { LlmRateLimiterService } from '../ai/llm-rate-limiter.service';
 import { TavilyProvider } from './tavily.provider';
 import { ResearchService } from './research.service';
 import { InsufficientEvidenceError } from './research.errors';
+import { buildLanguageInstruction, describeLanguage } from '../../shared/personas/language-instruction';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -75,7 +76,7 @@ describe('ResearchService', () => {
         { title: 'A duplicada', url: 'https://a-mirror.com', content: 'mismo contenido' }, // mismo hash que la anterior
       ]);
 
-      await expect(service.research(TOPIC_ID)).rejects.toThrow(InsufficientEvidenceError);
+      await expect(service.research(TOPIC_ID, 'ES')).rejects.toThrow(InsufficientEvidenceError);
       expect(prisma.researchSession.create).not.toHaveBeenCalled();
     });
 
@@ -95,7 +96,7 @@ describe('ResearchService', () => {
         object: { topic: 'Un trend', facts: [{ statement: 'Un hecho de A', sourceId: SOURCE_A }] },
       });
 
-      await service.research(TOPIC_ID);
+      await service.research(TOPIC_ID, 'ES');
 
       const createCall = prisma.researchSession.create.mock.calls[0][0];
       expect(createCall.data.sources.create).toHaveLength(3); // 4 resultados, 1 duplicado -> 3 fuentes válidas
@@ -115,7 +116,7 @@ describe('ResearchService', () => {
         object: { topic: 'Un trend', facts: [{ statement: 'Un hecho de A', sourceId: SOURCE_A }, { statement: 'Un hecho de B', sourceId: SOURCE_B }] },
       });
 
-      const result = await service.research(TOPIC_ID);
+      const result = await service.research(TOPIC_ID, 'ES');
 
       expect(modelProviderFactory.resolve).toHaveBeenCalledWith('GOOGLE');
       const call = mockGenerateObject.mock.calls[0][0];
@@ -139,7 +140,7 @@ describe('ResearchService', () => {
       });
       mockGenerateObject.mockResolvedValue({ object: { topic: 'Un trend', facts: [{ statement: 'Un hecho', sourceId: SOURCE_A }] } });
 
-      await service.research(TOPIC_ID, [
+      await service.research(TOPIC_ID, 'ES', [
         { url: 'https://manual-b.com', title: 'Manual B', snippet: 'manual B' },
         { url: 'https://manual-c.com', title: 'Manual C', snippet: 'manual C' },
       ]);
@@ -161,11 +162,35 @@ describe('ResearchService', () => {
       });
       mockGenerateObject.mockResolvedValue({ object: { topic: 'Un trend', facts: [] } }); // facts vacío falla .min(1)
 
-      await expect(service.research(TOPIC_ID)).rejects.toThrow();
+      await expect(service.research(TOPIC_ID, 'ES')).rejects.toThrow();
 
       // maxAttempts: 3 en cockatiel = 1 intento inicial + 3 reintentos = 4 invocaciones.
       expect(mockGenerateObject).toHaveBeenCalledTimes(4);
       expect(prisma.evidenceFact.createMany).not.toHaveBeenCalled();
     }, 10_000);
+
+    // Spec 004, D9 (AC 4.7 parte tests, AC 4.13): la búsqueda no cambia
+    // (Tavily recibe el título tal cual, sin idioma), y la extracción redacta
+    // los hechos en el idioma del episodio, aunque las fuentes estén en otro.
+    it.each(['ES', 'EN', 'PT'] as const)('en %s, pide los hechos en ese idioma sin tocar la búsqueda', async (language) => {
+      prisma.topic.findUniqueOrThrow.mockResolvedValue({ id: TOPIC_ID, title: 'Un trend', context: 'contexto' });
+      tavily.search.mockResolvedValue([
+        { title: 'A', url: 'https://a.com', content: 'contenido A' },
+        { title: 'B', url: 'https://b.com', content: 'contenido B' },
+        { title: 'C', url: 'https://c.com', content: 'contenido C' },
+      ]);
+      prisma.researchSession.create.mockResolvedValue({
+        id: 'session-1',
+        sources: [persistedSource(SOURCE_A, 'contenido A'), persistedSource(SOURCE_B, 'contenido B'), persistedSource(SOURCE_C, 'contenido C')],
+      });
+      mockGenerateObject.mockResolvedValue({ object: { topic: 'Un trend', facts: [{ statement: 'A fact', sourceId: SOURCE_A }] } });
+
+      await service.research(TOPIC_ID, language);
+
+      expect(tavily.search).toHaveBeenCalledWith('Un trend');
+      const call = mockGenerateObject.mock.calls[0][0];
+      expect(call.system.split('\n\n').at(-1)).toContain(`Redacta cada hecho (statement) en ${describeLanguage(language)}`);
+      expect(call.prompt.split('\n\n').at(-1)).toBe(buildLanguageInstruction(language));
+    });
   });
 });
