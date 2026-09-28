@@ -685,5 +685,32 @@ describe('Acciones de curaduría (e2e): API-10b, API-14 y API-19', () => {
         'VALIDATION_ERROR',
       );
     });
+
+    // Un nombre válido con percent-encoding no matchea la ruta literal pero
+    // sí `:action` (Express lo decodifica) y pasa ActionNameSchema: la ruta
+    // genérica responde 400, no un 500 ni la acción, y no toca el episodio.
+    it.each([
+      ['appr%6Fve', 'approve'],
+      ['regenerate%2Daudio', 'regenerate-audio'],
+    ])(
+      'acción válida con percent-encoding (%s) → 400 VALIDATION_ERROR sin ejecutarla',
+      async (encoded, decoded) => {
+        const { episode } = await seedReviewedEpisode(prisma);
+
+        const res = await action(episode.id, encoded, {}).expect(400);
+
+        expect(ErrorResponseSchema.parse(res.body)).toEqual({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: expect.stringContaining(`"${decoded}"`),
+          },
+        });
+        expect(res.body.error.message).toMatch(/^action: /);
+        const after = await prisma.episode.findUniqueOrThrow({
+          where: { id: episode.id },
+        });
+        expect(after.status).toBe('PENDING_REVIEW');
+      },
+    );
   });
 });

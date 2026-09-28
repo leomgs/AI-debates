@@ -147,6 +147,24 @@ describe('Idioma del episodio en la API (e2e, spec 004)', () => {
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
 
+    // El dashboard infiere a qué campo marcar en el form por el prefijo
+    // `<campo>: ` del mensaje (formatZodIssue en HttpErrorFilter): si el
+    // formato cambia, el error deja de aparecer junto al input de topic.
+    it('topic de 301 caracteres → 400 VALIDATION_ERROR con el mensaje prefijado por "topic: ", sin crear filas', async () => {
+      const before = await countCreationRows(prisma);
+
+      const res = await request(app.getHttpServer())
+        .post('/episodes')
+        .set('Cookie', cookie)
+        .send({ topic: 'x'.repeat(301), language: 'ES' })
+        .expect(400);
+
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.message).toMatch(/^topic: /);
+      expect(await countCreationRows(prisma)).toEqual(before);
+      expect(runPipelineSpy).not.toHaveBeenCalled();
+    });
+
     it.each([
       ['explícito', { language: 'ES' }],
       ['omitido', {}],
@@ -213,9 +231,11 @@ describe('Idioma del episodio en la API (e2e, spec 004)', () => {
     expect(after.language).toBe('ES');
   });
 
-  // AC 4.16 y 4.18 por HTTP: @ZodResponse valida la respuesta contra
-  // RemotionManifestSchema, así que un voiceId null solo sale en 200 si el
-  // contrato lo acepta. Borrar la voz del juez no cambia nada (D17 revisado).
+  // AC 4.16 y 4.18 por HTTP. @ZodResponse no valida la respuesta en runtime
+  // (no hay ZodSerializerInterceptor en este proyecto: solo documenta y
+  // tipa), así que el test la parsea con RemotionManifestSchema para
+  // comprobar que un voiceId null respeta el contrato. Borrar la voz del
+  // juez no cambia nada (D17 revisado).
   it('GET /episodes/:id/manifest → 200 con meta.language del episodio y el juez con voiceId null, aunque se borre su voz', async () => {
     const analystId = agentIdsByRole.get('ANALYST')!;
     const judgeId = agentIdsByRole.get(JUDGE.id)!;

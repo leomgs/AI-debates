@@ -1,4 +1,4 @@
-import { Body, Controller, Get, MessageEvent, Param, Post, Query, Res, Sse } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, MessageEvent, Param, Post, Query, Res, Sse } from "@nestjs/common";
 import { ApiBody, ApiExcludeEndpoint, ApiExtraModels, ApiOperation, ApiResponse, ApiTags, getSchemaPath } from "@nestjs/swagger";
 import { ZodResponse, ZodValidationPipe } from "nestjs-zod";
 import { EMPTY, Observable } from "rxjs";
@@ -249,12 +249,22 @@ export class EpisodesController {
   // API-10, cuando `action` era path param validado con ActionNameSchema (sin
   // esta ruta sería un 404 de Nest). Va DESPUÉS de las 7 rutas de arriba:
   // Express prueba las rutas en el orden en que Nest las registra (el de
-  // declaración de los métodos), así que un nombre válido nunca llega acá y
-  // el pipe siempre falla. Fuera de openapi.json: no es una operación.
+  // declaración de los métodos), así que un nombre desconocido falla en el
+  // pipe con el mismo mensaje de antes. Fuera de openapi.json: no es una
+  // operación. Tiene que seguir siendo el último @Post del controller (lo
+  // verifica episodes.controller.spec.ts): una acción declarada debajo
+  // quedaría tapada por esta ruta.
+  // Un nombre válido sí puede llegar acá si viene con percent-encoding
+  // (`appr%6Fve`, `regenerate%2Daudio`): no matchea la ruta literal, pero
+  // `:action` llega decodificado y pasa el pipe. No es una falla del
+  // servidor sino una URL distinta de la documentada: 400 VALIDATION_ERROR
+  // (BadRequestException, vía HttpErrorFilter), no un 500.
   @Post(":id/actions/:action")
   @ApiExcludeEndpoint()
   unknownAction(@Param("action", new ZodValidationPipe(ActionNameSchema)) action: ActionName): never {
-    throw new Error(`La acción "${action}" tiene handler propio y no debería llegar a la ruta genérica.`);
+    throw new BadRequestException(
+      `action: la acción "${action}" tiene que ir literal en la URL (/actions/${action}), sin caracteres codificados.`
+    );
   }
 
   // Feature 8 — OpenAPI no modela streams SSE (spec 001, restricción

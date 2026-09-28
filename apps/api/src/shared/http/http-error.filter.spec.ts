@@ -2,7 +2,7 @@ import type { ArgumentsHost } from "@nestjs/common";
 import * as nestCommon from "@nestjs/common";
 import { HttpException, UnauthorizedException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { ZodValidationException } from "nestjs-zod";
 import { InvalidCredentialsError, LoginBusyError, TooManyLoginAttemptsError } from "../../modules/auth/auth.errors";
 import { BudgetExceededError, InvalidEpisodeTransitionError } from "../../modules/episodes/episodes.errors";
@@ -97,6 +97,27 @@ describe("HttpErrorFilter — voces (spec 004, D15)", () => {
     expect(error.message).toMatch(/idioma EN/);
     expect(error.message).toMatch(/"LOCAL"/);
     expect(error.message).toMatch(/Analista \(ANALYST\), rol JUDGE \(sin fila Agent\)/);
+  });
+});
+
+// El dashboard infiere el campo del form por el prefijo `<path>: ` del
+// mensaje (formatZodIssue): se fija acá el formato del primer issue.
+describe("HttpErrorFilter — mensaje de los errores de Zod", () => {
+  it("ZodValidationException del pipe global: 400 VALIDATION_ERROR con `<campo>: <mensaje>` del primer issue", () => {
+    const result = z.object({ topic: z.string().max(300) }).safeParse({ topic: "x".repeat(301) });
+    if (result.success) throw new Error("el schema debería rechazar el topic");
+    const res = run(new ZodValidationException(result.error));
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0][0] as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.message).toBe(`topic: ${result.error.issues[0].message}`);
+  });
+
+  it("paths anidados se unen con punto", () => {
+    const result = z.object({ limits: z.object({ maxLlmCalls: z.number() }) }).safeParse({ limits: { maxLlmCalls: "x" } });
+    if (result.success) throw new Error("el schema debería rechazar maxLlmCalls");
+    const body = run(result.error).json.mock.calls[0][0] as { error: { message: string } };
+    expect(body.error.message).toMatch(/^limits\.maxLlmCalls: /);
   });
 });
 
