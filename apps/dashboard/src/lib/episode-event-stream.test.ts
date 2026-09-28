@@ -212,6 +212,21 @@ describe("EpisodeEventStream (AC 3.32-3.38)", () => {
     expect(states.at(-1)).toBe("disconnected");
   });
 
+  it("stop y start mientras refresca: el refresco viejo no reconecta (una sola conexión viva)", async () => {
+    const { stream, current, sources, timers, states } = setup([true]);
+    stream.start();
+    current().emit("error");
+    stream.stop();
+    stream.start();
+    expect(sources).toHaveLength(2);
+    await flush();
+    expect(timers.pending.size).toBe(0);
+    timers.runAll();
+    expect(sources).toHaveLength(2);
+    expect(sources[1].closed).toBe(false);
+    expect(states.at(-1)).toBe("connecting");
+  });
+
   it("si el refresco lanza, reintenta con la espera creciente", async () => {
     const { stream, current, timers, refetchAndDecide } = setup();
     refetchAndDecide.mockRejectedValueOnce(new Error("inesperado"));

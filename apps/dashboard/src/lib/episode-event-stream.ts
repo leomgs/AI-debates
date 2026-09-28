@@ -66,6 +66,13 @@ export class EpisodeEventStream {
   private source: EventSourceLike | null = null;
   private reconnectTimer: unknown = null;
   private stopped = true;
+  /**
+   * Sube con cada start() y stop(). Un refresco (recover) o un timer que
+   * empezó en una generación anterior no hace nada al terminar: sin esto,
+   * un stop() seguido de start() mientras se refrescaba dejaba dos
+   * conexiones (la nueva y la reconexión de la vieja).
+   */
+  private generation = 0;
   /** Reconexiones seguidas sin que la conexión llegue a abrirse. */
   private attempt = 0;
   private state: StreamConnectionState | null = null;
@@ -78,6 +85,7 @@ export class EpisodeEventStream {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.generation += 1;
     this.attempt = 0;
     this.connect();
   }
@@ -85,6 +93,7 @@ export class EpisodeEventStream {
   /** Cierra la conexión (y con ella la de la API) y cancela una reconexión pendiente. */
   stop(): void {
     this.stopped = true;
+    this.generation += 1;
     if (this.reconnectTimer !== null) {
       this.timers.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -136,6 +145,8 @@ export class EpisodeEventStream {
   }
 
   private async recover(): Promise<void> {
+    const generation = this.generation;
+    const isCurrentGeneration = () => !this.stopped && this.generation === generation;
     let reconnect: boolean;
     try {
       reconnect = await this.options.refetchAndDecide();
@@ -144,7 +155,7 @@ export class EpisodeEventStream {
       // con la espera creciente, que vuelve a refrescar si falla.
       reconnect = true;
     }
-    if (this.stopped) return;
+    if (!isCurrentGeneration()) return;
     if (!reconnect) {
       this.setState("closed");
       return;
@@ -153,7 +164,7 @@ export class EpisodeEventStream {
     this.attempt += 1;
     this.reconnectTimer = this.timers.setTimeout(() => {
       this.reconnectTimer = null;
-      if (!this.stopped) this.connect();
+      if (isCurrentGeneration()) this.connect();
     }, delay);
   }
 }
