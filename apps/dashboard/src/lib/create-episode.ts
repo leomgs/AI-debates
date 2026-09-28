@@ -46,6 +46,9 @@ export function parseValidationError(message: string): { field: CreateEpisodeErr
   const path = separator >= 0 ? message.slice(0, separator).trim() : "";
   const rest = separator >= 0 ? message.slice(separator + 1).trim() : "";
   if ((path === "topic" || path === "language") && rest) return { field: path, message: rest };
+  // Issue sin path (por ejemplo, una clave de más que rechaza `.strict()`):
+  // el mensaje llega como ": <mensaje>". Va al error general sin el ": ".
+  if (separator >= 0 && path === "" && rest) return { field: "form", message: rest };
   return { field: "form", message };
 }
 

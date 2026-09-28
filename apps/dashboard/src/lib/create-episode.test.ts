@@ -90,6 +90,13 @@ describe("parseValidationError (N2)", () => {
     expect(parseValidationError("topic:   ")).toEqual({ field: "form", message: "topic:   " });
   });
 
+  it("un issue sin path (\": …\", clave de más en .strict()) va al error general sin el prefijo vacío", () => {
+    expect(parseValidationError(': Unrecognized key: "extra"')).toEqual({ field: "form", message: 'Unrecognized key: "extra"' });
+    expect(parseValidationError("  :  algo")).toEqual({ field: "form", message: "algo" });
+    // Solo ":" sin mensaje: se deja como vino, no queda vacío.
+    expect(parseValidationError(":")).toEqual({ field: "form", message: ":" });
+  });
+
   it("un path anidado o desconocido no se recorta", () => {
     expect(parseValidationError("topic.x: algo")).toEqual({ field: "form", message: "topic.x: algo" });
   });
