@@ -90,8 +90,10 @@ export function feedLine(event: BusinessEvent, participants: readonly Participan
         text: `${agentName(participants, event.data.agentId)} está preparando su argumento de la ronda ${event.data.round}`,
       };
     case "fact_check.completed":
+      if (event.data.status === "PASSED") return { text: "Fact-check: aprobado" };
+      // Rechazado sin errores contados: "0 errores detectados" confundiría.
       return {
-        text: event.data.status === "PASSED" ? "Fact-check: aprobado" : `Fact-check: ${pluralErrors(event.data.errorsDetected)}`,
+        text: event.data.errorsDetected > 0 ? `Fact-check: ${pluralErrors(event.data.errorsDetected)}` : "Fact-check: rechazado",
       };
     case "argument.approved":
       return { text: `Nuevo argumento de ${agentName(participants, event.data.agentId)}`, quote: excerpt(event.data.text) };

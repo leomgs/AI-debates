@@ -29,7 +29,7 @@ export function EpisodeStatusNotice({
         <p className="font-medium">Detenido por un error interno; se retomará al reiniciar el backend.</p>
         <p className="text-muted-foreground">Mientras tanto la pantalla no se actualiza sola.</p>
         <Button variant="outline" size="sm" className="mt-2" onClick={onRefresh} disabled={refreshing}>
-          <RotateCw aria-hidden="true" className={cn(refreshing && "animate-spin")} />
+          <RotateCw aria-hidden="true" className={cn(refreshing && "motion-safe:animate-spin")} />
           {refreshing ? "Consultando…" : "Volver a consultar"}
         </Button>
       </Notice>

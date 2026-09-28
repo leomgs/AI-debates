@@ -1,4 +1,7 @@
+"use client";
+
 import { CircleDot, LoaderCircle, Radio, WifiOff, type LucideIcon } from "lucide-react";
+import { useState } from "react";
 import { debateLanguageTag, type AnyDebateLanguage } from "@/lib/debate-language";
 import { formatAbsoluteDate, formatTimeOfDay } from "@/lib/dates";
 import type { Participant } from "@/lib/episode-detail";
@@ -9,7 +12,7 @@ import { cn } from "@/lib/utils";
 type IndicatorKey = StreamConnectionState | "ended";
 
 const INDICATORS: Readonly<Record<IndicatorKey, { label: string; Icon: LucideIcon; className: string }>> = {
-  connecting: { label: "Conectando…", Icon: LoaderCircle, className: "text-muted-foreground [&>svg]:animate-spin" },
+  connecting: { label: "Conectando…", Icon: LoaderCircle, className: "text-muted-foreground motion-safe:[&>svg]:animate-spin" },
   live: { label: "En vivo", Icon: Radio, className: "border-primary/60 text-foreground" },
   disconnected: { label: "Desconectado", Icon: WifiOff, className: "border-destructive/50 text-destructive" },
   closed: { label: "Desconectado", Icon: WifiOff, className: "border-destructive/50 text-destructive" },
@@ -88,14 +91,23 @@ export function LiveActivity({
 
 function ConnectionIndicator({ state }: { state: IndicatorKey }) {
   const { label, Icon, className } = INDICATORS[state];
+  // Lo que anuncia el lector de pantalla: "Conectando…" no se anuncia (con
+  // la espera creciente se repetiría en cada intento), así que mientras
+  // conecta queda el último texto anunciado. Se ajusta durante el render
+  // (patrón "guardar el valor anterior" de la guía de React), sin efecto.
+  const [announced, setAnnounced] = useState(label);
+  if (state !== "connecting" && announced !== label) setAnnounced(label);
+
   return (
     <p
-      role="status"
       data-state={state}
       className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", className)}
     >
       <Icon aria-hidden="true" className="size-3.5" />
-      {label}
+      <span aria-hidden="true">{label}</span>
+      <span role="status" className="sr-only">
+        {announced}
+      </span>
     </p>
   );
 }

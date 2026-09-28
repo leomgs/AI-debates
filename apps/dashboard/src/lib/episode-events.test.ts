@@ -76,6 +76,12 @@ describe("feedLine (AC 3.32)", () => {
     );
   });
 
+  it("fact_check.completed rechazado sin errores contados: rechazado, no 0 errores", () => {
+    expect(line({ type: "fact_check.completed", data: { status: "FAILED", errorsDetected: 0 } }).text).toBe(
+      "Fact-check: rechazado",
+    );
+  });
+
   it("argument.approved con el agente y un extracto del texto (en el idioma del debate)", () => {
     const text = "Primera línea.\n\nSegunda línea con más contenido.";
     expect(line({ type: "argument.approved", data: { agentId: AGENT_A, text } })).toEqual({
