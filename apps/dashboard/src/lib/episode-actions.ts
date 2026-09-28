@@ -180,3 +180,41 @@ export function isArgumentAction(request: EpisodeActionRequest | undefined, argu
     request.argumentId === argumentId
   );
 }
+
+export interface ReviewControls {
+  budget: LlmBudget;
+  /**
+   * "Regenerar" y "Volver a juzgar" habilitados: con el presupuesto LLM
+   * agotado se deshabilitan, con la explicación a la vista (AC 3.46, AC 3.83).
+   */
+  llmActionsEnabled: boolean;
+  /**
+   * Veredicto desactualizado (AC 3.81): "Volver a juzgar" se destaca
+   * (AC 3.82) y la confirmación de "Aprobar" lo advierte (AC 3.84).
+   */
+  staleVerdict: boolean;
+}
+
+/**
+ * Controles de curaduría de PENDING_REVIEW (sección 6), o null en cualquier
+ * otro estado: ahí no se muestran, no alcanza con deshabilitarlos (AC 3.42).
+ */
+export function reviewControls(detail: Pick<EpisodeDetail, "status" | "usage" | "limits" | "debate">): ReviewControls | null {
+  if (detail.status !== "PENDING_REVIEW") return null;
+  const budget = llmBudget(detail);
+  return {
+    budget,
+    llmActionsEnabled: !budget.exhausted,
+    staleVerdict: detail.debate.verdict?.stale === true,
+  };
+}
+
+/** Advertencia de la confirmación de "Aprobar" con el veredicto desactualizado (AC 3.84). */
+export const APPROVE_STALE_VERDICT_WARNING = "El veredicto es anterior a tus cambios y es el que se va a publicar.";
+
+/** Edge case "Presupuesto agotado en PENDING_REVIEW": la confirmación de "Regenerar" lo avisa. */
+export function lastLlmCallWarning(budget: LlmBudget): string | null {
+  return budget.limit - budget.used === 1
+    ? "Es la última llamada LLM del presupuesto: después no vas a poder regenerar otro argumento ni volver a juzgar."
+    : null;
+}

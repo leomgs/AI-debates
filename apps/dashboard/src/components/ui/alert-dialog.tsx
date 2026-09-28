@@ -123,7 +123,7 @@ function AlertDialogAction({
   variant = "default",
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action> & {
-  variant?: "default" | "destructive"
+  variant?: "default" | "destructive" | "outline"
 }) {
   return (
     <AlertDialogPrimitive.Action

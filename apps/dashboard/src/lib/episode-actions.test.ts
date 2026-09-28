@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeEpisodeDetail } from "@/test/episode-detail-fixture";
 import { ApiError } from "./api/errors";
 import {
+  APPROVE_STALE_VERDICT_WARNING,
   ARGUMENT_NOT_FOUND_MESSAGE,
   EPISODE_NOT_FOUND_MESSAGE,
   LLM_BUDGET_ERROR_MESSAGE,
@@ -12,10 +13,12 @@ import {
   canRunAction,
   editDraftState,
   isArgumentAction,
+  lastLlmCallWarning,
   llmBudget,
   llmBudgetExhaustedExplanation,
   llmBudgetSummary,
   refetchesAfterError,
+  reviewControls,
   validationErrorText,
   type CurationAction,
 } from "./episode-actions";
@@ -196,5 +199,64 @@ describe("isArgumentAction", () => {
     expect(isArgumentAction({ action: "regenerate", argumentId: "a" }, "b")).toBe(false);
     expect(isArgumentAction({ action: "approve" }, "a")).toBe(false);
     expect(isArgumentAction(undefined, "a")).toBe(false);
+  });
+});
+
+describe("reviewControls (AC 3.42, AC 3.46, AC 3.81-3.84)", () => {
+  const verdict = {
+    id: "00000000-0000-4000-8000-0000000000f1",
+    judgeId: "00000000-0000-4000-8000-00000000000c",
+    content: "Gana el analista.",
+    winnerId: null,
+    createdAt: "2026-09-28T11:00:00.000Z",
+    stale: false,
+  };
+
+  it("solo en PENDING_REVIEW", () => {
+    for (const status of EPISODE_STATUSES) {
+      const controls = reviewControls(makeEpisodeDetail({ status }));
+      expect(controls === null).toBe(status !== "PENDING_REVIEW");
+    }
+  });
+
+  it("Regenerar y Volver a juzgar habilitados mientras quede presupuesto LLM", () => {
+    const controls = reviewControls(
+      makeEpisodeDetail({
+        status: "PENDING_REVIEW",
+        usage: { llmCalls: 24, searchRequests: 0, ttsRequests: 0, executionTime: 0 },
+        limits: { maxLlmCalls: 25, maxSearchQueries: 5, maxTtsSegments: 40 },
+      }),
+    );
+    expect(controls?.llmActionsEnabled).toBe(true);
+    expect(controls?.budget).toEqual({ used: 24, limit: 25, exhausted: false });
+  });
+
+  it("deshabilitados con el presupuesto LLM agotado", () => {
+    const controls = reviewControls(
+      makeEpisodeDetail({
+        status: "PENDING_REVIEW",
+        usage: { llmCalls: 25, searchRequests: 0, ttsRequests: 0, executionTime: 0 },
+        limits: { maxLlmCalls: 25, maxSearchQueries: 5, maxTtsSegments: 40 },
+      }),
+    );
+    expect(controls?.llmActionsEnabled).toBe(false);
+  });
+
+  it("veredicto desactualizado solo con stale en true", () => {
+    const fresh = reviewControls(makeEpisodeDetail({ status: "PENDING_REVIEW", debate: { rounds: [], verdict } }));
+    const stale = reviewControls(
+      makeEpisodeDetail({ status: "PENDING_REVIEW", debate: { rounds: [], verdict: { ...verdict, stale: true } } }),
+    );
+    const none = reviewControls(makeEpisodeDetail({ status: "PENDING_REVIEW", debate: { rounds: [], verdict: null } }));
+    expect(fresh?.staleVerdict).toBe(false);
+    expect(stale?.staleVerdict).toBe(true);
+    expect(none?.staleVerdict).toBe(false);
+    expect(APPROVE_STALE_VERDICT_WARNING).toBe("El veredicto es anterior a tus cambios y es el que se va a publicar.");
+  });
+
+  it("avisa cuando se va a gastar la última llamada LLM", () => {
+    expect(lastLlmCallWarning({ used: 24, limit: 25, exhausted: false })).not.toBeNull();
+    expect(lastLlmCallWarning({ used: 20, limit: 25, exhausted: false })).toBeNull();
+    expect(lastLlmCallWarning({ used: 25, limit: 25, exhausted: true })).toBeNull();
   });
 });

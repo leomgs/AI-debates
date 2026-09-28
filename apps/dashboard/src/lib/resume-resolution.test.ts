@@ -4,6 +4,7 @@ import type { DebateRound, EpisodeDetail } from "./episode-detail";
 import { liveUpdateMode } from "./live-updates";
 import {
   EMPTY_RESUME_BODY,
+  activeResolution,
   REPEAT_REASON_WARNING,
   agentsToReviewForVoices,
   agentsWithoutOfficialArguments,
@@ -242,5 +243,48 @@ describe("tras reanudar (AC 3.53)", () => {
     expect(liveUpdateMode("RESEARCHING", true)).toBe("sse");
     expect(liveUpdateMode("DEBATING", true)).toBe("sse");
     expect(liveUpdateMode("GENERATING_AUDIO", true)).toBe("polling");
+  });
+});
+
+describe("activeResolution (AC 3.51, AC 3.55)", () => {
+  type Checkpoint = EpisodeDetail["checkpoints"][number];
+  function checkpoint(reason: string, createdAt: string): Checkpoint {
+    // Un motivo que la API todavía no documenta llega como string suelto.
+    return { reason: reason as Checkpoint["reason"], fromState: "DEBATING", debateRoundId: null, createdAt };
+  }
+
+  it("solo en REQUIRES_HUMAN_REVIEW", () => {
+    const checkpoints = [checkpoint("MAX_REVISIONS_EXCEEDED", "2026-09-28T10:00:00.000Z")];
+    expect(activeResolution(makeEpisodeDetail({ status: "PENDING_REVIEW", checkpoints }))).toBeNull();
+    expect(activeResolution(makeEpisodeDetail({ status: "FAILED", checkpoints }))).toBeNull();
+  });
+
+  it("se resuelve sobre el checkpoint más reciente, sin depender del orden de la API", () => {
+    const resolution = activeResolution(
+      makeEpisodeDetail({
+        status: "REQUIRES_HUMAN_REVIEW",
+        checkpoints: [
+          checkpoint("INSUFFICIENT_EVIDENCE", "2026-09-28T12:00:00.000Z"),
+          checkpoint("USAGE_LIMIT_EXCEEDED", "2026-09-28T10:00:00.000Z"),
+        ],
+      }),
+    );
+    expect(resolution?.checkpoint?.reason).toBe("INSUFFICIENT_EVIDENCE");
+    expect(resolution?.kind).toBe("insufficient-evidence");
+  });
+
+  it("motivo desconocido o sin checkpoints: panel genérico", () => {
+    const unknown = activeResolution(
+      makeEpisodeDetail({
+        status: "REQUIRES_HUMAN_REVIEW",
+        checkpoints: [checkpoint("SOMETHING_NEW", "2026-09-28T10:00:00.000Z")],
+      }),
+    );
+    expect(unknown?.kind).toBe("unknown");
+    expect(unknown?.checkpoint?.reason).toBe("SOMETHING_NEW");
+    expect(activeResolution(makeEpisodeDetail({ status: "REQUIRES_HUMAN_REVIEW", checkpoints: [] }))).toEqual({
+      checkpoint: null,
+      kind: "unknown",
+    });
   });
 });

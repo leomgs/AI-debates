@@ -1,6 +1,6 @@
 import type { components } from "@/lib/api/schema";
 import type { CheckpointReason } from "@/lib/checkpoint-reasons";
-import type { Checkpoint, EpisodeDetail, Participant } from "@/lib/episode-detail";
+import { latestCheckpoint, type Checkpoint, type EpisodeDetail, type Participant } from "@/lib/episode-detail";
 import type { UsageMetricKey } from "@/lib/usage";
 
 // Resolución de REQUIRES_HUMAN_REVIEW (spec 003, sección 7; AC 3.51-3.55),
@@ -270,4 +270,22 @@ export function agentsWithoutOfficialArguments(detail: Pick<EpisodeDetail, "part
  */
 export function agentsToReviewForVoices(detail: Pick<EpisodeDetail, "participants">): Participant[] {
   return [...detail.participants];
+}
+
+export interface ActiveResolution {
+  /** El checkpoint más reciente; null si la API no trae ninguno (no debería pasar). */
+  checkpoint: Checkpoint | null;
+  kind: ResolutionKind;
+}
+
+/**
+ * Panel de resolución de REQUIRES_HUMAN_REVIEW (AC 3.51), o null en
+ * cualquier otro estado. Se resuelve sobre el checkpoint más reciente, el
+ * mismo que usa `resume` en el backend; sin checkpoint no se sabe qué body
+ * mandar, así que va al panel genérico con solo "Rechazar" (AC 3.55).
+ */
+export function activeResolution(detail: Pick<EpisodeDetail, "status" | "checkpoints">): ActiveResolution | null {
+  if (detail.status !== "REQUIRES_HUMAN_REVIEW") return null;
+  const checkpoint = latestCheckpoint(detail.checkpoints);
+  return { checkpoint, kind: checkpoint === null ? "unknown" : resolutionKind(checkpoint.reason) };
 }
