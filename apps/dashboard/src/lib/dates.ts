@@ -14,6 +14,11 @@ export function formatAbsoluteDate(iso: string, options: { timeZone?: string } =
   }).format(new Date(iso));
 }
 
+/** Solo la hora, con segundos ("14:05:09"): el feed en vivo, donde todo pasa en el día. */
+export function formatTimeOfDay(iso: string, options: { timeZone?: string } = {}): string {
+  return new Intl.DateTimeFormat(INTERFACE_LOCALE, { timeStyle: "medium", timeZone: options.timeZone }).format(new Date(iso));
+}
+
 const MINUTE = { unit: "minute", seconds: 60 } as const;
 
 const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; seconds: number }> = [

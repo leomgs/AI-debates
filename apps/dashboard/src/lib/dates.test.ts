@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { formatAbsoluteDate, formatRelativeDate } from "./dates";
+import { formatAbsoluteDate, formatRelativeDate, formatTimeOfDay } from "./dates";
+
+describe("formatTimeOfDay (feed en vivo, AC 3.74)", () => {
+  it("hora con segundos en la zona indicada", () => {
+    const iso = "2026-09-27T02:30:05.000Z";
+    expect(formatTimeOfDay(iso, { timeZone: "UTC" })).toBe("2:30:05");
+    expect(formatTimeOfDay(iso, { timeZone: "America/Argentina/Buenos_Aires" })).toBe("23:30:05");
+  });
+});
 
 const NOW = new Date("2026-09-27T12:00:00.000Z");
 const minutesAgo = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000).toISOString();
