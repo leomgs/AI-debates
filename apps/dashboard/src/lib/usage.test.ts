@@ -55,8 +55,13 @@ describe("usageMetrics", () => {
 });
 
 describe("formatExecutionTime (AC 3.30, en ms)", () => {
+  it("null con 0: la API todavía no lo registra y no se muestra un dato falso", () => {
+    expect(formatExecutionTime(0)).toBeNull();
+    expect(formatExecutionTime(-5)).toBeNull();
+  });
+
   it("segundos, minutos y horas", () => {
-    expect(formatExecutionTime(0)).toBe("0 s");
+    expect(formatExecutionTime(300)).toBe("menos de 1 s");
     expect(formatExecutionTime(45_400)).toBe("45 s");
     expect(formatExecutionTime(340_000)).toBe("5 min 40 s");
     expect(formatExecutionTime(120_000)).toBe("2 min");

@@ -41,13 +41,23 @@ export function UsagePanel({ usage, limits }: { usage: EpisodeDetail["usage"]; l
               </li>
             ))}
           </ul>
-          <p className="text-sm">
-            <span className="text-muted-foreground">Tiempo de ejecución: </span>
-            <span className="tabular-nums">{formatExecutionTime(usage.executionTime)}</span>
-          </p>
+          <ExecutionTime milliseconds={usage.executionTime} />
         </>
       )}
     </section>
+  );
+}
+
+// La API todavía no registra el tiempo de ejecución (queda en 0): en ese
+// caso la fila no se muestra, en vez de un "0 s" falso (AC 3.30).
+function ExecutionTime({ milliseconds }: { milliseconds: number }) {
+  const formatted = formatExecutionTime(milliseconds);
+  if (formatted === null) return null;
+  return (
+    <p className="text-sm">
+      <span className="text-muted-foreground">Tiempo de ejecución: </span>
+      <span className="tabular-nums">{formatted}</span>
+    </p>
   );
 }
 

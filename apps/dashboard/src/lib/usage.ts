@@ -64,9 +64,15 @@ export function usageLimitsSummary(limits: Limits): Array<{ label: string; limit
 /**
  * `executionTime` legible, en min/s (AC 3.30). La API lo da en milisegundos
  * (api-contract.md §2: 340000 → "5 min 40 s").
+ *
+ * null con 0 (o menos): la API todavía no registra el tiempo de ejecución
+ * (`EpisodeUsage.executionTime` queda en su default 0, nadie lo incrementa),
+ * así que "0 s" sería un dato falso; la pantalla no muestra la fila.
  */
-export function formatExecutionTime(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+export function formatExecutionTime(milliseconds: number): string | null {
+  if (milliseconds <= 0) return null;
+  const totalSeconds = Math.round(milliseconds / 1000);
+  if (totalSeconds < 1) return "menos de 1 s";
   if (totalSeconds < 60) return `${totalSeconds} s`;
   const totalMinutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
