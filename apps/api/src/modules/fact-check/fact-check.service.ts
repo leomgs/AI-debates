@@ -88,12 +88,20 @@ function buildEditorialReviewSystemPrompt(persona: DebaterPersona, language: Deb
     `Reglas que no puede romper bajo ninguna circunstancia: ${persona.editorialRules.forbidden.join("; ")}.`,
     `Reglas que siempre debe cumplir: ${persona.editorialRules.required.join("; ")}.`,
     "La afirmación a revisar es UN claim extraído de un argumento más largo — puede depender de datos o razonamiento que aparecen en otra parte de ese argumento. Evalúa la afirmación en el contexto del argumento completo (aparece abajo), no de forma aislada. Por ejemplo, una afirmación de peso que se apoya en un dato citado en una oración cercana del mismo argumento NO rompe una regla de 'no hacer afirmaciones sin respaldo', aunque el dato no esté repetido en la afirmación misma.",
+    `Idioma: la afirmación y el argumento están escritos en ${describeLanguage(language)}. Si passed es false, escribe violatedRule y reason en ${describeLanguage(language)}.`,
     // Las reglas editoriales siguen en español (D11) aunque el texto esté en
     // otro idioma (spec 004, edge case "Reglas editoriales en español
-    // evaluando texto en otro idioma"): se aclara que se aplican al
-    // contenido, para no sumar rechazos espurios por el idioma.
-    `Idioma: la afirmación y el argumento están escritos en ${describeLanguage(language)}. Las reglas de arriba están en español: aplícalas al contenido del texto, no al idioma en que está escrito. Si passed es false, escribe violatedRule y reason en ${describeLanguage(language)}.`,
-  ].join("\n\n");
+    // evaluando texto en otro idioma"). Se aclara que valen igual en ese
+    // idioma, para no sumar rechazos espurios por el idioma, sin sugerir que
+    // solo cuentan las ideas: las reglas de forma (insultos,
+    // descalificaciones) se siguen evaluando (review de 13.5, M1). En ES no
+    // hace falta.
+    language === "ES"
+      ? null
+      : `Las reglas de arriba están redactadas en español, pero se aplican igual a un texto en ${describeLanguage(language)}: evalúa lo que el texto dice y cómo lo dice. Que el texto no esté en español no es, por sí solo, una violación.`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n\n");
 }
 
 // argumentContent: bug real encontrado corriendo scripts/smoke-test-episode.ts

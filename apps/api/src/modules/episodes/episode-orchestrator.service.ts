@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Argument, Claim, DebateLanguage, DebateRound, ModelProvider, Prisma, RoundType } from "@prisma/client";
+import { Argument, Claim, DebateRound, ModelProvider, Prisma, RoundType } from "@prisma/client";
 import { PrismaService } from "../../shared/prisma/prisma.service";
 import { ResearchService } from "../research/research.service";
 import { InsufficientEvidenceError } from "../research/research.errors";
@@ -26,6 +26,7 @@ import {
   FactCheckOutput,
 } from "../../shared/contracts/agents.contracts";
 import { DEBATER_PERSONAS, DebaterPersona } from "../../shared/personas/agents.personas";
+import { editorialViolationFallback } from "../../shared/personas/language-instruction";
 import { EpisodeSseEventTypeSchema } from "./dto/episode-sse-event.schema";
 import type { z } from "zod";
 
@@ -99,17 +100,6 @@ function isFactCheckFailure(result: FactCheckOutput): boolean {
 function isEditorialFailure(result: EditorialReviewOutput): boolean {
   return result.passed === false;
 }
-
-// Spec 004, D7: respaldo de feedback.details cuando el filtro editorial
-// rechaza sin reason ni violatedRule (el .refine de EditorialReviewOutputSchema
-// lo impide, pero el tipo los deja opcionales). Vuelve al debatiente en el
-// prompt de amend, así que sale en el idioma del episodio: en otro idioma
-// aumentaría el riesgo de que la enmienda cambie de idioma.
-const EDITORIAL_VIOLATION_FALLBACK: Record<DebateLanguage, string> = {
-  ES: "Violación de reglas editoriales.",
-  EN: "Editorial rules violation.",
-  PT: "Violação das regras editoriais.",
-};
 
 // architecture.md §7 — orquestador del pipeline. Fase C agrega el loop de
 // rondas de debate (§7.2), el loop de enmienda (§7.3) y el veredicto (§7.4),
@@ -411,7 +401,8 @@ export class EpisodeOrchestratorService {
               details:
                 (failedResult as EditorialReviewOutput).reason ??
                 (failedResult as EditorialReviewOutput).violatedRule ??
-                EDITORIAL_VIOLATION_FALLBACK[context.language],
+                // Respaldo en el idioma del episodio (spec 004, D7).
+                editorialViolationFallback(context.language),
             };
 
       const original: ArgumentDraft | CrossExaminationDraft = respondsToId

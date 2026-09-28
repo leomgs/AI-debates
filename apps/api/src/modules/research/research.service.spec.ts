@@ -8,6 +8,7 @@ import { TavilyProvider } from './tavily.provider';
 import { ResearchService } from './research.service';
 import { InsufficientEvidenceError } from './research.errors';
 import { buildLanguageInstruction, describeLanguage } from '../../shared/personas/language-instruction';
+import { VOSEO } from '../../shared/personas/voseo.test-helper';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -191,6 +192,9 @@ describe('ResearchService', () => {
       const call = mockGenerateObject.mock.calls[0][0];
       expect(call.system.split('\n\n').at(-1)).toContain(`Redacta cada hecho (statement) en ${describeLanguage(language)}`);
       expect(call.prompt.split('\n\n').at(-1)).toBe(buildLanguageInstruction(language));
+      // AC 4.26: ni el system ni el prompt de usuario que llegan al SDK tienen voseo.
+      expect(call.system).not.toMatch(VOSEO);
+      expect(call.prompt).not.toMatch(VOSEO);
     });
   });
 });

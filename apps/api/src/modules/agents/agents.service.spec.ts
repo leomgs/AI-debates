@@ -7,6 +7,7 @@ import { AgentsService } from './agents.service';
 import { DebateContext } from '../../shared/contracts/agents.contracts';
 import { ANALYST, CONTRARIAN, JUDGE, buildDebaterSystemPrompt, buildJudgeSystemPrompt } from '../../shared/personas/agents.personas';
 import { buildLanguageInstruction } from '../../shared/personas/language-instruction';
+import { VOSEO } from '../../shared/personas/voseo.test-helper';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -191,6 +192,9 @@ describe('AgentsService', () => {
     };
 
     function expectLanguageInstruction(call: { system: string; prompt: string }, language: (typeof LANGUAGES)[number]) {
+      // AC 4.26: ni el system ni el prompt de usuario que llegan al SDK tienen voseo.
+      expect(call.system).not.toMatch(VOSEO);
+      expect(call.prompt).not.toMatch(VOSEO);
       const instruction = buildLanguageInstruction(language);
       // Regla del system prompt: su último párrafo.
       expect(call.system.split('\n\n').at(-1)).toBe(instruction);

@@ -1,39 +1,10 @@
 import { RoundType } from "../contracts/agents.contracts";
 import { DEBATER_PERSONAS, JUDGE, buildDebaterSystemPrompt, buildJudgeSystemPrompt } from "./agents.personas";
-import { buildLanguageInstruction, describeLanguage } from "./language-instruction";
+import { buildLanguageInstruction, describeLanguage, editorialViolationFallback } from "./language-instruction";
+import { VOSEO } from "./voseo.test-helper";
 
 const LANGUAGES = ["ES", "EN", "PT"] as const;
 const ROUNDS = RoundType.options;
-
-// Formas de voseo que había en los prompts antes de la spec 004 (y sus
-// vecinas más probables). Delimitadas por letras Unicode, no por \b: \b
-// trata las vocales acentuadas como no-palabra.
-const VOSEO = new RegExp(
-  `(?<!\\p{L})(${[
-    "sos",
-    "querés",
-    "podés",
-    "tenés",
-    "debés",
-    "sabés",
-    "presentá",
-    "generá",
-    "devolvé",
-    "recordá",
-    "emití",
-    "evaluá",
-    "citá",
-    "segmentá",
-    "clasificá",
-    "extraé",
-    "usá",
-    "reforzá",
-    "ajustá",
-    "quedáte",
-    "fijate",
-  ].join("|")})(?!\\p{L})`,
-  "iu"
-);
 
 describe("buildLanguageInstruction (spec 004, D11)", () => {
   it("ES nombra la variante: neutro latinoamericano, tuteo y sin regionalismos (AC 4.27)", () => {
@@ -84,23 +55,37 @@ describe("system prompts de debatientes y juez (spec 004)", () => {
     expect("Sos Analyst.").toMatch(VOSEO);
     expect("Reglas que no podés romper").toMatch(VOSEO);
     expect("presentá tu posición").toMatch(VOSEO);
+    expect("Asegurate de citar la fuente y mantené el tono.").toMatch(VOSEO);
     expect("Eres Analyst. Presenta tu posición.").not.toMatch(VOSEO);
   });
 
   // AC 4.9: ningún texto de persona inyectado en los prompts trae frases
   // literales entre comillas o preguntas en español que el modelo pueda
   // copiar tal cual a una salida en otro idioma.
-  it("ningún texto de persona contiene frases literales citadas (AC 4.9)", () => {
-    for (const persona of Object.values(DEBATER_PERSONAS)) {
-      const texts = [
+  // Incluye al juez (review de 13.5, N1): sus criterios y reglas también se
+  // inyectan en el system prompt.
+  it("ningún texto de persona, ni del juez, contiene frases literales citadas (AC 4.9)", () => {
+    const texts = [
+      ...Object.values(DEBATER_PERSONAS).flatMap((persona) => [
         persona.coreStance,
         persona.argumentStyle,
         persona.crossExaminationStyle,
         persona.voice,
         ...persona.editorialRules.forbidden,
         ...persona.editorialRules.required,
-      ];
-      for (const text of texts) expect(text).not.toMatch(/['"“”‘’«»¿]/);
-    }
+      ]),
+      ...JUDGE.evaluationCriteria,
+      ...JUDGE.editorialRules.forbidden,
+      ...JUDGE.editorialRules.required,
+    ];
+    for (const text of texts) expect(text).not.toMatch(/['"“”‘’«»¿]/);
+  });
+});
+
+describe("editorialViolationFallback (spec 004, D7)", () => {
+  it("devuelve el respaldo del filtro editorial en el idioma del episodio", () => {
+    expect(editorialViolationFallback("ES")).toBe("Violación de reglas editoriales.");
+    expect(editorialViolationFallback("EN")).toBe("Editorial rules violation.");
+    expect(editorialViolationFallback("PT")).toBe("Violação das regras editoriais.");
   });
 });

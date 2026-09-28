@@ -35,3 +35,19 @@ export function buildLanguageInstruction(language: DebateLanguage): string {
 export function describeLanguage(language: DebateLanguage): string {
   return LANGUAGE_NAMES[language];
 }
+
+// Spec 004, D7: respaldo de feedback.details cuando el filtro editorial
+// rechaza sin reason ni violatedRule (el .refine de EditorialReviewOutputSchema
+// lo impide, pero el tipo los deja opcionales). Vuelve al debatiente en el
+// prompt de amend, así que sale en el idioma del episodio: en otro idioma
+// aumentaría el riesgo de que la enmienda cambie de idioma. Vive acá para
+// que cada texto por idioma esté en un solo lugar (review de 13.5, N3).
+const EDITORIAL_VIOLATION_FALLBACKS: Record<DebateLanguage, string> = {
+  ES: "Violación de reglas editoriales.",
+  EN: "Editorial rules violation.",
+  PT: "Violação das regras editoriais.",
+};
+
+export function editorialViolationFallback(language: DebateLanguage): string {
+  return EDITORIAL_VIOLATION_FALLBACKS[language];
+}

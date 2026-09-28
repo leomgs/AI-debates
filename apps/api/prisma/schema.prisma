@@ -201,7 +201,11 @@ model Agent {
   // nuevas sin migrar el schema.
   role         String? // Ej: "ANALYST", "CONTRARIAN", "JUDGE"
   avatarUrl    String? // Asset visual para Remotion
-  systemPrompt String // Personalidad y directrices del agente
+  // Snapshot informativo de la personalidad y las directrices del agente
+  // (lo carga el seed). No se lee en runtime: el prompt real lo arma
+  // AgentsService en cada llamada, con el idioma del episodio (spec 004,
+  // D11), así que un mismo agente sirve para ES, EN y PT.
+  systemPrompt String
   // Las voces viven en AgentVoice (una por idioma y proveedor), no en un
   // Json de Agent: ADR 0002, que reemplaza el punto 1 de decision-log.md #20.
   voices       AgentVoice[]

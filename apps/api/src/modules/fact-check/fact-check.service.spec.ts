@@ -8,6 +8,7 @@ import { FactCheckService } from './fact-check.service';
 import { ANALYST } from '../../shared/personas/agents.personas';
 import { DebateContext } from '../../shared/contracts/agents.contracts';
 import { buildLanguageInstruction, describeLanguage } from '../../shared/personas/language-instruction';
+import { VOSEO } from '../../shared/personas/voseo.test-helper';
 
 // generateObject es el borde real con el AI SDK — se mockea acá (jest-testing
 // skill: "mock at the SDK call boundary"), nunca se llama al LLM real.
@@ -138,7 +139,10 @@ describe('FactCheckService', () => {
     const CLAIM = { id: CLAIM_ID, argumentId: ARGUMENT_ID, statement: 'a claim', type: 'OPINION' as const };
 
     function expectLanguage(call: { system: string; prompt: string }, language: (typeof LANGUAGES)[number], freeFields: string[]) {
-      const idiomaRule = call.system.split('\n\n').at(-1)!;
+      // AC 4.26: ni el system ni el prompt de usuario que llegan al SDK tienen voseo.
+      expect(call.system).not.toMatch(VOSEO);
+      expect(call.prompt).not.toMatch(VOSEO);
+      const idiomaRule = call.system.split('\n\n').find((paragraph) => paragraph.startsWith('Idioma:'))!;
       expect(idiomaRule).toContain(describeLanguage(language));
       for (const field of freeFields) expect(idiomaRule).toContain(field);
       expect(call.prompt.split('\n\n').at(-1)).toBe(buildLanguageInstruction(language));
@@ -177,8 +181,33 @@ describe('FactCheckService', () => {
       const call = mockGenerateObject.mock.calls[0][0];
       expectLanguage(call, language, ['violatedRule', 'reason']);
       expect(call.system).toContain(`están escritos en ${describeLanguage(language)}`);
-      // Las reglas editoriales siguen en español (D11) y se aplican al contenido.
+      // Las reglas editoriales siguen en español (D11).
       expect(call.system).toContain(ANALYST.editorialRules.forbidden[0]);
+    });
+
+    // Review de 13.5, M1: fuera de ES se aclara que las reglas valen igual en
+    // el idioma del texto, incluidas las de forma ("lo que el texto dice y
+    // cómo lo dice"), y que el idioma por sí solo no es una violación. En ES
+    // la aclaración no va.
+    const RULES_NOTE = 'Las reglas de arriba están redactadas en español';
+
+    it.each(['EN', 'PT'] as const)('editorialReview en %s aclara que las reglas en español se aplican igual, forma incluida', async (language) => {
+      mockGenerateObject.mockResolvedValue({ object: { passed: true } });
+
+      await service.editorialReview(CLAIM, ANALYST, 'GOOGLE', 'The whole argument.', language);
+
+      const note = (mockGenerateObject.mock.calls[0][0].system as string).split('\n\n').find((p) => p.startsWith(RULES_NOTE));
+      expect(note).toBe(
+        `${RULES_NOTE}, pero se aplican igual a un texto en ${describeLanguage(language)}: evalúa lo que el texto dice y cómo lo dice. Que el texto no esté en español no es, por sí solo, una violación.`
+      );
+    });
+
+    it('editorialReview en ES no lleva la aclaración de las reglas', async () => {
+      mockGenerateObject.mockResolvedValue({ object: { passed: true } });
+
+      await service.editorialReview(CLAIM, ANALYST, 'GOOGLE', 'Todo el argumento.', 'ES');
+
+      expect(mockGenerateObject.mock.calls[0][0].system).not.toContain(RULES_NOTE);
     });
   });
 });
