@@ -1,6 +1,6 @@
 # Tasks — Dashboard (front)
 
-Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-28, novena pasada (bloque F2-A mergeado: compartido, inbox, lista, crear y spike de SSE, con verificaciones en navegador pendientes; API-10 hecha en el backend). Octava pasada, 2026-09-27 (§1 completa: verificaciones en navegador hechas por el usuario, todas OK). Séptima pasada, 2026-09-26 (F1 mergeada a `master` con fast-forward desde `feat/dashboard-f1`; §1 sin cambios de estado: siguen los `[~]` de verificación en navegador; §2 apunta a lo que se puede adelantar antes de API-17). Sexta pasada, mismo día (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
+Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-28, décima pasada (bloque F2-B mergeado: detalle, vista en vivo y aviso de veredicto desactualizado, con verificaciones en navegador pendientes). Novena pasada, mismo día (bloque F2-A mergeado: compartido, inbox, lista, crear y spike de SSE, con verificaciones en navegador pendientes; API-10 hecha en el backend). Octava pasada, 2026-09-27 (§1 completa: verificaciones en navegador hechas por el usuario, todas OK). Séptima pasada, 2026-09-26 (F1 mergeada a `master` con fast-forward desde `feat/dashboard-f1`; §1 sin cambios de estado: siguen los `[~]` de verificación en navegador; §2 apunta a lo que se puede adelantar antes de API-17). Sexta pasada, mismo día (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
 
 Cada tarea cita su origen en la spec 003 (AC 3.x, D-n, API-n o "Restricciones técnicas"). "Requiere" indica una dependencia explícita con otra tarea de este archivo (§n) o con backend (API-n, trackeado en `tasks.md` de la raíz §12; API-17, en §13). Antes de escribir código de Next: leer la guía de la versión instalada en `node_modules/next/dist/docs/` (`apps/dashboard/AGENTS.md`).
 
@@ -60,7 +60,7 @@ Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1. Proceso y hallazgos en
 - [x] Verificar con curl contra `/api/...` que los endpoints no públicos devuelven `401 UNAUTHORIZED` (AC 3.5): hecho (episodios, detalle, SSE, manifest, acciones, notificaciones, sesión). AC 3.9: la URL interna no aparece en el HTML ni en ningún chunk de `.next/static` (solo en el `routes-manifest.json` del servidor); pestaña de red revisada en navegador (2026-09-27): todo sale a `localhost:3001`
 - [x] Verificar criterio F1: `pnpm build` verde; renombrar `COMPLETED` en el enum de estados o `password` en `LoginDto` de `openapi.json` hace fallar el build del dashboard (`TS2353`); un import prohibido hace fallar `check-boundaries` y corta `pnpm build`
 
-## 2. F2 — Panel de curación (privado) — en curso: bloque F2-A mergeado 2026-09-28 (`decision-log.md` entrada 7); `[~]` = implementado y con tests, falta la prueba en navegador
+## 2. F2 — Panel de curación (privado) — en curso: bloques F2-A y F2-B mergeados 2026-09-28 (`decision-log.md` entradas 7 y 8); `[~]` = implementado y con tests, falta la prueba en navegador
 
 Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§0). Criterio: ver `roadmap.md`, Fase 2. Qué se puede adelantar antes de API-17 con lo que ya está en `master`, y con qué criterio: `roadmap.md`, Fase 2, "Qué se puede adelantar antes de API-17".
 
@@ -92,25 +92,25 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§
 - [~] `409 VOICE_NOT_CONFIGURED`: mensaje junto al selector de idioma ("No hay voces configuradas para <idioma>…") más el `error.message` del backend si trae detalle; conserva texto e idioma (AC 3.78; AC 4.21)
 
 **Detalle `/studio/episodes/[id]` (sección 5)** — requiere API-1, API-7a y API-12:
-- [ ] Cabecera: tópico, distintivo de idioma, estado, fecha, "Publicado" si `publishedAt` no es nulo, acceso al preview (AC 3.26; AC 4.22)
-- [ ] Timeline por ronda con nombre de agente y distintivo de origen (AC 3.27)
-- [ ] Referencia y salto a `respondsToId` en `CROSS_EXAMINATION` (AC 3.28)
-- [ ] Veredicto con juez y ganador / "Sin ganador" (AC 3.29)
-- [ ] Argumentos, veredicto y feed marcan su bloque con el `lang` del idioma del episodio (`es`/`en`/`pt`), dentro del documento `lang="es"` del panel (AC 3.79 b; requiere API-17)
-- [ ] Barras de uso vs. límites, umbrales 80 %/100 %, `usage` null, `executionTime` legible (AC 3.30)
-- [ ] Historial de checkpoints con motivo en español, incluido `VOICE_NOT_CONFIGURED` (AC 3.31)
-- [ ] Bloques `FAILED`/`CANCELLED` y pantalla 404 (AC 3.40, AC 3.41)
+- [~] Cabecera: tópico, distintivo de idioma, estado, fecha, "Publicado" si `publishedAt` no es nulo, acceso al preview (AC 3.26; AC 4.22)
+- [~] Timeline por ronda con nombre de agente y distintivo de origen (AC 3.27)
+- [~] Referencia y salto a `respondsToId` en `CROSS_EXAMINATION` (AC 3.28)
+- [~] Veredicto con juez y ganador / "Sin ganador" (AC 3.29)
+- [~] Argumentos, veredicto y feed marcan su bloque con el `lang` del idioma del episodio (`es`/`en`/`pt`), dentro del documento `lang="es"` del panel (AC 3.79 b; requiere API-17)
+- [~] Barras de uso vs. límites, umbrales 80 %/100 %, `usage` null, `executionTime` legible (la fila de `executionTime` se oculta mientras valga 0: la API todavía no lo registra, ver `tasks.md` de la raíz §12) (AC 3.30)
+- [~] Historial de checkpoints con motivo en español, incluido `VOICE_NOT_CONFIGURED` (AC 3.31)
+- [~] Bloques `FAILED`/`CANCELLED` y pantalla 404 (AC 3.40, AC 3.41)
 
 **Vista en vivo (sección 5)** — requiere API-12 y API-13:
 - [x] Spike: la compresión no bufferea `text/event-stream` a través del rewrite (Restricciones técnicas, "Rewrites y SSE"). Hecho 2026-09-28 con un server SSE mínimo con las cabeceras de Nest detrás del mismo rewrite: la compresión de Next sí alcanza al rewrite y con gzip bufferea, lo evita el `Cache-Control: no-transform` de Nest (anotado en `next.config.ts`). Falta confirmarlo con la API real (AC 3.33, F2-B). Nest manda las cabeceras recién con el primer mensaje: el `open` del `EventSource` puede tardar hasta el primer `heartbeat` (~15 s)
-- [ ] Cliente SSE con `addEventListener` por tipo de evento, solo en estados "SSE" con `pipelineActive` (AC 3.32; Restricciones técnicas, "Cliente SSE")
-- [ ] Feed de actividad traducido + indicador en vivo/desconectado, sin `heartbeat` en el feed (AC 3.32, AC 3.33, AC 3.37)
-- [ ] Refetch del detalle por cada evento de negocio, sin reconstruir estado (AC 3.34, D7)
-- [ ] Polling de 10 s (constantes, D19) en `APPROVED`/`GENERATING_AUDIO`/`RENDERING` con `pipelineActive` (AC 3.35)
-- [ ] Cierre sin reintento en estados frenados/terminales (AC 3.36)
-- [ ] Reconexión condicionada en `onerror` + `401` vía refetch (AC 3.38, AC 3.7)
-- [ ] Mensaje de episodio trabado con `pipelineActive: false` (AC 3.39)
-- [ ] Verificar: 60 s sin eventos de negocio sin reconexiones (AC 3.33)
+- [~] Cliente SSE con `addEventListener` por tipo de evento, solo en estados "SSE" con `pipelineActive` (AC 3.32; Restricciones técnicas, "Cliente SSE")
+- [~] Feed de actividad traducido + indicador en vivo/desconectado, sin `heartbeat` en el feed (AC 3.32, AC 3.33, AC 3.37)
+- [~] Refetch del detalle por cada evento de negocio, sin reconstruir estado (AC 3.34, D7)
+- [~] Polling de 10 s (constantes, D19) en `APPROVED`/`GENERATING_AUDIO`/`RENDERING` con `pipelineActive` (AC 3.35)
+- [~] Cierre sin reintento en estados frenados/terminales (AC 3.36)
+- [~] Reconexión condicionada en `onerror` + `401` vía refetch (AC 3.38, AC 3.7)
+- [~] Mensaje de episodio trabado con `pipelineActive: false` (AC 3.39)
+- [ ] Verificar: 60 s sin eventos de negocio sin reconexiones (AC 3.33) — a mano, con un episodio real (el cliente se probó con un server SSE de prueba: 36 s solo con heartbeats, una conexión)
 
 **Curaduría en `PENDING_REVIEW` (sección 6):**
 - [ ] Controles visibles solo en los estados de `api-contract.md` §5 y API-19 (AC 3.42)
