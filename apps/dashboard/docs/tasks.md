@@ -1,6 +1,6 @@
 # Tasks — Dashboard (front)
 
-Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-27, octava pasada (§1 completa: verificaciones en navegador hechas por el usuario, todas OK). Séptima pasada, 2026-09-26 (F1 mergeada a `master` con fast-forward desde `feat/dashboard-f1`; §1 sin cambios de estado: siguen los `[~]` de verificación en navegador; §2 apunta a lo que se puede adelantar antes de API-17). Sexta pasada, mismo día (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
+Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-28, novena pasada (bloque F2-A mergeado: compartido, inbox, lista, crear y spike de SSE, con verificaciones en navegador pendientes; API-10 hecha en el backend). Octava pasada, 2026-09-27 (§1 completa: verificaciones en navegador hechas por el usuario, todas OK). Séptima pasada, 2026-09-26 (F1 mergeada a `master` con fast-forward desde `feat/dashboard-f1`; §1 sin cambios de estado: siguen los `[~]` de verificación en navegador; §2 apunta a lo que se puede adelantar antes de API-17). Sexta pasada, mismo día (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
 
 Cada tarea cita su origen en la spec 003 (AC 3.x, D-n, API-n o "Restricciones técnicas"). "Requiere" indica una dependencia explícita con otra tarea de este archivo (§n) o con backend (API-n, trackeado en `tasks.md` de la raíz §12; API-17, en §13). Antes de escribir código de Next: leer la guía de la versión instalada en `node_modules/next/dist/docs/` (`apps/dashboard/AGENTS.md`).
 
@@ -60,36 +60,36 @@ Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1. Proceso y hallazgos en
 - [x] Verificar con curl contra `/api/...` que los endpoints no públicos devuelven `401 UNAUTHORIZED` (AC 3.5): hecho (episodios, detalle, SSE, manifest, acciones, notificaciones, sesión). AC 3.9: la URL interna no aparece en el HTML ni en ningún chunk de `.next/static` (solo en el `routes-manifest.json` del servidor); pestaña de red revisada en navegador (2026-09-27): todo sale a `localhost:3001`
 - [x] Verificar criterio F1: `pnpm build` verde; renombrar `COMPLETED` en el enum de estados o `password` en `LoginDto` de `openapi.json` hace fallar el build del dashboard (`TS2353`); un import prohibido hace fallar `check-boundaries` y corta `pnpm build`
 
-## 2. F2 — Panel de curación (privado) — sin empezar
+## 2. F2 — Panel de curación (privado) — en curso: bloque F2-A mergeado 2026-09-28 (`decision-log.md` entrada 7); `[~]` = implementado y con tests, falta la prueba en navegador
 
 Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§0). Criterio: ver `roadmap.md`, Fase 2. Qué se puede adelantar antes de API-17 con lo que ya está en `master`, y con qué criterio: `roadmap.md`, Fase 2, "Qué se puede adelantar antes de API-17".
 
 **Compartido:**
-- [ ] Constantes de polling en un único módulo: 30 s inbox, 10 s detalle (fases sin SSE) y lista; ninguna pantalla define su propio intervalo (AC 3.86; D19). Verificable por revisión de código
-- [ ] Mapeo de `DebateLanguage` a etiqueta (`ES` → "Español", `EN` → "English", `PT` → "Português") como módulo compartido, con el tipo del enum generado de `openapi.json`, nunca una lista escrita a mano (spec, "Mapeo de estados a UI"; D5; Restricciones técnicas, "Tipos generados") — requiere API-17
-- [ ] Componente de distintivo de idioma: código compacto (`ES`/`EN`/`PT`) con el nombre completo accesible, por ejemplo en un tooltip (spec, "Mapeo de estados a UI")
+- [~] Constantes de polling en un único módulo: 30 s inbox, 10 s detalle (fases sin SSE) y lista; ninguna pantalla define su propio intervalo (AC 3.86; D19). Verificable por revisión de código
+- [~] Mapeo de `DebateLanguage` a etiqueta (`ES` → "Español", `EN` → "English", `PT` → "Português") como módulo compartido, con el tipo del enum generado de `openapi.json`, nunca una lista escrita a mano (spec, "Mapeo de estados a UI"; D5; Restricciones técnicas, "Tipos generados") — requiere API-17
+- [~] Componente de distintivo de idioma: código compacto (`ES`/`EN`/`PT`) con el nombre completo accesible, por ejemplo en un tooltip (spec, "Mapeo de estados a UI")
 
 **Inbox (sección 2 de la spec)** — requiere API-5:
-- [ ] Contador de no leídas en el header, polling de 30 s desde las constantes (D19) + refetch al volver el foco (AC 3.10)
-- [ ] Lista del inbox con mensaje, tipo con categoría visual y fecha relativa (AC 3.11, AC 3.74)
-- [ ] Click → `markNotificationRead` + navegación al episodio (AC 3.12)
-- [ ] "Marcar todas como leídas" (AC 3.13)
-- [ ] Inbox vacío y contador ante error de consulta (AC 3.14)
+- [~] Contador de no leídas en el header, polling de 30 s desde las constantes (D19) + refetch al volver el foco (AC 3.10)
+- [~] Lista del inbox con mensaje, tipo con categoría visual y fecha relativa (AC 3.11, AC 3.74)
+- [~] Click → `markNotificationRead` + navegación al episodio (AC 3.12)
+- [~] "Marcar todas como leídas" (AC 3.13)
+- [~] Inbox vacío y contador ante error de consulta (AC 3.14)
 
 **Lista `/studio` (sección 3)** — requiere API-1 (`language`) y API-7a:
-- [ ] Agrupación Requiere acción / En curso / Terminados, orden por fecha (AC 3.16)
-- [ ] Fila con título truncado, distintivo de idioma, etiqueta de estado, fecha y distintivo "Publicado" si `publishedAt` no es nulo (AC 3.17; "Publicado" verificado con `publishedAt` puesto a mano hasta que exista API-7)
-- [ ] Contador y estado vacío de "Requiere acción" (AC 3.18)
-- [ ] Filtro multi-estado en la URL, tolerante a valores inválidos (AC 3.19)
-- [ ] Estados vacío/carga/error (AC 3.20, AC 3.73)
-- [ ] Auto-refresco de 10 s (constantes, D19) mientras haya episodios "En curso" (AC 3.21)
+- [~] Agrupación Requiere acción / En curso / Terminados, orden por fecha (AC 3.16)
+- [~] Fila con título truncado, distintivo de idioma, etiqueta de estado, fecha y distintivo "Publicado" si `publishedAt` no es nulo (AC 3.17; "Publicado" verificado con `publishedAt` puesto a mano hasta que exista API-7)
+- [~] Contador y estado vacío de "Requiere acción" (AC 3.18)
+- [~] Filtro multi-estado en la URL, tolerante a valores inválidos (AC 3.19)
+- [~] Estados vacío/carga/error (AC 3.20, AC 3.73)
+- [~] Auto-refresco de 10 s (constantes, D19) mientras haya episodios "En curso" (AC 3.21)
 
 **Crear `/studio/new` (sección 4)** — requiere API-17 (hecho 2026-09-27). Nota del review de 13.7: `openapi-typescript` (con `defaultNonNullable`) genera `CreateEpisodeDto.language` como **requerido** porque el schema tiene `default: "ES"`; la API lo acepta omitido (AC 4.2), pero el formulario siempre lo manda (AC 3.22), así que no hace falta cambiar la generación. Crear un episodio `EN`/`PT` responde `409 VOICE_NOT_CONFIGURED` mientras no haya voces (spec 004, D20, AC 4.29): es el caso de AC 3.78. En el manifest, `agents[].voiceId` puede ser `null` (el juez siempre).
-- [ ] Formulario `topic` con contador y validación 1-300 tras recortar (AC 3.22)
-- [ ] Selector de idioma con Español, English y Português, Español preseleccionado, siempre enviado en `createEpisode`, con nota de que el idioma no se puede cambiar después (AC 3.22; D15; AC 4.20)
-- [ ] Envío sin duplicados y navegación al detalle (AC 3.23, AC 3.24)
-- [ ] Errores `VALIDATION_ERROR` junto al campo y genérico conservando el texto y el idioma elegidos (AC 3.25)
-- [ ] `409 VOICE_NOT_CONFIGURED`: mensaje junto al selector de idioma ("No hay voces configuradas para <idioma>…") más el `error.message` del backend si trae detalle; conserva texto e idioma (AC 3.78; AC 4.21)
+- [~] Formulario `topic` con contador y validación 1-300 tras recortar (AC 3.22)
+- [~] Selector de idioma con Español, English y Português, Español preseleccionado, siempre enviado en `createEpisode`, con nota de que el idioma no se puede cambiar después (AC 3.22; D15; AC 4.20)
+- [~] Envío sin duplicados y navegación al detalle (AC 3.23, AC 3.24)
+- [~] Errores `VALIDATION_ERROR` junto al campo y genérico conservando el texto y el idioma elegidos (AC 3.25)
+- [~] `409 VOICE_NOT_CONFIGURED`: mensaje junto al selector de idioma ("No hay voces configuradas para <idioma>…") más el `error.message` del backend si trae detalle; conserva texto e idioma (AC 3.78; AC 4.21)
 
 **Detalle `/studio/episodes/[id]` (sección 5)** — requiere API-1, API-7a y API-12:
 - [ ] Cabecera: tópico, distintivo de idioma, estado, fecha, "Publicado" si `publishedAt` no es nulo, acceso al preview (AC 3.26; AC 4.22)
@@ -102,7 +102,7 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§
 - [ ] Bloques `FAILED`/`CANCELLED` y pantalla 404 (AC 3.40, AC 3.41)
 
 **Vista en vivo (sección 5)** — requiere API-12 y API-13:
-- [ ] Spike: la compresión no bufferea `text/event-stream` a través del rewrite (Restricciones técnicas, "Rewrites y SSE")
+- [x] Spike: la compresión no bufferea `text/event-stream` a través del rewrite (Restricciones técnicas, "Rewrites y SSE"). Hecho 2026-09-28 con un server SSE mínimo con las cabeceras de Nest detrás del mismo rewrite: la compresión de Next sí alcanza al rewrite y con gzip bufferea, lo evita el `Cache-Control: no-transform` de Nest (anotado en `next.config.ts`). Falta confirmarlo con la API real (AC 3.33, F2-B). Nest manda las cabeceras recién con el primer mensaje: el `open` del `EventSource` puede tardar hasta el primer `heartbeat` (~15 s)
 - [ ] Cliente SSE con `addEventListener` por tipo de evento, solo en estados "SSE" con `pipelineActive` (AC 3.32; Restricciones técnicas, "Cliente SSE")
 - [ ] Feed de actividad traducido + indicador en vivo/desconectado, sin `heartbeat` en el feed (AC 3.32, AC 3.33, AC 3.37)
 - [ ] Refetch del detalle por cada evento de negocio, sin reconstruir estado (AC 3.34, D7)
