@@ -1,8 +1,9 @@
 "use client";
 
 import { CornerDownRight } from "lucide-react";
-import type { MouseEvent } from "react";
+import { useEffect, useId, useRef, type MouseEvent } from "react";
 import { debateLanguageTag } from "@/lib/debate-language";
+import { llmBudgetExhaustedExplanation } from "@/lib/episode-actions";
 import {
   ARGUMENT_ORIGIN_LABELS,
   agentName,
@@ -17,24 +18,40 @@ import {
   type Participant,
 } from "@/lib/episode-detail";
 import { cn } from "@/lib/utils";
+import { ArgumentControls, ArgumentEditor, argumentBusy, type ArgumentReview } from "./argument-curation";
 
 const REFERENCE_EXCERPT_LENGTH = 100;
 
 /**
  * Timeline del debate (AC 3.27, AC 3.28): una sección por ronda, en orden,
  * con cada argumento, su agente y su origen. El contenido va marcado con el
- * idioma del episodio (AC 3.79 b).
+ * idioma del episodio (AC 3.79 b). Con `review` (solo en PENDING_REVIEW,
+ * AC 3.42), cada argumento suma "Editar" y "Regenerar" (AC 3.44-3.46).
  */
-export function DebateTimeline({ detail }: { detail: EpisodeDetail }) {
+export function DebateTimeline({
+  detail,
+  review,
+}: {
+  detail: EpisodeDetail;
+  review?: Omit<ArgumentReview, "budgetNoteId">;
+}) {
   const rounds = sortRounds(detail.debate.rounds);
   const argumentsById = indexArguments(rounds);
   const lang = debateLanguageTag(detail.language);
+  const budgetNoteId = useId();
+  const budgetExhausted = review !== undefined && !review.controls.llmActionsEnabled;
+  const argumentReview = review && { ...review, budgetNoteId: budgetExhausted ? budgetNoteId : undefined };
 
   return (
     <section aria-labelledby="debate-heading" className="space-y-6">
       <h2 id="debate-heading" className="text-lg font-semibold">
         Debate
       </h2>
+      {budgetExhausted && review && (
+        <p id={budgetNoteId} className="rounded-md border px-3 py-2 text-sm text-muted-foreground">
+          {llmBudgetExhaustedExplanation(review.controls.budget)}
+        </p>
+      )}
       {rounds.length === 0 ? (
         <p className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
           Todavía no hay argumentos.
@@ -47,6 +64,7 @@ export function DebateTimeline({ detail }: { detail: EpisodeDetail }) {
             participants={detail.participants}
             argumentsById={argumentsById}
             lang={lang}
+            review={argumentReview}
           />
         ))
       )}
@@ -59,11 +77,13 @@ function RoundSection({
   participants,
   argumentsById,
   lang,
+  review,
 }: {
   round: DebateRound;
   participants: readonly Participant[];
   argumentsById: ReadonlyMap<string, DebateArgument>;
   lang: string;
+  review?: ArgumentReview;
 }) {
   const headingId = `ronda-${round.id}`;
   return (
@@ -82,6 +102,7 @@ function RoundSection({
                 participants={participants}
                 respondsTo={argument.respondsToId === null ? undefined : (argumentsById.get(argument.respondsToId) ?? null)}
                 lang={lang}
+                review={review}
               />
             </li>
           ))}
@@ -96,17 +117,40 @@ function ArgumentCard({
   participants,
   respondsTo,
   lang,
+  review,
 }: {
   argument: DebateArgument;
   participants: readonly Participant[];
   /** undefined: no responde a nadie; null: responde a un argumento que no está en el debate. */
   respondsTo: DebateArgument | null | undefined;
   lang: string;
+  review?: ArgumentReview;
 }) {
   const authorId = `${argumentElementId(argument.id)}-autor`;
+  const author = agentName(participants, argument.agentId);
+  const articleRef = useRef<HTMLElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const editing = review?.editingArgumentId === argument.id;
+  const busy = review !== undefined && argumentBusy(review, argument.id);
+
+  // Al cerrar el editor (guardado o cancelado), el foco vuelve a "Editar"
+  // (AC 3.77); si no, se perdería con el textarea que se desmonta.
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    if (editing || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    editButtonRef.current?.focus();
+  }, [editing]);
+
+  function closeEditor() {
+    restoreFocus.current = true;
+    review?.onEditingChange(null);
+  }
+
   return (
     // tabIndex -1: destino del salto de AC 3.28, que le lleva el foco.
     <article
+      ref={articleRef}
       id={argumentElementId(argument.id)}
       tabIndex={-1}
       aria-labelledby={authorId}
@@ -114,14 +158,37 @@ function ArgumentCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p id={authorId} className="font-medium">
-          {agentName(participants, argument.agentId)}
+          {author}
         </p>
         <OriginBadge origin={argument.origin} />
       </div>
       {respondsTo !== undefined && <ResponseReference target={respondsTo} participants={participants} lang={lang} />}
-      <p lang={lang} className="text-sm leading-relaxed whitespace-pre-wrap">
-        {argument.content}
-      </p>
+      {review && editing ? (
+        <ArgumentEditor
+          argument={argument}
+          review={review}
+          agentLabel={author}
+          lang={lang}
+          onClose={closeEditor}
+        />
+      ) : (
+        <p
+          lang={lang}
+          aria-busy={busy}
+          className={cn("text-sm leading-relaxed whitespace-pre-wrap", busy && "opacity-60")}
+        >
+          {argument.content}
+        </p>
+      )}
+      {review && !editing && (
+        <ArgumentControls
+          argument={argument}
+          review={review}
+          agentLabel={author}
+          editButtonRef={editButtonRef}
+          focusAfterRegenerate={() => articleRef.current}
+        />
+      )}
     </article>
   );
 }

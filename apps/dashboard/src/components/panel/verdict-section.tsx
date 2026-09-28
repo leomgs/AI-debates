@@ -1,27 +1,80 @@
+"use client";
+
 import { TriangleAlert } from "lucide-react";
+import { useRef, type RefObject } from "react";
 import { debateLanguageTag } from "@/lib/debate-language";
+import type { ReviewControls } from "@/lib/episode-actions";
 import { showStaleVerdictWarning, verdictParties, type EpisodeDetail } from "@/lib/episode-detail";
+import { cn } from "@/lib/utils";
+import { RejudgeControl, RejudgeProgress } from "./rejudge";
+import type { EpisodeActions } from "./use-episode-actions";
+
+/** Controles de revisión del veredicto; solo en PENDING_REVIEW (AC 3.42). */
+export interface VerdictReview {
+  actions: EpisodeActions;
+  controls: ReviewControls;
+}
 
 /**
  * Veredicto (AC 3.29): juez, ganador o "Sin ganador" y el texto, marcado con
  * el idioma del episodio (AC 3.79 b). En PENDING_REVIEW con
- * `debate.verdict.stale`, el aviso de veredicto desactualizado (AC 3.81); el
- * botón "Volver a juzgar" es del bloque F2-C.
+ * `debate.verdict.stale`, el aviso de veredicto desactualizado (AC 3.81), y
+ * en PENDING_REVIEW "Volver a juzgar" (AC 3.82-3.85).
  */
-export function VerdictSection({ detail }: { detail: EpisodeDetail }) {
+export function VerdictSection({
+  detail,
+  review,
+  blockRef: externalBlockRef,
+}: {
+  detail: EpisodeDetail;
+  review?: VerdictReview;
+  /** El bloque del veredicto, destino del foco al volver a juzgar (también desde "Aprobar", AC 3.84). */
+  blockRef?: RefObject<HTMLDivElement | null>;
+}) {
   const { verdict } = detail.debate;
+  const internalBlockRef = useRef<HTMLDivElement>(null);
+  const blockRef = externalBlockRef ?? internalBlockRef;
+  const judging = review?.actions.pending?.action === "regenerate-verdict";
+
   return (
     <section aria-labelledby="verdict-heading" className="space-y-3">
-      <h2 id="verdict-heading" className="text-lg font-semibold">
-        Veredicto
-      </h2>
-      {verdict === null ? (
-        <p className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
-          Todavía no hay veredicto.
-        </p>
-      ) : (
-        <VerdictBody detail={detail} verdict={verdict} />
-      )}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 id="verdict-heading" className="text-lg font-semibold">
+          Veredicto
+        </h2>
+        {review && (
+          <div className="max-w-sm">
+            <RejudgeControl
+              actions={review.actions}
+              budget={review.controls.budget}
+              highlighted={review.controls.staleVerdict}
+              focusAfterConfirm={() => blockRef.current}
+            />
+          </div>
+        )}
+      </div>
+      {/* tabIndex -1: destino del foco al confirmar "Volver a juzgar". */}
+      <div
+        ref={blockRef}
+        tabIndex={-1}
+        className="rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        {/* role="status": "Juzgando…" y el aviso de AC 3.81 aparecen sin recargar, y así se anuncian. */}
+        <div role="status">
+          {judging && (
+            <div className="mb-3">
+              <RejudgeProgress />
+            </div>
+          )}
+        </div>
+        {verdict === null ? (
+          <p className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
+            Todavía no hay veredicto.
+          </p>
+        ) : (
+          <VerdictBody detail={detail} verdict={verdict} dimmed={judging} />
+        )}
+      </div>
     </section>
   );
 }
@@ -29,15 +82,18 @@ export function VerdictSection({ detail }: { detail: EpisodeDetail }) {
 function VerdictBody({
   detail,
   verdict,
+  dimmed,
 }: {
   detail: EpisodeDetail;
   verdict: NonNullable<EpisodeDetail["debate"]["verdict"]>;
+  dimmed: boolean;
 }) {
   const { judgeName, winnerName } = verdictParties(detail.participants, verdict);
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4 text-card-foreground">
-      {/* role="status": el aviso aparece sin recargar tras un edit o un
-          regenerate (refetch de D7), y así se anuncia. */}
+    <div
+      aria-busy={dimmed}
+      className={cn("space-y-3 rounded-lg border bg-card p-4 text-card-foreground", dimmed && "opacity-60")}
+    >
       <div role="status">
         {showStaleVerdictWarning(detail) && (
           <p className="flex items-start gap-2 rounded-md border border-primary/50 bg-primary/10 px-3 py-2 text-sm">

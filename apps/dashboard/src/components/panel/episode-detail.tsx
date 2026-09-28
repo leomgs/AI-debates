@@ -6,17 +6,23 @@ import { useRef, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api/client";
 import { isNotFoundError, unwrap } from "@/lib/api/errors";
-import type { EpisodeDetail } from "@/lib/episode-detail";
+import { reviewControls } from "@/lib/episode-actions";
+import { indexArguments, type EpisodeDetail } from "@/lib/episode-detail";
 import { prependFeedEntry, type BusinessEvent, type FeedEntry } from "@/lib/episode-events";
 import { detailLiveUpdateMode, detailRefetchInterval } from "@/lib/live-updates";
 import { queryKeys } from "@/lib/query-keys";
+import { activeResolution } from "@/lib/resume-resolution";
+import { ScreenNotice } from "./action-feedback";
 import { CheckpointHistory } from "./checkpoint-history";
 import { DebateTimeline } from "./debate-timeline";
 import { EpisodeHeader } from "./episode-header";
 import { EpisodeStatusNotice } from "./episode-status-notice";
 import { ErrorNotice } from "./error-notice";
 import { LiveActivity } from "./live-activity";
+import { ResolutionPanel } from "./resolution-panel";
+import { ReviewPanel } from "./review-panel";
 import { UsagePanel } from "./usage-panel";
+import { useEpisodeActions } from "./use-episode-actions";
 import { useEpisodeEventStream } from "./use-episode-event-stream";
 import { VerdictSection } from "./verdict-section";
 
@@ -30,7 +36,10 @@ async function fetchEpisodeDetail(episodeId: string, signal: AbortSignal): Promi
  * Detalle de un episodio y vista en vivo (spec 003, sección 5). El detalle
  * (getEpisodeDetail) es la única fuente de verdad (D7): el SSE solo dispara
  * refrescos y alimenta el feed, y en las fases sin SSE se refresca por
- * polling (D19). Los datos se piden desde el navegador (D11).
+ * polling (D19). Los datos se piden desde el navegador (D11). En
+ * PENDING_REVIEW suma la curaduría (sección 6) y en REQUIRES_HUMAN_REVIEW el
+ * panel de resolución (sección 7); tras cada acción se refresca el detalle y
+ * la vista en vivo sale de ahí (AC 3.43, AC 3.53).
  */
 export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
   const query = useQuery({
@@ -54,6 +63,12 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
 
   // AC 3.32: suscripto solo en estados "SSE" con pipelineActive.
   const connection = useEpisodeEventStream({ episodeId, enabled: mode === "sse", onEvent: addToFeed });
+
+  // Acciones de curaduría: una sola mutación para todas (AC 3.49).
+  const actions = useEpisodeActions(episodeId);
+  // Argumento en el editor inline; uno a la vez (AC 3.44).
+  const [editingArgumentId, setEditingArgumentId] = useState<string | null>(null);
+  const verdictRef = useRef<HTMLDivElement>(null);
 
   // AC 3.73: carga, error y (AC 3.41) no encontrado.
   if (query.isPending) return <EpisodeDetailSkeleton />;
@@ -79,6 +94,16 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
     />
   ) : null;
 
+  // AC 3.42: los controles existen solo en los estados que los aceptan.
+  const review = reviewControls(detail);
+  const resolution = activeResolution(detail);
+  // Si el argumento en edición ya no está (404 tras el refetch), no queda en
+  // edición: si no, bloquearía el "Editar" de los demás.
+  const editingId =
+    review !== null && editingArgumentId !== null && indexArguments(detail.debate.rounds).has(editingArgumentId)
+      ? editingArgumentId
+      : null;
+
   // AC 3.39: trabado, sin feed. Fuera de las fases con SSE, el feed que se
   // haya acumulado queda a la vista, como transmisión finalizada.
   const showLiveActivity = mode === "sse" || (mode !== "stuck" && feed.length > 0);
@@ -87,12 +112,22 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
     <article className="space-y-6">
       <EpisodeHeader detail={detail} />
       {refreshError}
+      <ScreenNotice message={actions.screenNotice} onDismiss={actions.clearFailure} />
       <EpisodeStatusNotice
         detail={detail}
         mode={mode}
         onRefresh={() => query.refetch()}
         refreshing={query.isFetching}
       />
+      {resolution && <ResolutionPanel detail={detail} resolution={resolution} actions={actions} />}
+      {review && (
+        <ReviewPanel
+          actions={actions}
+          controls={review}
+          editing={editingId !== null}
+          focusVerdict={() => verdictRef.current}
+        />
+      )}
       {showLiveActivity && (
         <LiveActivity
           feed={feed}
@@ -104,8 +139,15 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
       )}
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="min-w-0 space-y-8">
-          <DebateTimeline detail={detail} />
-          <VerdictSection detail={detail} />
+          <DebateTimeline
+            detail={detail}
+            review={
+              review
+                ? { actions, controls: review, editingArgumentId: editingId, onEditingChange: setEditingArgumentId }
+                : undefined
+            }
+          />
+          <VerdictSection detail={detail} review={review ? { actions, controls: review } : undefined} blockRef={verdictRef} />
         </div>
         <aside aria-label="Presupuesto e interrupciones" className="space-y-8">
           <UsagePanel usage={detail.usage} limits={detail.limits} />
