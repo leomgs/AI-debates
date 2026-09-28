@@ -371,13 +371,13 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 - [x] `openapi.json` regenerado e idempotente
 
 **No bloqueantes**
-- [ ] **API-10** (recomendado antes de F2) — bodies y respuestas por acción de `runEpisodeAction` (incluida `regenerate-verdict`) y envelope de error con sus códigos en `openapi.json`, incluido `VOICE_NOT_CONFIGURED` (`@ZodResponse` en acciones, DTO de `ResumeActionBodySchema`, pendientes de la spec 001). El código `VOICE_NOT_CONFIGURED` existe recién tras la sección 13, paso 6.
-- [ ] **API-10** — corregir en `features.md`/`api-contract.md` la documentación de `argument.approved` (no lleva `sequenceIndex`)
+- [x] **API-10** (HECHO 2026-09-28, `decision-log.md` entrada 39) (recomendado antes de F2) — bodies y respuestas por acción de `runEpisodeAction` (incluida `regenerate-verdict`) y envelope de error con sus códigos en `openapi.json`, incluido `VOICE_NOT_CONFIGURED` (`@ZodResponse` en acciones, DTO de `ResumeActionBodySchema`, pendientes de la spec 001). El código `VOICE_NOT_CONFIGURED` existe recién tras la sección 13, paso 6.
+- [x] **API-10** — (hecho 2026-09-28 en `api-contract.md`; `features.md` está congelado y no se edita) corregir en `features.md`/`api-contract.md` la documentación de `argument.approved` (no lleva `sequenceIndex`)
 - [x] **API-14** — **hecho 2026-09-26** (entrada 35): `edit`/`regenerate` validan que el `argumentId` pertenezca al episodio → `404 NOT_FOUND` (`episode-actions.service.ts:56,73`) (AC 3.50, importante por integridad). No en paralelo con la sección 13, paso 5a, ni con API-19.
 - [ ] **API-16** — aceptar `maxTtsSegments` en `UsageLimitResumeSchema` (parte de AC 3.51)
 - [ ] **API-18** — exponer qué agentes no tienen voz en un `VOICE_NOT_CONFIGURED` (parte de AC 3.51, fila `VOICE_NOT_CONFIGURED`; sin fase en la spec). Requiere la sección 13, paso 6. **Antes de implementarlo, `architect` define el mecanismo** (la spec no lo fija; ver `roadmap.md`, "Decisiones abiertas")
 - [x] **API-15** (menor) — **hecho 2026-09-26** (entrada 35): `resume` valida el estado antes de aplicar límites nuevos (`episode-actions.service.ts:151` vs. `:153`)
-- [ ] **API-6** (mejora) — filtro `status` de `listEpisodes` tipado con los valores válidos; status inválido → `VALIDATION_ERROR` en vez de `BADREQUEST` (`episodes.service.ts:133`)
+- [~] **API-6** (mejora; la parte de `VALIDATION_ERROR` quedó hecha con API-10 el 2026-09-28, falta tipar el filtro con los valores válidos) — filtro `status` de `listEpisodes` tipado con los valores válidos; status inválido → `VALIDATION_ERROR` en vez de `BADREQUEST` (`episodes.service.ts:133`)
 - [ ] **API-11** (mejora, no necesaria para el MVP: la spec la cubre con polling) — eventos SSE para `APPROVED`/`GENERATING_AUDIO`
 
 ### 12.3. Antes de F3 — `packages/video` como librería (spec, "Restricciones técnicas", puntos 1-4)

@@ -120,12 +120,12 @@ Ordenado por la fase del front que desbloquea. "Bloqueante"/"no bloqueante" es l
 - [x] **API-12** — bloqueante (AC 3.32, 3.35, 3.38, 3.39): `pipelineActive` en `getEpisodeDetail`; el SSE completa enseguida si el pipeline no está activo. **Hecho 2026-09-25** (entrada 34); tras el review, el SSE responde `204` sin pipeline activo y `404` si el episodio no existe.
 - [x] **API-13** — bloqueante (AC 3.33). **Hecho 2026-09-25** (entrada 34; `no-transform` ya lo pone Nest): evento SSE `heartbeat` cada 15 s + `Cache-Control: no-transform` (ADR 0001 punto 6).
 - [x] **API-10b** — **hecho 2026-09-26** (entrada 35; también cubre `TtsProviderUnavailableError`). No bloqueante según la spec, pero **prerrequisito de API-19**, así que en la práctica entra en la ruta crítica de F2 (AC 3.50, 3.62, 3.85): `BudgetExceededError` → `409 USAGE_LIMIT_EXCEEDED`, errores de proveedor → `503 PROVIDER_QUOTA_EXCEEDED` en `regenerate`/`regenerate-audio`. Sirve también a F3.
-- [ ] **API-10** — no bloqueante, recomendado antes de F2: bodies, respuestas y códigos de error de `runEpisodeAction` en `openapi.json` (incluido `VOICE_NOT_CONFIGURED`, que existe recién tras la Fase 7 paso 6, y la acción `regenerate-verdict` de API-19); corrección de la documentación de `argument.approved`.
+- [x] **API-10** (HECHO 2026-09-28) — no bloqueante, recomendado antes de F2: bodies, respuestas y códigos de error de `runEpisodeAction` en `openapi.json` (incluido `VOICE_NOT_CONFIGURED`, que existe recién tras la Fase 7 paso 6, y la acción `regenerate-verdict` de API-19); corrección de la documentación de `argument.approved`.
 - [x] **API-14** — **hecho 2026-09-26** (entrada 35). Importante, no bloqueante: `edit`/`regenerate` validan que el `argumentId` pertenezca al episodio (`404`).
 - [ ] **API-16** — no bloqueante (parte de AC 3.51): `maxTtsSegments` en `UsageLimitResumeSchema`.
 - [ ] **API-18** — no bloqueante, sin fase asignada en la spec (parte de AC 3.51, fila `VOICE_NOT_CONFIGURED`): exponer qué agentes no tienen voz en un `VOICE_NOT_CONFIGURED` (hoy el checkpoint solo trae el motivo). Depende de la Fase 7 paso 6 (`VoiceNotConfiguredError`). **El mecanismo no está especificado** (ver "Decisiones abiertas"); sin API-18 el panel lista todos los participantes.
 - [x] **API-15** — **hecho 2026-09-26** (entrada 35). Menor: `resume` valida el estado antes de aplicar límites nuevos.
-- [ ] **API-6** — mejora: filtro `status` de `listEpisodes` tipado; `VALIDATION_ERROR` en vez de `BADREQUEST`.
+- [~] **API-6** (`VALIDATION_ERROR` hecho con API-10) — mejora: filtro `status` de `listEpisodes` tipado; `VALIDATION_ERROR` en vez de `BADREQUEST`.
 - [ ] **API-11** — mejora, no necesaria (la spec la cubre con polling): eventos SSE para `APPROVED`/`GENERATING_AUDIO`.
 
 **6.3 — Antes de F3 (preview con audio)**

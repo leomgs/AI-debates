@@ -7,7 +7,7 @@ Autenticación: un solo usuario (el curador), con sesión por cookie emitida y v
 ## 1. Convenciones generales
 
 - Formato: JSON sobre HTTP, salvo el endpoint de eventos (SSE).
-- Errores: `{ "error": { "code": string, "message": string } }`. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1), y los de auth (§1.1): `UNAUTHORIZED` (401, sin sesión válida), `INVALID_CREDENTIALS` (401, login rechazado), `TOO_MANY_ATTEMPTS` (429, login bloqueado por rate-limit) y `LOGIN_BUSY` (429, reintentar en un segundo).
+- Errores: `{ "error": { "code": ErrorCode, "message": string } }`. Desde API-10 (2026-09-28), `ErrorCode` es un enum documentado en `openapi.json` y sale de una sola fuente en el código (`apps/api/src/shared/http/error-codes.ts`); un test impide que el filtro emita un código fuera del enum. Valores: `VALIDATION_ERROR`, `INVALID_SEQUENCE_INDEX`, `UNAUTHORIZED`, `INVALID_CREDENTIALS`, `FORBIDDEN`, `NOT_FOUND`, `INVALID_STATE_TRANSITION`, `MANIFEST_NOT_READY`, `VOICE_NOT_CONFIGURED`, `USAGE_LIMIT_EXCEEDED`, `TOO_MANY_ATTEMPTS`, `LOGIN_BUSY`, `PROVIDER_QUOTA_EXCEEDED`, `HTTP_ERROR` e `INTERNAL_ERROR`. Una `HttpException` genérica toma el `code` de su status: 400 → `VALIDATION_ERROR`, 401 → `UNAUTHORIZED`, 403 → `FORBIDDEN`, 404 → `NOT_FOUND`, 500 → `INTERNAL_ERROR`, cualquier otro → `HTTP_ERROR` (antes usaba el nombre de la clase: `BADREQUEST`, `NOTFOUND`, que ya no existen). Un `VALIDATION_ERROR` de Zod trae en `message` el primer issue como `<campo>: <mensaje>` (`: <mensaje>` si no tiene campo); el dashboard usa ese prefijo para marcar el campo, y un e2e lo fija. `code` usa los mismos valores que `CheckpointReason` cuando aplica (`USAGE_LIMIT_EXCEEDED`, etc.), más `INVALID_STATE_TRANSITION` para acciones de curaduría llamadas en un estado que no las admite, `INVALID_SEQUENCE_INDEX` para `regenerate-audio` con un `sequenceIndex` fuera de rango (AC 6.2), `FORBIDDEN` para una URL de `/audio-files` vencida o alterada (AC 6.1), y los de auth (§1.1): `UNAUTHORIZED` (401, sin sesión válida), `INVALID_CREDENTIALS` (401, login rechazado), `TOO_MANY_ATTEMPTS` (429, login bloqueado por rate-limit) y `LOGIN_BUSY` (429, reintentar en un segundo).
 - Una acción de curaduría llamada en un estado que no la admite (ver tabla de la sección 5) responde `409 Conflict`, nunca `400` — el request está bien formado, lo que falla es la transición.
 - Acciones sincrónicas que llaman a un proveedor (`regenerate`, `regenerate-verdict`, `regenerate-audio`; spec 003, API-10b, implementado el 2026-09-26):
   - `409 USAGE_LIMIT_EXCEEDED`: el presupuesto del episodio (`maxLlmCalls` o `maxTtsSegments`) está agotado. En `PENDING_REVIEW` y `READY_FOR_RENDER` no hay forma de subir los límites, así que el dashboard deshabilita el botón antes de llegar a este error (AC 3.46, 3.61, 3.83).
@@ -152,7 +152,7 @@ Implementación real (`LocalDiskStorageProvider`, etapa 3 de TTS — `tasks.md` 
 
 ## 3. Acciones de curaduría
 
-Todas siguen el mismo shape: `POST /episodes/:id/actions/:action`. Cada una solo es válida desde ciertos estados (ver sección 5) — el resto del payload depende de la acción.
+Todas siguen el mismo shape: `POST /episodes/:id/actions/:action`. Cada una solo es válida desde ciertos estados (ver sección 5) — el resto del payload depende de la acción. Desde API-10 (2026-09-28), cada acción es una operación propia en `openapi.json`, con su body y su respuesta tipados: `approveEpisode`, `rejectEpisode`, `editEpisodeArgument`, `regenerateEpisodeArgument`, `resumeEpisode`, `regenerateEpisodeAudio` y `regenerateEpisodeVerdict` (las URLs no cambiaron; `runEpisodeAction` ya no existe). Todas responden `201`. Una acción desconocida responde `400 VALIDATION_ERROR`. Express 5 rutea sin distinguir mayúsculas, así que `/actions/APPROVE` ejecuta `approve` (antes daba `400`; aceptado).
 
 ### `POST /episodes/:id/actions/approve`
 Válida solo desde `PENDING_REVIEW`. Sin body. Transiciona a `APPROVED`.
@@ -184,7 +184,7 @@ Válida solo desde `READY_FOR_RENDER` (AC 6.2) — a diferencia de `edit`/`regen
 // Request
 { "sequenceIndex": 1 }
 
-// Response 200 — el AudioAsset nuevo
+// Response 201 — el AudioAsset nuevo (AudioAssetDto)
 { "id": "uuid", "storageKey": "...", "provider": "LOCAL", "durationMs": 64812, "mimeType": "audio/wav" }
 ```
 
@@ -236,7 +236,7 @@ Reanuda exactamente desde `checkpoint.fromState` / `checkpoint.debateRoundId` (v
 event: research.started        data: {}
 event: agent.thinking          data: { agentId, round }
 event: fact_check.completed    data: { status, errorsDetected }
-event: argument.approved       data: { sequenceIndex, agentId, text }
+event: argument.approved       data: { agentId, text }   // sin sequenceIndex (API-10)
 event: episode.pending_review  data: {}
 event: episode.requires_review data: { reason, checkpoint }
 event: heartbeat               (spec 003, API-13; sin línea data:, ver abajo)
