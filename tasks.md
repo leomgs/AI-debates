@@ -380,6 +380,8 @@ Post-MVP, fuera de `features.md` (congelado). Spec escrita y revisada por `archi
 - [~] **API-6** (mejora; la parte de `VALIDATION_ERROR` quedó hecha con API-10 el 2026-09-28, falta tipar el filtro con los valores válidos) — filtro `status` de `listEpisodes` tipado con los valores válidos; status inválido → `VALIDATION_ERROR` en vez de `BADREQUEST` (`episodes.service.ts:133`)
 - [ ] **API-11** (mejora, no necesaria para el MVP: la spec la cubre con polling) — eventos SSE para `APPROVED`/`GENERATING_AUDIO`
 
+- [ ] **API-20** (surgido del review de la F2-B, 2026-09-28) — `EpisodeUsage.executionTime` nunca se escribe (`@default(0)`, `EpisodeBudgetService` solo toca `llmCalls`/`searchRequests`/`ttsRequests`), así que el detalle no puede mostrar el tiempo de ejecución (AC 3.30); el dashboard oculta la fila mientras valga 0. Definir qué mide (tiempo de pipeline activo, de reloj, etc.) y dónde se acumula; pasa por `product-analyst`/`architect` antes de implementar
+
 ### 12.3. Antes de F3 — `packages/video` como librería (spec, "Restricciones técnicas", puntos 1-4)
 
 - [ ] `src/studio.ts` con `registerRoot`; script `"studio": "remotion studio src/studio.ts"` (punto 1)
@@ -451,20 +453,20 @@ Por D20 (2026-09-27), lo que quedaba de este paso (voces `EN`, asignación `PT`,
 - [x] Extraer `EpisodeContextService.build(episodeId)` en `modules/episodes/`, reemplazando las copias de `buildDebateContext` del orquestador (`:496`) y de acciones (`:219`) (prepara AC 4.12). Si API-19 (12.2) arranca antes, esta extracción es su primer commit; nunca una tercera copia
 - [x] Tests existentes en verde **antes** de tocar el idioma, sin cambiar ninguna aserción (solo el setup: stub del servicio en el spec del orquestador, servicio real en el de acciones); spec propio `episode-context.service.spec.ts`; no en paralelo con API-10b/API-14/API-15/API-19 (mismo `episode-actions.service.ts`)
 
-**5b. Prompts (requiere 5a y 13.4)**
-- [ ] Reescribir sin voseo, a español neutro con tuteo: `agents.personas.ts` (incluido `ROUND_FRAMING` `:155-159` y `:168,184`), `agents.service.ts`, `fact-check.service.ts`, `research.service.ts` y el `debaterSummary` del seed (AC 4.26)
-- [ ] `buildLanguageInstruction(language)` en `shared/personas`: una línea por idioma, redactada en el idioma de destino, para los 3 idiomas desde el MVP; la de `ES` nombra la variante (neutro latinoamericano, tuteo, sin regionalismos) (AC 4.27; D11)
-- [ ] Instrucción como regla del system prompt y como última línea del prompt de usuario en `argue`, `respond`, `amend`, `regenerate` y `judge` (incluido el `judge` de `regenerate-verdict`, API-19); tests que inspeccionan el prompt para `ES`, `EN` y `PT` (AC 4.6)
-- [ ] En las evaluadoras (claims, fact-check, filtro editorial) y en la extracción de hechos del research: idioma del texto evaluado y de los campos libres (`statement`, `analysis`, `violatedRule`, `reason`, hechos); tests del prompt para `ES`, `EN` y `PT` (AC 4.7 parte tests; D7, D9)
-- [ ] Texto de respaldo `"Violación de reglas editoriales."` (`episode-orchestrator.service.ts:371`) en el idioma del episodio (D7)
-- [ ] `CONTRARIAN.voice` (`agents.personas.ts:67`) sin la frase literal en español; reemplazo por descripción neutra (AC 4.9)
-- [ ] Búsqueda en el código sin formas de voseo ("sos", "querés", "presentá", "generá", "devolvé"...) + revisión (AC 4.26)
+**5b. Prompts (requiere 5a y 13.4)** — HECHO 2026-09-28 (`decision-log.md` entrada 40)
+- [x] Reescribir sin voseo, a español neutro con tuteo: `agents.personas.ts` (incluido `ROUND_FRAMING` `:155-159` y `:168,184`), `agents.service.ts`, `fact-check.service.ts`, `research.service.ts` y el `debaterSummary` del seed (AC 4.26)
+- [x] `buildLanguageInstruction(language)` en `shared/personas`: una línea por idioma, redactada en el idioma de destino, para los 3 idiomas desde el MVP; la de `ES` nombra la variante (neutro latinoamericano, tuteo, sin regionalismos) (AC 4.27; D11)
+- [x] Instrucción como regla del system prompt y como última línea del prompt de usuario en `argue`, `respond`, `amend`, `regenerate` y `judge` (incluido el `judge` de `regenerate-verdict`, API-19); tests que inspeccionan el prompt para `ES`, `EN` y `PT` (AC 4.6)
+- [x] En las evaluadoras (claims, fact-check, filtro editorial) y en la extracción de hechos del research: idioma del texto evaluado y de los campos libres (`statement`, `analysis`, `violatedRule`, `reason`, hechos); tests del prompt para `ES`, `EN` y `PT` (AC 4.7 parte tests; D7, D9)
+- [x] Texto de respaldo `"Violación de reglas editoriales."` (`episode-orchestrator.service.ts:371`) en el idioma del episodio (D7)
+- [x] `CONTRARIAN.voice` (`agents.personas.ts:67`) sin la frase literal en español; reemplazo por descripción neutra (AC 4.9)
+- [x] Búsqueda en el código sin formas de voseo ("sos", "querés", "presentá", "generá", "devolvé"...) + revisión (AC 4.26)
 
-**5c. `language` por parámetro (requiere 5a y 13.4)**
-- [ ] `DebateContext.language`, completado por `EpisodeContextService` desde `Episode.language` (AC 4.10, 4.12)
-- [ ] `FactCheckService.extractClaims`/`check`/`editorialReview` con `language` como último parámetro (`fact-check.service.ts:100,121,149`) (AC 4.7)
-- [ ] `ResearchService.research(topicId, language, manualSources?)`; ajustar `scripts/smoke-test-argument.ts` (`:31`, `:44`) (AC 4.13)
-- [ ] Tests del orquestador: episodio `EN` reanudado desde `DEBATING`, `JUDGING` y `GENERATING_AUDIO` conserva el idioma (AC 4.10); episodio `PT` retomado por `EpisodeRecoveryService` (AC 4.11); `regenerate` en `PENDING_REVIEW` sobre `EN` usa el contexto compartido (AC 4.12); `resume` de `INSUFFICIENT_EVIDENCE` en `EN` extrae hechos en inglés (AC 4.13). Los que pasan por audio o por `createEpisode` en `EN`/`PT` cargan en su setup filas `AgentVoice` de prueba con ids visiblemente ficticios (D14, p. ej. `test-en-analyst`), nunca con forma de catálogo vits y nunca en el seed
+**5c. `language` por parámetro (requiere 5a y 13.4)** — HECHO 2026-09-28 (`decision-log.md` entrada 40)
+- [x] `DebateContext.language`, completado por `EpisodeContextService` desde `Episode.language` (AC 4.10, 4.12)
+- [x] `FactCheckService.extractClaims`/`check`/`editorialReview` con `language` como último parámetro (`fact-check.service.ts:100,121,149`) (AC 4.7)
+- [x] `ResearchService.research(topicId, language, manualSources?)`; ajustar `scripts/smoke-test-argument.ts` (`:31`, `:44`) (AC 4.13)
+- [x] Tests del orquestador: episodio `EN` reanudado desde `DEBATING`, `JUDGING` y `GENERATING_AUDIO` conserva el idioma (AC 4.10); episodio `PT` retomado por `EpisodeRecoveryService` (AC 4.11); `regenerate` en `PENDING_REVIEW` sobre `EN` usa el contexto compartido (AC 4.12); `resume` de `INSUFFICIENT_EVIDENCE` en `EN` extrae hechos en inglés (AC 4.13). Los que pasan por audio o por `createEpisode` en `EN`/`PT` cargan en su setup filas `AgentVoice` de prueba con ids visiblemente ficticios (D14, p. ej. `test-en-analyst`), nunca con forma de catálogo vits y nunca en el seed
 
 ### 13.6. Paso 6 — TTS (requiere 13.4) — HECHO 2026-09-27 (rama `feat/backend-13-6`, `decision-log.md` entrada 37)
 
