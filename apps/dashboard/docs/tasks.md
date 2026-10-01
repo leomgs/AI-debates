@@ -1,6 +1,6 @@
 # Tasks — Dashboard (front)
 
-Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-09-28, décima pasada (bloque F2-B mergeado: detalle, vista en vivo y aviso de veredicto desactualizado, con verificaciones en navegador pendientes). Novena pasada, mismo día (bloque F2-A mergeado: compartido, inbox, lista, crear y spike de SSE, con verificaciones en navegador pendientes; API-10 hecha en el backend). Octava pasada, 2026-09-27 (§1 completa: verificaciones en navegador hechas por el usuario, todas OK). Séptima pasada, 2026-09-26 (F1 mergeada a `master` con fast-forward desde `feat/dashboard-f1`; §1 sin cambios de estado: siguen los `[~]` de verificación en navegador; §2 apunta a lo que se puede adelantar antes de API-17). Sexta pasada, mismo día (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
+Tracking de estado puramente del front. Convención: `[x]` hecho, `[ ]` pendiente, `[~]` empezado/parcial. Última revisión: 2026-10-01, undécima pasada (bloque F2-C mergeado: curaduría, "Volver a juzgar" y resolución de los 6 motivos, con verificaciones en navegador pendientes). Décima pasada, 2026-09-28 (bloque F2-B mergeado: detalle, vista en vivo y aviso de veredicto desactualizado, con verificaciones en navegador pendientes). Novena pasada, mismo día (bloque F2-A mergeado: compartido, inbox, lista, crear y spike de SSE, con verificaciones en navegador pendientes; API-10 hecha en el backend). Octava pasada, 2026-09-27 (§1 completa: verificaciones en navegador hechas por el usuario, todas OK). Séptima pasada, 2026-09-26 (F1 mergeada a `master` con fast-forward desde `feat/dashboard-f1`; §1 sin cambios de estado: siguen los `[~]` de verificación en navegador; §2 apunta a lo que se puede adelantar antes de API-17). Sexta pasada, mismo día (F1 implementada en la rama `feat/dashboard-f1`, §1). Quinta pasada, 2026-09-25 (API-8 hecha en el backend, §0). Cuarta pasada (spec 003 sin preguntas abiertas: D17-D20, AC 3.81-3.86, API-19 bloqueante de F2; nada implementado). Tercera pasada del mismo día: D16, AC 3.80, AC 3.79 partido en (a)/(b)/(c), dos layouts raíz, rutas del showcase bajo `/[locale]`; preguntas A y B de la spec 004 resueltas. Segunda pasada: tareas ajustadas por la spec 004 (API-7a, API-17, AC 3.78/3.79, selector y distintivos de idioma, sexto motivo `VOICE_NOT_CONFIGURED`). Revisión previa: 2026-09-25 (tareas reescritas según el plan F1-F4 de `docs/product/003-dashboard-ui.md`).
 
 Cada tarea cita su origen en la spec 003 (AC 3.x, D-n, API-n o "Restricciones técnicas"). "Requiere" indica una dependencia explícita con otra tarea de este archivo (§n) o con backend (API-n, trackeado en `tasks.md` de la raíz §12; API-17, en §13). Antes de escribir código de Next: leer la guía de la versión instalada en `node_modules/next/dist/docs/` (`apps/dashboard/AGENTS.md`).
 
@@ -60,7 +60,7 @@ Requiere API-8 (§0). Criterio: ver `roadmap.md`, Fase 1. Proceso y hallazgos en
 - [x] Verificar con curl contra `/api/...` que los endpoints no públicos devuelven `401 UNAUTHORIZED` (AC 3.5): hecho (episodios, detalle, SSE, manifest, acciones, notificaciones, sesión). AC 3.9: la URL interna no aparece en el HTML ni en ningún chunk de `.next/static` (solo en el `routes-manifest.json` del servidor); pestaña de red revisada en navegador (2026-09-27): todo sale a `localhost:3001`
 - [x] Verificar criterio F1: `pnpm build` verde; renombrar `COMPLETED` en el enum de estados o `password` en `LoginDto` de `openapi.json` hace fallar el build del dashboard (`TS2353`); un import prohibido hace fallar `check-boundaries` y corta `pnpm build`
 
-## 2. F2 — Panel de curación (privado) — en curso: bloques F2-A y F2-B mergeados 2026-09-28 (`decision-log.md` entradas 7 y 8); `[~]` = implementado y con tests, falta la prueba en navegador
+## 2. F2 — Panel de curación (privado) — implementada: bloques F2-A y F2-B mergeados 2026-09-28 y F2-C 2026-10-01 (`decision-log.md` entradas 7, 8 y 9); falta la verificación del criterio F2 en navegador; `[~]` = implementado y con tests, falta la prueba en navegador
 
 Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§0). Criterio: ver `roadmap.md`, Fase 2. Qué se puede adelantar antes de API-17 con lo que ya está en `master`, y con qué criterio: `roadmap.md`, Fase 2, "Qué se puede adelantar antes de API-17".
 
@@ -113,35 +113,35 @@ Requiere §1 completa y API-1, API-5, API-7a, API-12, API-13, API-17, API-19 (§
 - [ ] Verificar: 60 s sin eventos de negocio sin reconexiones (AC 3.33) — a mano, con un episodio real (el cliente se probó con un server SSE de prueba: 36 s solo con heartbeats, una conexión)
 
 **Curaduría en `PENDING_REVIEW` (sección 6):**
-- [ ] Controles visibles solo en los estados de `api-contract.md` §5 y API-19 (AC 3.42)
-- [ ] Aprobar con confirmación y paso a polling hasta `READY_FOR_RENDER` (AC 3.43)
-- [ ] Editor inline de un argumento a la vez (AC 3.44)
-- [ ] Regenerar argumento con confirmación de los 3 avisos y estado "Regenerando…" (AC 3.45, AC 3.75)
-- [ ] Deshabilitar "Regenerar" con presupuesto LLM agotado (AC 3.46)
-- [ ] Rechazar con diálogo destructivo (AC 3.47)
-- [ ] `409 INVALID_STATE_TRANSITION` → refetch + aviso (AC 3.48)
-- [ ] Bloqueo de acciones concurrentes sobre el mismo episodio (AC 3.49)
-- [ ] Errores específicos de `regenerate` (AC 3.50; mensajes específicos requieren API-10b, `404` de argumento requiere API-14)
+- [~] Controles visibles solo en los estados de `api-contract.md` §5 y API-19 (AC 3.42)
+- [~] Aprobar con confirmación y paso a polling hasta `READY_FOR_RENDER` (AC 3.43)
+- [~] Editor inline de un argumento a la vez (AC 3.44)
+- [~] Regenerar argumento con confirmación de los 3 avisos y estado "Regenerando…" (AC 3.45, AC 3.75)
+- [~] Deshabilitar "Regenerar" con presupuesto LLM agotado (AC 3.46)
+- [~] Rechazar con diálogo destructivo (AC 3.47)
+- [~] `409 INVALID_STATE_TRANSITION` → refetch + aviso (AC 3.48)
+- [~] Bloqueo de acciones concurrentes sobre el mismo episodio (AC 3.49)
+- [~] Errores específicos de `regenerate` (AC 3.50; mensajes específicos requieren API-10b, `404` de argumento requiere API-14)
 
 **Veredicto desactualizado y "Volver a juzgar" (sección 6; D17)** — requiere API-19:
-- [ ] Aviso "Este veredicto es anterior a cambios en los argumentos…" en el bloque del veredicto cuando `debate.verdict.stale` es verdadero en `PENDING_REVIEW`; aparece tras `edit`/`regenerate` y desaparece al volver a estar al día, sin recargar (AC 3.81; D7)
-- [ ] Botón "Volver a juzgar" (`regenerate-verdict`) siempre visible en `PENDING_REVIEW`, destacado con el aviso; confirmación con el costo a la vista (1 llamada LLM, usadas y límite) y el aviso de que reemplaza veredicto y ganador; "Juzgando…" mientras corre, con AC 3.49; refetch al terminar (AC 3.82, AC 3.75)
-- [ ] Deshabilitar "Volver a juzgar", con la explicación a la vista, si `usage.llmCalls >= limits.maxLlmCalls` (AC 3.83)
-- [ ] Confirmación de "Aprobar" con veredicto desactualizado: advertencia "El veredicto es anterior a tus cambios y es el que se va a publicar" y "Volver a juzgar" como alternativa en el mismo diálogo (AC 3.84)
-- [ ] Errores de `regenerate-verdict`: `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` con los mensajes de AC 3.50; `409 INVALID_STATE_TRANSITION` como en AC 3.48; el veredicto anterior queda y el bloque nunca queda en "Juzgando…" (AC 3.85)
+- [~] Aviso "Este veredicto es anterior a cambios en los argumentos…" en el bloque del veredicto cuando `debate.verdict.stale` es verdadero en `PENDING_REVIEW`; aparece tras `edit`/`regenerate` y desaparece al volver a estar al día, sin recargar (AC 3.81; D7)
+- [~] Botón "Volver a juzgar" (`regenerate-verdict`) siempre visible en `PENDING_REVIEW`, destacado con el aviso; confirmación con el costo a la vista (1 llamada LLM, usadas y límite) y el aviso de que reemplaza veredicto y ganador; "Juzgando…" mientras corre, con AC 3.49; refetch al terminar (AC 3.82, AC 3.75)
+- [~] Deshabilitar "Volver a juzgar", con la explicación a la vista, si `usage.llmCalls >= limits.maxLlmCalls` (AC 3.83)
+- [~] Confirmación de "Aprobar" con veredicto desactualizado: advertencia "El veredicto es anterior a tus cambios y es el que se va a publicar" y "Volver a juzgar" como alternativa en el mismo diálogo (AC 3.84)
+- [~] Errores de `regenerate-verdict`: `409 USAGE_LIMIT_EXCEEDED` y `503 PROVIDER_QUOTA_EXCEEDED` con los mensajes de AC 3.50; `409 INVALID_STATE_TRANSITION` como en AC 3.48; el veredicto anterior queda y el bloque nunca queda en "Juzgando…" (AC 3.85)
 
 **Resolución de `REQUIRES_HUMAN_REVIEW` (sección 7):**
-- [ ] Panel de resolución con motivo, `fromState`, ronda, sobre el checkpoint más reciente (AC 3.51)
-- [ ] Panel `USAGE_LIMIT_EXCEEDED`: formulario de límites > consumo actual; caso `ttsRequests` solo "Rechazar" hasta API-16 (AC 3.51)
-- [ ] Panel `INSUFFICIENT_EVIDENCE`: formulario de fuentes manuales `{ url, title, snippet }` (AC 3.51)
-- [ ] Panel `MAX_REVISIONS_EXCEEDED`: reanudar `{}` / rechazar (AC 3.51)
-- [ ] Panel `VALIDATION_INCONSISTENCY`: agente afectado (API-1), "Reanudar" deshabilitado con explicación (AC 3.51, D13)
-- [ ] Panel `PROVIDER_QUOTA_EXCEEDED`: reanudar `{}` / rechazar (AC 3.51)
-- [ ] Panel `VOICE_NOT_CONFIGURED`: idioma del episodio y agentes sin voz (API-18; mientras no exista, los participantes del episodio de API-1 como agentes a revisar), explicación de que se corrige en el seed de voces de la API, "Reanudar" `{}` **habilitado** o "Rechazar" (AC 3.51; requiere API-17)
-- [ ] Aviso de repetición de motivo junto a "Reanudar", con el agregado específico de `PROVIDER_QUOTA_EXCEEDED` y de `VOICE_NOT_CONFIGURED` (reanudar sin corregir las voces gasta el reintento) (AC 3.52)
-- [ ] Body exacto por motivo, reapertura de SSE o polling según `fromState` (`GENERATING_AUDIO` → polling, también para `VOICE_NOT_CONFIGURED`) (AC 3.53)
-- [ ] `VALIDATION_ERROR` dentro del formulario sin perder datos (AC 3.54)
-- [ ] Panel genérico para motivo desconocido (AC 3.55)
+- [~] Panel de resolución con motivo, `fromState`, ronda, sobre el checkpoint más reciente (AC 3.51)
+- [~] Panel `USAGE_LIMIT_EXCEEDED`: formulario de límites > consumo actual; caso `ttsRequests` solo "Rechazar" hasta API-16 (AC 3.51)
+- [~] Panel `INSUFFICIENT_EVIDENCE`: formulario de fuentes manuales `{ url, title, snippet }` (AC 3.51)
+- [~] Panel `MAX_REVISIONS_EXCEEDED`: reanudar `{}` / rechazar (AC 3.51)
+- [~] Panel `VALIDATION_INCONSISTENCY`: agente afectado (API-1), "Reanudar" deshabilitado con explicación (AC 3.51, D13)
+- [~] Panel `PROVIDER_QUOTA_EXCEEDED`: reanudar `{}` / rechazar (AC 3.51)
+- [~] Panel `VOICE_NOT_CONFIGURED`: idioma del episodio y agentes sin voz (API-18; mientras no exista, los participantes del episodio de API-1 como agentes a revisar), explicación de que se corrige en el seed de voces de la API, "Reanudar" `{}` **habilitado** o "Rechazar" (AC 3.51; requiere API-17)
+- [~] Aviso de repetición de motivo junto a "Reanudar", con el agregado específico de `PROVIDER_QUOTA_EXCEEDED` y de `VOICE_NOT_CONFIGURED` (reanudar sin corregir las voces gasta el reintento) (AC 3.52)
+- [~] Body exacto por motivo, reapertura de SSE o polling según `fromState` (`GENERATING_AUDIO` → polling, también para `VOICE_NOT_CONFIGURED`) (AC 3.53)
+- [~] `VALIDATION_ERROR` dentro del formulario sin perder datos (AC 3.54)
+- [~] Panel genérico para motivo desconocido (AC 3.55)
 - [ ] Verificar criterio F2: crear un episodio en cada idioma con voces configuradas → en vivo hasta `PENDING_REVIEW` sin cortes; crear en un idioma sin voces muestra AC 3.78; editar un argumento hace aparecer el aviso de veredicto desactualizado y "Volver a juzgar" lo hace desaparecer; forzar y resolver cada uno de los 6 motivos en local (para `VOICE_NOT_CONFIGURED`, quitando una voz del seed); "Publicado" con `publishedAt` puesto a mano
 
 ## 3. F3 — Preview con audio — sin empezar

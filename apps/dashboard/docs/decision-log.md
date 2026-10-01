@@ -151,3 +151,50 @@ Se descartó "Tailwind + fetch nativo con Server Actions" porque se combina peor
 **Review** (listo con correcciones, aplicadas): `executionTime` nunca lo escribe la API (`@default(0)`, nadie lo incrementa), así que la fila se oculta mientras valga 0 en vez de mostrar un "0 s" falso (anotado como pendiente de backend en `tasks.md` de la raíz §12); `signal` en el fetch del detalle; un solo `isNotFoundError`; `motion-safe:` en las animaciones; "Fact-check: rechazado" con `FAILED` y 0 errores. No se sumó testing-library: el ciclo de vida del hook (desmontar, cambiar de episodio, `enabled` en false) queda en la verificación manual.
 
 **Verificación**: `pnpm build` 6/6 con `check-boundaries`, Vitest 19 archivos / 243 tests, eslint sin errores. Pendiente a mano: AC 3.33 (60 s sin eventos, una conexión), cierre de la conexión al cerrar la pestaña, recorrido real hasta `PENDING_REVIEW`, 401 durante el SSE, episodio trabado, lector de pantalla y contraste de los avisos.
+
+## 2026-10-01
+
+### 9. Bloque F2-C: curaduría, "Volver a juzgar" y resolución de motivos
+
+**Contexto**: tercer y último bloque de la F2, el que llama acciones, posible desde que API-10 tipó las operaciones por acción en `openapi.json` (2026-09-28). Mismo flujo que F2-A y F2-B: worktree aislado, rama `feat/dashboard-f2c`, `frontend-engineer`, verificación propia, `code-reviewer`, correcciones, re-review y merge fast-forward a `master`.
+
+**Qué se hizo**:
+- **Lógica sin React**:
+  - `lib/episode-actions.ts`: acciones válidas por estado (AC 3.42), presupuesto LLM agotado (AC 3.46, 3.83), borrador del editor y mapeo de errores a mensajes (AC 3.48, 3.50, 3.85).
+  - `lib/resume-resolution.ts`: el panel y el body de `resume` según el motivo, con validación y aviso de repetición (AC 3.51-3.55).
+  - `lib/episode-action-mutation.ts`: opciones de la mutación, guarda de una sola acción y estado pendiente/fallo.
+- **UI**:
+  - Panel de revisión: Aprobar con la advertencia de veredicto desactualizado y "Volver a juzgar" en el mismo diálogo (AC 3.43, 3.84), y Rechazar con diálogo destructivo (AC 3.47).
+  - Editar inline de a un argumento; Regenerar con sus tres avisos y el consumo (AC 3.44-3.46).
+  - "Volver a juzgar" junto al veredicto, con "Juzgando…" (AC 3.82-3.85).
+  - Panel de `REQUIRES_HUMAN_REVIEW` con los 6 motivos, formularios de límites y de fuentes manuales, y panel genérico.
+  - `AlertDialog` de shadcn sobre `radix-ui`.
+- **Pendientes de backend conocidos**: el caso `ttsRequests` ofrece solo "Rechazar" hasta API-16; `VOICE_NOT_CONFIGURED` lista los participantes hasta API-18.
+
+**Review** (listo con correcciones, sin bloqueantes; las 8 se aplicaron):
+1. **Foco (AC 3.77)**: tras aprobar, rechazar o reanudar, o un 409/404, el panel que tenía el foco se desmonta y el foco caía al `<body>`. Ahora el destino final es algo que sobrevive al cambio de estado:
+   - el `<h1>` de la cabecera, con `tabIndex={-1}`;
+   - o el aviso de pantalla.
+
+   Se enfoca en un efecto, después de pintar el detalle nuevo. "Reanudar" usa `aria-disabled` mientras corre, para no perder el foco.
+2. **Tests del hook de acciones**: no tenía tests. La mutación se extrajo a `lib/episode-action-mutation.ts`, testeada con `QueryClient`, `QueryObserver` y `MutationObserver` reales (sin testing-library). Cubre:
+   - una sola acción a la vez (AC 3.49);
+   - pendiente hasta el refetch;
+   - refetch tras éxito, 409 y 404, y no tras 503;
+   - nunca queda en "Juzgando…".
+3. **409 `USAGE_LIMIT_EXCEEDED`**: en Regenerar y "Volver a juzgar" refresca el detalle, pero el mensaje queda junto al control. Para eso `refetch` se separó del aviso de pantalla.
+4. **404**: un solo `isNotFoundError`.
+5. **Tabla de acciones**: la UI decide con `canRunAction`; se sacó `availableActions`, que nadie usaba.
+6. **Tope de límites**: `2_147_483_647`. El `Int` de Prisma es de 32 bits aunque la base sea SQLite; antes un valor mayor terminaba en 500.
+7. **Texto de `VALIDATION_INCONSISTENCY`**: ahora nombra al agente sin argumentos aprobados, que es el oponente.
+8. **Sin red**: `networkMode: "always"`, así la acción falla en vez de quedar en pausa.
+
+El texto nuevo del punto 7 va sin verbos en segunda persona: el copy del curador sigue en voseo por la entrada 40 del `decision-log.md` de la raíz.
+
+**Re-review**: los 8 resueltos y listo para merge, con un problema nuevo menor, corregido antes del merge. Si la acción terminaba durante los 200 ms de la animación de cierre del diálogo (por ejemplo, un 409 rápido), `onCloseAutoFocus` le sacaba el foco al aviso. Ahora `useConfirmFocus` no toca el foco si ya salió del diálogo.
+
+**Verificación**: Vitest 22 archivos / 325 tests, eslint sin errores, `pnpm build` en verde. Pendiente a mano, junto con el criterio de la F2 (`roadmap.md`, Fase 2):
+- el foco tras cada acción, incluido un 409 provocado con dos pestañas;
+- los 6 motivos forzados en local y resueltos desde la UI;
+- editar, ver el aviso de desactualizado y que "Volver a juzgar" lo quite;
+- lector de pantalla en los diálogos.
