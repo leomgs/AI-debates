@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_A, AGENT_B, JUDGE, makeEpisodeDetail } from "@/test/episode-detail-fixture";
+import { canRunAction } from "./episode-actions";
 import type { DebateRound, EpisodeDetail } from "./episode-detail";
+import { EPISODE_STATUSES } from "./episode-status";
 import { liveUpdateMode } from "./live-updates";
 import {
   EMPTY_RESUME_BODY,
+  MAX_LIMIT_VALUE,
   activeResolution,
   REPEAT_REASON_WARNING,
   agentsToReviewForVoices,
@@ -146,6 +149,22 @@ describe("USAGE_LIMIT_EXCEEDED (AC 3.51)", () => {
     ).toBe("El número es demasiado grande.");
   });
 
+  it("tope en el máximo de int32: la columna es Int de Prisma y fuera de rango la API responde 500", () => {
+    const detail = withUsage({ llmCalls: 25 });
+    expect(MAX_LIMIT_VALUE).toBe(2_147_483_647);
+    const atMax = validateUsageLimitForm({ maxLlmCalls: "2147483647", maxSearchQueries: "5" }, detail);
+    expect(atMax.fieldErrors).toEqual({});
+    expect(atMax.body).toEqual({ maxLlmCalls: 2_147_483_647 });
+    for (const value of ["2147483648", "9007199254740991"]) {
+      expect(validateUsageLimitForm({ maxLlmCalls: value, maxSearchQueries: "5" }, detail).fieldErrors.maxLlmCalls, value).toBe(
+        "El número es demasiado grande.",
+      );
+    }
+    expect(
+      validateUsageLimitForm({ maxLlmCalls: "30", maxSearchQueries: "2147483648" }, detail).fieldErrors.maxSearchQueries,
+    ).toBe("El número es demasiado grande.");
+  });
+
   it("vacío en la métrica agotada es un error; en la otra, no se manda", () => {
     const detail = withUsage({ llmCalls: 25 });
     expect(validateUsageLimitForm({ maxLlmCalls: "", maxSearchQueries: "" }, detail).fieldErrors).toEqual({
@@ -257,6 +276,15 @@ describe("activeResolution (AC 3.51, AC 3.55)", () => {
     const checkpoints = [checkpoint("MAX_REVISIONS_EXCEEDED", "2026-09-28T10:00:00.000Z")];
     expect(activeResolution(makeEpisodeDetail({ status: "PENDING_REVIEW", checkpoints }))).toBeNull();
     expect(activeResolution(makeEpisodeDetail({ status: "FAILED", checkpoints }))).toBeNull();
+  });
+
+  it("lo decide la tabla de acciones: existe justo donde se puede reanudar (AC 3.42)", () => {
+    const checkpoints = [checkpoint("MAX_REVISIONS_EXCEEDED", "2026-09-28T10:00:00.000Z")];
+    for (const status of EPISODE_STATUSES) {
+      expect(activeResolution(makeEpisodeDetail({ status, checkpoints })) !== null, status).toBe(
+        canRunAction(status, "resume"),
+      );
+    }
   });
 
   it("se resuelve sobre el checkpoint más reciente, sin depender del orden de la API", () => {

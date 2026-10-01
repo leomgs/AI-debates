@@ -1,5 +1,5 @@
 import { API_ERROR_CODES } from "@/lib/api/error-codes";
-import { ApiError, errorMessage } from "@/lib/api/errors";
+import { ApiError, errorMessage, isNotFoundError } from "@/lib/api/errors";
 import type { components } from "@/lib/api/schema";
 import type { EpisodeDetail } from "@/lib/episode-detail";
 import type { EpisodeStatus } from "@/lib/episode-status";
@@ -43,10 +43,10 @@ const ACTIONS_BY_STATUS: Readonly<Record<EpisodeStatus, readonly CurationAction[
   FAILED: [],
 };
 
-export function availableActions(status: EpisodeStatus): readonly CurationAction[] {
-  return ACTIONS_BY_STATUS[status];
-}
-
+/**
+ * La consultan reviewControls() y activeResolution() para decidir qué panel
+ * existe: así la tabla de arriba es la que maneja la UI (AC 3.42).
+ */
 export function canRunAction(status: EpisodeStatus, action: CurationAction): boolean {
   return ACTIONS_BY_STATUS[status].includes(action);
 }
@@ -117,18 +117,24 @@ const ACTION_FAILURE_LABELS: Readonly<Record<CurationAction, string>> = {
  * - `state-changed`: 409 INVALID_STATE_TRANSITION; se refresca el detalle y
  *   se avisa arriba de la pantalla, porque los controles pueden desaparecer
  *   con el estado nuevo (AC 3.48, AC 3.85).
- * - `not-found`: 404; se refresca el detalle (AC 3.50, API-14).
+ * - `not-found`: 404; también arriba de la pantalla (AC 3.50, API-14).
  * - `validation`: 400 VALIDATION_ERROR, dentro del formulario sin perder lo
  *   cargado (AC 3.54).
- * - `error`: mensaje específico (AC 3.50, AC 3.85) o error genérico.
- * En todos los casos los datos quedan como estaban: la vista no cambia
- * nada hasta el refetch (D7).
+ * - `error`: mensaje específico (AC 3.50, AC 3.85) o error genérico, junto
+ *   al control.
+ *
+ * `refetch` va aparte de dónde se muestra: se refresca el detalle tras el
+ * 409 de transición y el 404 (AC 3.48, AC 3.50), y tras el 409
+ * USAGE_LIMIT_EXCEEDED de una acción con LLM, para que el consumo y los
+ * controles deshabilitados queden al día (AC 3.46, AC 3.83) aunque el
+ * mensaje siga junto al control. Hasta ese refetch la vista no cambia nada
+ * por su cuenta (D7).
  */
-export type ActionErrorView =
-  | { kind: "state-changed"; message: string }
-  | { kind: "not-found"; message: string }
-  | { kind: "validation"; message: string }
-  | { kind: "error"; message: string };
+export interface ActionErrorView {
+  kind: "state-changed" | "not-found" | "validation" | "error";
+  message: string;
+  refetch: boolean;
+}
 
 /** Acciones sincrónicas que llaman al LLM (API-10b): tienen mensajes propios. */
 function callsLlm(action: CurationAction): boolean {
@@ -148,28 +154,51 @@ export function validationErrorText(message: string): string {
 export function actionErrorView(action: CurationAction, error: unknown): ActionErrorView {
   if (error instanceof ApiError) {
     if (error.status === 409 && error.code === API_ERROR_CODES.INVALID_STATE_TRANSITION) {
-      return { kind: "state-changed", message: STATE_CHANGED_MESSAGE };
+      return { kind: "state-changed", message: STATE_CHANGED_MESSAGE, refetch: true };
     }
-    if (error.status === 404 && error.code === API_ERROR_CODES.NOT_FOUND) {
+    if (isNotFoundError(error)) {
       const argumentAction = action === "edit" || action === "regenerate";
-      return { kind: "not-found", message: argumentAction ? ARGUMENT_NOT_FOUND_MESSAGE : EPISODE_NOT_FOUND_MESSAGE };
+      return {
+        kind: "not-found",
+        message: argumentAction ? ARGUMENT_NOT_FOUND_MESSAGE : EPISODE_NOT_FOUND_MESSAGE,
+        refetch: true,
+      };
     }
     if (callsLlm(action) && error.status === 409 && error.code === API_ERROR_CODES.USAGE_LIMIT_EXCEEDED) {
-      return { kind: "error", message: LLM_BUDGET_ERROR_MESSAGE };
+      return { kind: "error", message: LLM_BUDGET_ERROR_MESSAGE, refetch: true };
     }
     if (callsLlm(action) && error.status === 503 && error.code === API_ERROR_CODES.PROVIDER_QUOTA_EXCEEDED) {
-      return { kind: "error", message: PROVIDER_QUOTA_ERROR_MESSAGE };
+      return { kind: "error", message: PROVIDER_QUOTA_ERROR_MESSAGE, refetch: false };
     }
     if (error.status === 400 && error.code === API_ERROR_CODES.VALIDATION_ERROR) {
-      return { kind: "validation", message: validationErrorText(error.message) || error.message };
+      return { kind: "validation", message: validationErrorText(error.message) || error.message, refetch: false };
     }
   }
-  return { kind: "error", message: `${ACTION_FAILURE_LABELS[action]} ${errorMessage(error)}` };
+  return { kind: "error", message: `${ACTION_FAILURE_LABELS[action]} ${errorMessage(error)}`, refetch: false };
 }
 
-/** Tras un 409 de transición o un 404 se refresca el detalle (AC 3.48, AC 3.50). */
+/** Tras el error se refresca el detalle, y se espera, antes de mostrarlo (ver ActionErrorView). */
 export function refetchesAfterError(view: ActionErrorView): boolean {
+  return view.refetch;
+}
+
+/**
+ * El error va arriba de la pantalla y no junto a su control: tras el
+ * refetch, el control puede haber desaparecido (otro estado, o el argumento
+ * ya no está) y con él su lugar para el error (AC 3.48, AC 3.50).
+ */
+export function showsScreenNotice(view: ActionErrorView): boolean {
   return view.kind === "state-changed" || view.kind === "not-found";
+}
+
+/**
+ * Tras el éxito el episodio sale del estado de revisión, y con él el panel
+ * que tenía el foco: aprobar pasa a APPROVED, rechazar a CANCELLED y
+ * reanudar a la fase activa. Editar, regenerar y volver a juzgar se quedan
+ * en PENDING_REVIEW.
+ */
+export function leavesStateOnSuccess(action: CurationAction): boolean {
+  return action === "approve" || action === "reject" || action === "resume";
 }
 
 /** La acción en curso involucra este argumento ("Regenerando…", editor ocupado). */
@@ -196,11 +225,12 @@ export interface ReviewControls {
 }
 
 /**
- * Controles de curaduría de PENDING_REVIEW (sección 6), o null en cualquier
- * otro estado: ahí no se muestran, no alcanza con deshabilitarlos (AC 3.42).
+ * Controles de curaduría de PENDING_REVIEW (sección 6), o null en los
+ * estados donde ACTIONS_BY_STATUS no admite `approve`: ahí no se muestran,
+ * no alcanza con deshabilitarlos (AC 3.42).
  */
 export function reviewControls(detail: Pick<EpisodeDetail, "status" | "usage" | "limits" | "debate">): ReviewControls | null {
-  if (detail.status !== "PENDING_REVIEW") return null;
+  if (!canRunAction(detail.status, "approve")) return null;
   const budget = llmBudget(detail);
   return {
     budget,

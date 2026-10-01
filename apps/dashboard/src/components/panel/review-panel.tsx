@@ -43,6 +43,9 @@ export function ReviewPanel({
   /** El bloque del veredicto, destino del foco si se vuelve a juzgar desde "Aprobar". */
   focusVerdict: () => HTMLElement | null;
 }) {
+  // Destino del foco mientras corren Aprobar o Rechazar. Con el éxito o un 409
+  // el panel se desmonta y useEpisodeActions lleva el foco al <h1> o al aviso
+  // de pantalla (AC 3.77).
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
 

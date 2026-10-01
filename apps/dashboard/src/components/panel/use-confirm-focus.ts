@@ -5,9 +5,17 @@ import { useRef } from "react";
 /**
  * Foco al cerrar un diálogo de confirmación (AC 3.77). Al cancelar, Radix
  * devuelve el foco al botón que lo abrió. Al confirmar, ese botón queda
- * deshabilitado mientras corre la acción (AC 3.49), o desaparece con el
- * estado nuevo, y el foco se perdería en el <body>: se lleva a `target`
- * (un encabezado o un bloque con tabIndex -1 cerca de lo que cambia).
+ * deshabilitado mientras corre la acción (AC 3.49) y el foco se perdería en
+ * el <body>, así que se lleva a `target`: el encabezado del panel o el
+ * bloque que muestra el progreso.
+ *
+ * Es solo el destino mientras la acción corre. Si al terminar el episodio
+ * sale del estado (aprobar, rechazar, reanudar, o un 409 o 404 que refresca
+ * el detalle), el panel y `target` se desmontan, y el foco final lo pone
+ * useEpisodeActions en algo que sobrevive al cambio: el `<h1>` de la
+ * cabecera o el aviso de pantalla. Por eso, tras confirmar, Radix nunca
+ * vuelve al botón: si `target` ya no está, no se toca el foco y queda el de
+ * useEpisodeActions.
  */
 export function useConfirmFocus(target: () => HTMLElement | null) {
   const confirmed = useRef(false);
@@ -20,11 +28,9 @@ export function useConfirmFocus(target: () => HTMLElement | null) {
     onCloseAutoFocus(event: Event) {
       if (!confirmed.current) return;
       confirmed.current = false;
+      event.preventDefault();
       const element = target();
-      if (element) {
-        event.preventDefault();
-        element.focus();
-      }
+      if (element?.isConnected) element.focus();
     },
   };
 }

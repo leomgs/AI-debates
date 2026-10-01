@@ -29,6 +29,13 @@ export function RepeatReasonWarning({ reason, id }: { reason: CheckpointReason; 
  * "Reanudar" (AC 3.53). Sin confirmación (AC 3.75): el aviso de repetición
  * está a la vista al lado. Con `type="submit"` lo usan los formularios; sin
  * formulario, `onResume`.
+ *
+ * Mientras reanuda no se deshabilita con `disabled` sino con
+ * `aria-disabled`: así conserva el foco y anuncia "Reanudando…", en vez de
+ * dejarlo caer al <body> (AC 3.77). Un click en ese momento no hace nada: la
+ * mutación tiene su guarda (AC 3.49) y los formularios no envían con una
+ * acción en curso. Al terminar, si el episodio salió del estado, el foco lo
+ * mueve useEpisodeActions; si falló, ResumeError.
  */
 export function ResumeButton({
   actions,
@@ -43,8 +50,16 @@ export function ResumeButton({
   return (
     <Button
       type={onResume ? "button" : "submit"}
-      onClick={onResume}
-      disabled={actions.pending !== null}
+      onClick={(event) => {
+        if (pending) {
+          event.preventDefault();
+          return;
+        }
+        onResume?.();
+      }}
+      disabled={actions.pending !== null && !pending}
+      aria-disabled={pending || undefined}
+      className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
       aria-describedby={describedBy}
     >
       <Play aria-hidden="true" />

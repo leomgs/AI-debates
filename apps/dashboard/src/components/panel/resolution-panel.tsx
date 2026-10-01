@@ -37,6 +37,9 @@ export function ResolutionPanel({
   resolution: ActiveResolution;
   actions: EpisodeActions;
 }) {
+  // Destino del foco mientras corre Rechazar. Con el éxito o un 409 el panel
+  // se desmonta y useEpisodeActions lleva el foco al <h1> o al aviso de
+  // pantalla (AC 3.77); lo mismo tras reanudar.
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const { checkpoint } = resolution;
@@ -198,11 +201,16 @@ function ValidationInconsistency({ detail }: { detail: EpisodeDetail }) {
   return (
     <div className="space-y-3 text-sm">
       <p>
-        Un agente llegó al contrainterrogatorio sin ningún argumento aprobado propio al que responder.
+        En el contrainterrogatorio, un agente tenía que responder a un argumento aprobado de su oponente, pero el
+        oponente no tiene ninguno.
       </p>
       {agents.length > 0 ? (
         <div>
-          <p>{agents.length === 1 ? "Agente afectado:" : "Agentes afectados:"}</p>
+          <p>
+            {agents.length === 1
+              ? "Agente sin argumentos aprobados (el otro no tiene a qué responder):"
+              : "Agentes sin argumentos aprobados:"}
+          </p>
           <ul className="list-disc pl-5">
             {agents.map((agent) => (
               <li key={agent.agentId}>{agent.name}</li>
@@ -210,7 +218,9 @@ function ValidationInconsistency({ detail }: { detail: EpisodeDetail }) {
           </ul>
         </div>
       ) : (
-        <p className="text-muted-foreground">No se pudo identificar el agente afectado a partir del debate.</p>
+        <p className="text-muted-foreground">
+          No se pudo identificar, a partir del debate, qué agente no tiene argumentos aprobados.
+        </p>
       )}
       <p id={explanationId} className="text-muted-foreground">
         Reanudar vuelve a producir el mismo error y el episodio pasa a Falló, así que no se puede reanudar. La única

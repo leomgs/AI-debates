@@ -64,8 +64,15 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
   // AC 3.32: suscripto solo en estados "SSE" con pipelineActive.
   const connection = useEpisodeEventStream({ episodeId, enabled: mode === "sse", onEvent: addToFeed });
 
-  // Acciones de curaduría: una sola mutación para todas (AC 3.49).
-  const actions = useEpisodeActions(episodeId);
+  // Acciones de curaduría: una sola mutación para todas (AC 3.49). El <h1> y
+  // el aviso de pantalla sobreviven a cualquier cambio de estado: ahí va el
+  // foco cuando el panel que lo tenía se desmonta (AC 3.77).
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null);
+  const screenNoticeRef = useRef<HTMLDivElement>(null);
+  const actions = useEpisodeActions(episodeId, {
+    afterStateChange: pageHeadingRef,
+    afterScreenNotice: screenNoticeRef,
+  });
   // Argumento en el editor inline; uno a la vez (AC 3.44).
   const [editingArgumentId, setEditingArgumentId] = useState<string | null>(null);
   const verdictRef = useRef<HTMLDivElement>(null);
@@ -110,9 +117,17 @@ export function EpisodeDetailView({ episodeId }: { episodeId: string }) {
 
   return (
     <article className="space-y-6">
-      <EpisodeHeader detail={detail} />
+      <EpisodeHeader detail={detail} headingRef={pageHeadingRef} />
       {refreshError}
-      <ScreenNotice message={actions.screenNotice} onDismiss={actions.clearFailure} />
+      <ScreenNotice
+        ref={screenNoticeRef}
+        message={actions.screenNotice}
+        onDismiss={() => {
+          actions.clearFailure();
+          // El botón de cerrar desaparece con el aviso.
+          pageHeadingRef.current?.focus();
+        }}
+      />
       <EpisodeStatusNotice
         detail={detail}
         mode={mode}

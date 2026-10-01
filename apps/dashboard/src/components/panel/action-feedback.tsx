@@ -1,4 +1,5 @@
 import { Info, X } from "lucide-react";
+import type { Ref } from "react";
 import { Button } from "@/components/ui/button";
 import type { ActionErrorView } from "@/lib/episode-actions";
 import { cn } from "@/lib/utils";
@@ -37,11 +38,25 @@ export function ActionErrorMessage({
  * que ya no está (AC 3.50). Va arriba porque, con el detalle nuevo, el
  * control que disparó la acción puede haber desaparecido. La región
  * `role="status"` está siempre montada, así el lector de pantalla anuncia el
- * aviso cuando aparece.
+ * aviso cuando aparece; con `tabIndex={-1}` y `ref` recibe el foco cuando el
+ * panel que lo tenía se desmontó con el refetch (AC 3.77).
  */
-export function ScreenNotice({ message, onDismiss }: { message: string | null; onDismiss: () => void }) {
+export function ScreenNotice({
+  message,
+  onDismiss,
+  ref,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+  ref?: Ref<HTMLDivElement>;
+}) {
   return (
-    <div role="status">
+    <div
+      ref={ref}
+      role="status"
+      tabIndex={-1}
+      className="rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
       {message !== null && (
         <div className="flex items-start justify-between gap-3 rounded-md border border-primary/50 bg-primary/10 px-4 py-3 text-sm">
           <p className="flex items-start gap-2">

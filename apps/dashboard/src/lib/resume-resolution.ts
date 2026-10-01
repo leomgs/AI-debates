@@ -1,5 +1,6 @@
 import type { components } from "@/lib/api/schema";
 import type { CheckpointReason } from "@/lib/checkpoint-reasons";
+import { canRunAction } from "@/lib/episode-actions";
 import { latestCheckpoint, type Checkpoint, type EpisodeDetail, type Participant } from "@/lib/episode-detail";
 import type { UsageMetricKey } from "@/lib/usage";
 
@@ -135,6 +136,12 @@ export interface UsageLimitValidation {
 const INTEGER_PATTERN = /^\d+$/;
 
 /**
+ * Los límites son columnas `Int` de Prisma: aunque la base sea SQLite, el
+ * cliente de Prisma rechaza valores fuera de int32 y la API respondería 500.
+ */
+export const MAX_LIMIT_VALUE = 2_147_483_647;
+
+/**
  * Valida el formulario de límites (AC 3.51, AC 3.53):
  * - Cada valor es un entero positivo mayor que el consumo actual de su
  *   métrica: un límite menor o igual volvería a frenar por el mismo motivo
@@ -167,7 +174,7 @@ export function validateUsageLimitForm(
       continue;
     }
     const value = Number(raw);
-    if (!Number.isSafeInteger(value)) {
+    if (value > MAX_LIMIT_VALUE) {
       fieldErrors[field] = "El número es demasiado grande.";
       continue;
     }
@@ -253,10 +260,12 @@ export function validateManualSources(rows: readonly ManualSourceDraft[]): Manua
 // --- VALIDATION_INCONSISTENCY y VOICE_NOT_CONFIGURED ---
 
 /**
- * Agentes afectados por un VALIDATION_INCONSISTENCY (AC 3.51): los
- * debatientes sin ningún argumento aprobado propio, que es lo que hace
- * fallar `pickCrossExaminationTarget` en el backend. El detalle solo trae
- * argumentos OFFICIAL.
+ * Agentes a listar en un VALIDATION_INCONSISTENCY (AC 3.51): los
+ * debatientes sin ningún argumento OFFICIAL. No son los que llegaron al
+ * contrainterrogatorio sino sus oponentes: `pickCrossExaminationTarget`
+ * falla en el backend porque el agente que tiene que responder no encuentra
+ * ningún argumento aprobado del otro. El detalle solo trae argumentos
+ * OFFICIAL.
  */
 export function agentsWithoutOfficialArguments(detail: Pick<EpisodeDetail, "participants" | "debate">): Participant[] {
   const withArguments = new Set<string>();
@@ -279,13 +288,13 @@ export interface ActiveResolution {
 }
 
 /**
- * Panel de resolución de REQUIRES_HUMAN_REVIEW (AC 3.51), o null en
- * cualquier otro estado. Se resuelve sobre el checkpoint más reciente, el
+ * Panel de resolución de REQUIRES_HUMAN_REVIEW (AC 3.51), o null en los
+ * estados donde ACTIONS_BY_STATUS no admite `resume` (AC 3.42). Se resuelve sobre el checkpoint más reciente, el
  * mismo que usa `resume` en el backend; sin checkpoint no se sabe qué body
  * mandar, así que va al panel genérico con solo "Rechazar" (AC 3.55).
  */
 export function activeResolution(detail: Pick<EpisodeDetail, "status" | "checkpoints">): ActiveResolution | null {
-  if (detail.status !== "REQUIRES_HUMAN_REVIEW") return null;
+  if (!canRunAction(detail.status, "resume")) return null;
   const checkpoint = latestCheckpoint(detail.checkpoints);
   return { checkpoint, kind: checkpoint === null ? "unknown" : resolutionKind(checkpoint.reason) };
 }

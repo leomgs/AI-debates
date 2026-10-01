@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Clapperboard } from "lucide-react";
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useId, useState, type Ref } from "react";
 import { Button } from "@/components/ui/button";
 import { hasPreview, type EpisodeDetail } from "@/lib/episode-detail";
 import { cn } from "@/lib/utils";
@@ -19,9 +19,17 @@ const LONG_TOPIC_LENGTH = 140;
 /**
  * Cabecera del detalle (AC 3.26): tópico, idioma, estado, fecha de creación,
  * "Publicado" si `publishedAt` no es nulo y, desde READY_FOR_RENDER, el
- * acceso al preview.
+ * acceso al preview. El `<h1>` acepta el foco (`headingRef`): sobrevive a
+ * cualquier cambio de estado, así que es a donde va el foco cuando una
+ * acción desmonta el panel que lo tenía (AC 3.77).
  */
-export function EpisodeHeader({ detail }: { detail: EpisodeDetail }) {
+export function EpisodeHeader({
+  detail,
+  headingRef,
+}: {
+  detail: EpisodeDetail;
+  headingRef?: Ref<HTMLHeadingElement>;
+}) {
   return (
     <header className="space-y-3">
       <Link
@@ -31,7 +39,7 @@ export function EpisodeHeader({ detail }: { detail: EpisodeDetail }) {
         <ArrowLeft aria-hidden="true" className="size-4" />
         Episodios
       </Link>
-      <EpisodeTopic title={detail.topic.title} />
+      <EpisodeTopic title={detail.topic.title} headingRef={headingRef} />
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <StatusBadge status={detail.status} />
         <LanguageBadge language={detail.language} />
@@ -45,14 +53,19 @@ export function EpisodeHeader({ detail }: { detail: EpisodeDetail }) {
   );
 }
 
-function EpisodeTopic({ title }: { title: string }) {
+function EpisodeTopic({ title, headingRef }: { title: string; headingRef?: Ref<HTMLHeadingElement> }) {
   const [expanded, setExpanded] = useState(false);
   const headingId = useId();
   const long = title.length > LONG_TOPIC_LENGTH;
   return (
     <div className="space-y-1">
       {/* El h1 lleva siempre el texto completo: el recorte es solo visual. */}
-      <h1 id={headingId} className={cn("text-2xl font-semibold break-words", long && !expanded && "line-clamp-2")}>
+      <h1
+        id={headingId}
+        ref={headingRef}
+        tabIndex={-1}
+        className={cn("text-2xl font-semibold break-words outline-none", long && !expanded && "line-clamp-2")}
+      >
         {title}
       </h1>
       {long && (
