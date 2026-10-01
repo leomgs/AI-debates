@@ -125,7 +125,7 @@ A diferencia de Cockatiel (reactivo, por integración), `LlmRateLimiterService` 
 
 El estado se persiste en `LlmRequestLog` (una fila por request, ventana deslizante) para sobrevivir a reinicios del proceso. RPM espera (encola con un cap defensivo ~90s); RPD falla rápido con `DailyQuotaExceededError` (fail-fast — no tiene sentido esperar horas). Los límites concretos son configurables por env var (`GOOGLE_RPM_LIMIT`/`GOOGLE_RPD_LIMIT`, `OPENROUTER_RPM_LIMIT`/`OPENROUTER_RPD_LIMIT`) — `OPENAI`/`ANTHROPIC`/`XAI` no tienen límite proactivo configurado hoy (no hay uso real). Proceso de diseño completo en `decision-log.md` entrada 8.
 
-**Nota sobre `OPENROUTER`**: dos modelos `:free` distintos comparten la misma cuenta/key de OpenRouter, y por lo tanto el mismo cupo real — por eso es un único valor de `ModelProvider` (no dos), con `ModelProviderFactory.resolve('OPENROUTER')` sorteando entre ambos modelos en cada llamada. Modelarlos como dos providers separados le hubiera hecho subestimar el uso real a `LlmRateLimiterService` (`decision-log.md` entrada 13).
+**Nota sobre `OPENROUTER`**: dos modelos `:free` distintos comparten la misma cuenta/key de OpenRouter, y por lo tanto el mismo cupo real — por eso es un único valor de `ModelProvider` (no dos), con `ModelProviderFactory.resolve('OPENROUTER')` sorteando entre ambos modelos en cada llamada. Modelarlos como dos providers separados le hubiera hecho subestimar el uso real a `LlmRateLimiterService` (`decision-log.md` entrada 13). **Cambio planeado, no implementado** (spec 005, D12, decidido por el usuario; ADR 0003, propuesto): `liquid/lfm-2.5-2.6b:free` sale del pipeline y `OPENROUTER` queda solo con `nvidia/nemotron-3-super-120b-a12b:free`; además, `OPENROUTER` deja de participar de la verificación (extracción, hechos y editorial van a `GOOGLE`), así que su cupo (50 RPD por defecto) solo lo consumen la generación de un debatiente o el juez.
 
 ## 6. Modelo de dominio
 
@@ -133,13 +133,13 @@ El modelo de datos completo vive en `schema.prisma` (comentado inline). Resumen 
 
 - **research**: `Topic`, `ResearchSession`, `Source`, `EvidenceFact`
 - **agents**: `Agent`
-- **debate**: `Debate`, `DebateRound` (tipada por `RoundType`: `OPENING`/`REBUTTAL`/`CROSS_EXAMINATION`), `Argument` (con `respondsToId` auto-referencial para cross-examination), `ArgumentHistory`, `Verdict`, `VerdictHistory` (spec 003, API-19: los veredictos reemplazados por la acción `regenerate-verdict`, archivados por `DebateService.replaceVerdict` en la misma transacción que borra el `Verdict` viejo y crea el nuevo; Feature 10, no se expone en la API; `judgeId`/`winnerId` sin FK a `Agent`). `Verdict` sigue siendo 1:1 con `Debate`, y "veredicto desactualizado" (`debate.verdict.stale`) no es una columna: se deriva de `ArgumentHistory.createdAt` posterior a `Verdict.createdAt`, así que toda mutación de un argumento OFFICIAL en `PENDING_REVIEW` tiene que archivar en `ArgumentHistory`
-- **fact-check**: `Claim`, `FactCheck`
+- **debate**: `Debate`, `DebateRound` (tipada por `RoundType`: `OPENING`/`REBUTTAL`/`CROSS_EXAMINATION`), `Argument` (con `respondsToId` auto-referencial para cross-examination), `ArgumentHistory`, `Verdict`, `VerdictHistory` (spec 003, API-19: los veredictos reemplazados por la acción `regenerate-verdict`, archivados por `DebateService.replaceVerdict` en la misma transacción que borra el `Verdict` viejo y crea el nuevo; Feature 10, no se expone en la API; `judgeId`/`winnerId` sin FK a `Agent`). `Verdict` sigue siendo 1:1 con `Debate`, y "veredicto desactualizado" (`debate.verdict.stale`) no es una columna: se deriva de `ArgumentHistory.createdAt` posterior a `Verdict.createdAt`, así que toda mutación de un argumento OFFICIAL en `PENDING_REVIEW` tiene que archivar en `ArgumentHistory`. **Propuesto, no implementado** (ADR 0003, estado propuesto): `Argument.revision` (cantidad de reemplazos de contenido; `DebateService.replaceContent` la incrementa en el mismo `update`, sin romper el orden de #35); para un `DRAFT` es la cantidad de enmiendas hechas (D16)
+- **fact-check**: `Claim`, `FactCheck`. **Propuesto, no implementado** (ADR 0003, estado propuesto; spec 005): `Claim.revision` (versión del argumento de la que se extrajo; "claims de la versión vigente" = `Claim.revision == Argument.revision`), `Claim.specificity` (enum `ClaimSpecificity` `CONCRETE`/`GENERAL`, solo en `FACTUAL`; decide si un `UNSUPPORTED` bloquea, D17) y `FactCheck.reusedFromId` (sin FK: resultado copiado de una versión anterior, D8)
 - **ai**: `LlmRequestLog` (estado persistido del rate limiter, §5.2) — no es un módulo de dominio de producto, es infraestructura
 - **notifications**: `Notification` (acoplada 1:1 a `Episode` — no hay otro emisor de notificaciones en el sistema, se descartó un modelo genérico/polimórfico por generalización prematura)
 - **tts**: `AudioAsset` — `AudioProvider` ganó el valor `OPENROUTER`; las voces viven en `AgentVoice` (una fila por agente, idioma y proveedor; ADR 0002, migración `20260927120000_add_debate_language_agent_voice`) y `AudioAsset.voiceId` guarda la voz usada en cada segmento. Proveedor Local implementado y verificado; Google/OpenRouter pendientes (`decision-log.md` entradas 19-22)
 - **render**: `Asset` (Feature 9, P1, módulo todavía no implementado). `RenderService` (Feature 7, P0, completa) es puro — no persiste nada propio, arma `RemotionManifest` a partir de datos de `Episode`/`Debate`/`Argument`/`AudioAsset`/`Verdict` que le pasa `EpisodesService`
-- **episodes**: `Episode`, `EpisodeParticipant` (qué `Agent` + qué `ModelProvider` participa, y quién es el Judge), `EpisodeUsage`, `EpisodeCheckpoint` (historial, no 1:1 — ver Feature 10 de `features.md`)
+- **episodes**: `Episode`, `EpisodeParticipant` (qué `Agent` + qué `ModelProvider` participa, y quién es el Judge), `EpisodeUsage`, `EpisodeCheckpoint` (historial, no 1:1 — ver Feature 10 de `features.md`). **Propuesto, no implementado** (ADR 0004, estado propuesto; spec 005, D10): `EpisodeLlmCall`, una fila por `withLlmCall` con operación, proveedor, modelo concreto, intentos, resultado y tokens; los tokens se suman a `EpisodeUsage.inputTokens`/`outputTokens` (hoy siempre en 0). No se expone en la API
 
 `Topic` y `Debate` no tienen `status` propio — se derivan consultando el `Episode` asociado (ver sección 4).
 
@@ -151,7 +151,7 @@ Decisiones de diseño (acordadas con el usuario) que resuelven la ambigüedad qu
 - **Solo 2 agentes debaten por episodio** (de un pool de 4 personas: Analyst, Contrarian, Diplomat, Provocateur), con turnos secuenciales — no los 4 a la vez. Esto es clave para que el resultado sea una conversación entendible, no un mosaico de monólogos en paralelo.
 - **Judge es un personaje fijo**, pero el modelo LLM que lo interpreta rota por episodio (`EpisodeParticipant.modelProvider`).
 - **Asignación de cross-examination aleatoria** — quién examina qué argumento puntual, para que sea parejo entre agentes.
-- **Paralelización solo en el fact-checking de claims** dentro de un mismo argumento — nunca en la generación de los argumentos en sí (son secuenciales por diseño, ver punto anterior).
+- **Paralelización solo en el fact-checking de claims** dentro de un mismo argumento — nunca en la generación de los argumentos en sí (son secuenciales por diseño, ver punto anterior). **Cambio propuesto (ADR 0003, estado propuesto; spec 005), no implementado:** sin paralelización en el pipeline; generación y verificación corren en serie (3 llamadas de verificación como máximo por versión, ver §7.3).
 
 Implementado en `EpisodeOrchestratorService` (`episodes/episode-orchestrator.service.ts`), con la ayuda de `EpisodeParticipantsService` (§7.1), `EpisodeBudgetService` (§4) y `EpisodeStateService` (§4) como colaboradores.
 
@@ -169,7 +169,7 @@ Implementado en `EpisodeOrchestratorService` (`episodes/episode-orchestrator.ser
    todos igual — fallback documentado, puede coincidir con un debatiente
 ```
 
-Nota sobre `OPENROUTER` como `ModelProvider`: da acceso a 2 modelos `:free` distintos (`nvidia/nemotron-3-super-120b-a12b`, `liquid/lfm-2.5-2.6b`), pero es un único valor de enum, no dos — comparten la misma cuenta/key y por lo tanto el mismo cupo real de RPM/RPD de OpenRouter. `ModelProviderFactory.resolve('OPENROUTER')` sortea entre ambos modelos en cada llamada, así que "el ModelProvider" de un `EpisodeParticipant` puede, en la práctica, ejecutar dos modelos distintos turno a turno — el paso 2/3 de arriba sigue sorteando sobre `ModelProvider`, no sobre modelos individuales (`LlmRateLimiterService` trackea el cupo por `ModelProvider`, no por modelo — ver `decision-log.md` entrada 13).
+Nota sobre `OPENROUTER` como `ModelProvider`: da acceso a 2 modelos `:free` distintos (`nvidia/nemotron-3-super-120b-a12b`, `liquid/lfm-2.5-2.6b`), pero es un único valor de enum, no dos — comparten la misma cuenta/key y por lo tanto el mismo cupo real de RPM/RPD de OpenRouter. `ModelProviderFactory.resolve('OPENROUTER')` sortea entre ambos modelos en cada llamada, así que "el ModelProvider" de un `EpisodeParticipant` puede, en la práctica, ejecutar dos modelos distintos turno a turno — el paso 2/3 de arriba sigue sorteando sobre `ModelProvider`, no sobre modelos individuales (`LlmRateLimiterService` trackea el cupo por `ModelProvider`, no por modelo — ver `decision-log.md` entrada 13). **Cambio planeado, no implementado** (spec 005, D12; ADR 0003, propuesto): con un solo modelo en `OPENROUTER` deja de haber sorteo, y un `EpisodeParticipant` en `OPENROUTER` solo genera (`argue`/`respond`/`amend`) o juzga: no extrae ni verifica claims. El modelo concreto de cada llamada queda en `EpisodeLlmCall` (ADR 0004, propuesto).
 
 **Orden de turnos — sin columna nueva en `EpisodeParticipant`** (a diferencia de una versión anterior de este documento, que lo describía como un sorteo explícito hecho al armar los participantes): se deriva de forma perezosa, la primera vez que `runDebatePhase` lo necesita, mirando el `createdAt` del primer `Argument` (cualquier status) de la ronda OPENING/round 1 — si todavía no existe ninguno, se sortea recién ahí y ese orden queda "fijado" por ser el primero en persistirse. Evita tocar el schema de `EpisodeParticipant` y es naturalmente resistente a resume/recovery (`decision-log.md` entrada 10, decisión D-4).
 
@@ -201,42 +201,37 @@ para cada round en 1..crossExaminationRounds:
     context.officialArguments.push(resultado)
 ```
 
-### 7.3 `procesarBorrador` — el loop de enmienda
+### 7.3 `procesarBorrador`: verificación por versión y loop de enmienda
+
+> **Diseño propuesto, todavía no implementado.** Depende de ADR 0003 y ADR 0004 (los dos en estado **propuesto**) y de la spec 005. Mientras no se implementen, el código (`episode-orchestrator.service.ts`, `processDraft`) hace esto: 1 `extractClaims` con el proveedor del debatiente; 1 llamada por claim en un `Promise.all` (`check` con el proveedor del debatiente, `editorialReview` con `GOOGLE`, `decision-log.md` #14); `amend` con la primera falla; la vuelta se repite entera hasta `maxRevisionAttempts`, con el conteo de intentos solo en memoria.
+
+Un `Argument` en `DRAFT` tiene una `revision` (cantidad de veces que se reemplazó su contenido). Los `Claim` llevan la `revision` de la que se extrajeron, así que "la versión vigente" es `Claim.revision == Argument.revision`. Toda la verificación usa `VERIFICATION_PROVIDER` (`GOOGLE`), sea cual sea el proveedor del debatiente (ADR 0003). Las llamadas corren en serie, cada una dentro de `withLlmCall` (ADR 0004).
 
 ```
-draft → claim extraction (FactCheckModule.extractClaims(argumentId, content, provider))
-claims = [...]
+runRound: si el agente ya tiene un DRAFT en la ronda → procesarBorrador(ese DRAFT)   // sin argue/respond (resume/recovery)
+          si no → draft = argue/respond; procesarBorrador(createDraftArgument(draft))
 
-// Sin agrupación manual por ModelProvider (a diferencia de una versión
-// anterior de este documento): LlmRateLimiterService (§5.2) ya serializa
-// correctamente las llamadas concurrentes por provider vía su mutex
-// interno — agrupar acá hubiera duplicado esa garantía sin necesidad
-// (decision-log.md entrada 10, decisión D-7). El orquestador simplemente
-// lanza Promise.all sobre todos los claims del argumento:
-resultados = Promise.all(claims.map(claim =>
-  claim.type == FACTUAL
-    ? FactCheckModule.check(claim, evidenceBase, provider)      // TRUE/FALSE/MISLEADING/...
-    : FactCheckModule.editorialReview(claim, persona, provider, argumentContent)
-    // argumentContent: el claim se evalúa CON el argumento completo
-    // alrededor, no aislado — bug real encontrado corriendo
-    // scripts/smoke-test-episode.ts (decision-log.md entradas 11-12):
-    // evaluar un claim OPINION/SUBJECTIVE sin su contexto rechazaba
-    // afirmaciones bien respaldadas por datos de una oración vecina
-))
-
-si algún resultado es FALSE / MISLEADING / editorial.passed=false:
-  intentos += 1
-  si intentos > episode.maxRevisionAttempts:
-    DebateModule.rejectArgument(argumentId)
-    EpisodeStateService.requireHumanReview(reason: MAX_REVISIONS_EXCEEDED, debateRoundId)
-  si no:
-    feedback = AmendmentFeedback (shared/contracts)
-    draft = agent.amend(context, draft, feedback, roundType)
-    reintentar procesarBorrador(draft)
-si no:
-  DebateModule.promoteToOfficial(argumentId)
-  devolver Argument
+procesarBorrador(arg):
+  loop:
+    r = arg.revision                        // = enmiendas ya hechas (sobrevive a resume/recovery)
+    si el texto contiene un UUID → fallas = [FORMAT_VIOLATION]; ir a "fallas"   // 0 llamadas
+    claims = FactCheck.getRevisionClaims(arg, r)
+           ?: withLlmCall(EXTRACT_CLAIMS, FactCheck.extractClaims(arg, r, texto))   // 1 llamada; dedup + specificity
+    pendientes = FactCheck.reuseVerifiedFacts(arg, r)      // copia resultados de versiones previas con statement igual
+    si pendientes ≠ ∅ → withLlmCall(VERIFY_FACTS, FactCheck.verifyFacts(pendientes, evidenceBase))   // 1 llamada, lote
+    no factuales = claims sin FACTUAL
+    si ≠ ∅ → editorial = withLlmCall(EDITORIAL_REVIEW, FactCheck.reviewEditorial(no factuales, persona, texto))  // 1 llamada, lote
+    fallas = FACTUAL de r con isBlockingFactCheck(veracity, specificity) + editoriales con passed=false
+    emitir fact_check.completed { status, errorsDetected: |fallas| }
+    si fallas = ∅ → DebateModule.promoteToOfficial(arg); devolver
+  fallas:
+    si r >= episode.maxRevisionAttempts →
+      DebateModule.rejectArgument(arg); EpisodeState.requireHumanReview(MAX_REVISIONS_EXCEEDED, debateRoundId)
+    amended = withLlmCall(AMEND, agent.amend(context, texto, { failures: fallas }, roundType))   // todas las fallas juntas
+    arg = DebateModule.reviseDraft(arg, amended)          // revision + 1, archiva la versión anterior
 ```
+
+Errores: un lote que después de los reintentos de Cockatiel no parsea, no cubre todos los claims o cita evidencia inexistente sale como `VerificationUnavailableError`. El orquestador lo mapea a `PROVIDER_QUOTA_EXCEEDED`: no cuenta como enmienda y no aprueba nada. Si se repite después de reanudar, la regla de repetición lo pasa a `FAILED` (ADR 0003, Consecuencias). Un `BudgetExceededError` entre dos llamadas deja persistido lo ya verificado de la versión. Al reanudar, la misma versión retoma solo lo que falta.
 
 ### 7.4 Veredicto (estado `JUDGING`)
 
